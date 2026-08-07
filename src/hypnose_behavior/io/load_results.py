@@ -33,7 +33,51 @@ import pandas as pd
 from hypnose_behavior.io.layout import derivatives
 from hypnose_behavior.metric_analysis.frames import build_position_data
 
-__all__ = ["load_session_results"]
+__all__ = ["SessionResults", "load_session_results"]
+
+_UNBUILT = object()
+
+
+class SessionResults(dict):
+    """A session's `results` mapping, with `position_data` derived on first access.
+
+    `build_position_data` is 22 of the 29 ms it costs to compute every metric for a
+    session (`docs/DECISIONS.md` section 5), and the callers that never look at it
+    are real ones: `io/tracking._load_tracking_and_behavior` and
+    `visualization.load_tracking_with_behavior` load a session's tables purely to
+    join them against SLEAP tracking, once per session across a whole cohort.
+    `run_all_metrics` still materialises it, since 9 of the 25 reported metrics
+    declare a `position_data` frame -- laziness helps the tracking paths, not that
+    one.
+
+    Subclasses `dict` because that is exactly what consumers expect it to be, and
+    they reach for the key in three different ways: `MetricSpec.call` uses `.get`,
+    `merge.pool_results_dicts` walks `.keys()` and tests `in`, and everything else
+    subscripts. So the key is genuinely present, holding a placeholder, and the
+    accessors resolve it -- `__missing__` would fire for none of those. `items`,
+    `values` and `copy` are overridden for the same reason: to keep the placeholder
+    from ever escaping as a value.
+    """
+
+    def __getitem__(self, key):
+        value = dict.__getitem__(self, key)
+        if value is _UNBUILT:
+            value = build_position_data(dict.__getitem__(self, "trial_data"))
+            dict.__setitem__(self, key, value)
+        return value
+
+    def get(self, key, default=None):
+        return self[key] if key in self else default
+
+    def items(self):
+        return [(key, self[key]) for key in self]
+
+    def values(self):
+        return [self[key] for key in self]
+
+    def copy(self):
+        # Raw values, so a copy of an unbuilt mapping stays unbuilt.
+        return SessionResults(dict.items(self))
 
 
 def load_session_results(subjid, date):
@@ -56,7 +100,7 @@ def load_session_results(subjid, date):
     manifest = json.load(open(results_dir / "manifest.json"))
     summary = json.load(open(results_dir / "summary.json"))
 
-    results: dict = {}
+    results = SessionResults()
 
     # Prefer the unified trial_data parquet; fall back to CSV if needed
     trial_parquet = results_dir / "trial_data.parquet"
@@ -74,8 +118,9 @@ def load_session_results(subjid, date):
     # Long per-position frame, derived here rather than written by the classifier,
     # so metrics never parse a JSON blob and legacy sessions need no
     # compatibility branch (D0, tier 2). Phase 7b's position_data side-table
-    # turns this from a derivation into a read.
-    results["position_data"] = build_position_data(trial_df)
+    # turns this from a derivation into a read. Deferred until something reads
+    # it -- see `SessionResults`.
+    dict.__setitem__(results, "position_data", _UNBUILT)
 
     # The three `non_initiated_*` tables are deliberately not loaded. Phase 4a
     # step 6 dropped non-initiated trials from the metric set: they are not in
