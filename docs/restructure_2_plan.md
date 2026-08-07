@@ -160,7 +160,7 @@ Update this table at the end of each phase, in the same commit as the work.
 | 3 re-baseline QC | **done** — superseded by 0 | `481110b` | Nothing further to do |
 | 4a strip metrics from visualization | **done** 2026-08-06 | audit `58387ce`..`6aac5de`; moves `9672f1e`..`aa0355f` | **`visualization/` fetches and plots, and computes no metrics.** 32 sites of metric math resolved: 24 metrics added to `metric_analysis`, 8 exact dedups, 9 variants collapsed onto `by_group`/`over_windows`. D0 complete for every tier. `compute_speed_analysis` (711 lines, 7 movement metrics) moved wholesale to `metric_analysis/movement.py`. Two deliberate output changes landed (non-initiated trials left the metric set; `ambiguous_rate`/`correct_rejection_rate` added). `qc/plot_regression.py` written and grown to 32 cases. **Deviation that outranks the audit: `_load_tracking_and_behavior` → `io/tracking.py`, not `visualization/io/`** |
 | 4b modularise metric_analysis | **done** 2026-08-07 | `604355f`..`cbc7059` | **`metrics_utils.py` (2,639 lines) is gone.** Plumbing to `io/load_results.py` + `run`/`merge`/`summary`; definitions to 7 modules under `metrics/`. Registry: 43 registered / 25 reported. Every carve verified by an ast pass requiring all 112 pre-4b function bodies byte-identical. One intended output change (`fa_abortion_stats` numeric). **Registry contract, `frames.py`-as-leaf and the legacy-reader trap — `DECISIONS.md` §3-5** |
-| 5 visualization primitives | **partly done** 2026-08-07 — **NOT closed** | `e532ab7`..`ff3aaea`+ | **Both 4a defects fixed** (`_style_log_yaxis` unstyled-crash; `_ordered_groups` hash order, a verified pure permutation). **No plotter reads `metrics_*.json`** — the whole load-vs-compute item, trap discharged, and it exposed a duplicate-rows bug the JSON path was hiding. `position_data` lazy; `load_results_dir` split out. `visualization/primitives.py` with `mean_sem` (18 sites) / `sem_band` / `rolling_mean`. **Every session-selecting plotter now takes all six selectors** (44 functions across 5 modules). **Still open: the shared prep module, finding 10, `style_axis`, and the 3 rolling call sites — see "What Phase 5 still owes"** |
+| 5 visualization primitives | **done** 2026-08-07 | `e532ab7`..`2ce3dcc` | **Both 4a defects fixed.** **No plotter reads `metrics_*.json`** — trap discharged, and it exposed a duplicate-rows bug the JSON path was hiding. `position_data` lazy; `load_results_dir` split out. Three shared leaves: `primitives.py` (`mean_sem` 18 sites, `sem_band`, `rolling_windows`), `prep.py`, `panels.py`. **All 44 session-selecting functions take the six selectors.** **Zero plotter-to-plotter imports.** Two briefs were measurably wrong and were not followed: finding 10's "duplicates" disagree on up to **63.8%** of trials, and section 2's helpers were never duplicated — `DECISIONS.md` §13. `style_axis` dropped as unearned (§12). **Gate grew 32 → 35 cases**; "no plot function over ~100 lines" is explicitly left to Phase 10 |
 | 6 trial classification dedup | not started | | unit tests first |
 | 7a manifest provenance | not started | | ~40% done in advance by 2c |
 | 7b schema & formats | not started | | intended output change |
@@ -311,27 +311,34 @@ files and can be re-imported.
 for every plot type it supports and becomes a god-function. Thin primitives plus one small
 function per metric give the same ergonomics without that.
 
-### What Phase 5 still owes  *(status 2026-08-07, `7daf246`)*
+### What Phase 5 delivered  *(closed 2026-08-07, `2ce3dcc`)*
 
-Phase 5 is **not closed**. Done: both 4a defects, the entire load-vs-compute item, and the
-`mean_sem` primitive. What a continuation chat picks up, roughly in value order:
+All five open items are done. The gate went from 32 to **35 cases** on the way, because three of
+the plotters this phase touched were covered by none.
 
-1. ~~**Thread the session selectors** (`dates`/`ses`/`index` + range forms) through every public
-   plotter.~~ **Done** 2026-08-07 (`ff3aaea`, `78c1ff7`, and the `pred_seq`/`sing_rew`/movement
-   commit). `_filter_sessions` and `_filter_session_dirs` take all six keywords and forward them
-   to the shared `filter_sessions`; `session_selectors()` bundles the five non-date ones so each
-   plotter forwards in one line. 44 functions across 5 modules; nothing interprets them.
-2. **`style_axis`**, and the 3 rolling call sites onto `primitives.rolling_mean`
-   (`_rolling_median_iqr`, `_plot_summary_rolling`, `modelling/switchpoint/plots._rolling_mean`).
-   `_rolling_pts` is **not** one of them — it carries the rate windowing rule and must keep
-   calling `over_windows`. `rolling_mean` is written and unused; the call sites are the work.
-3. **The shared prep module** and **finding 10** (trajectory prep duplicated 2-4× across
-   `movement_analysis_utils` ↔ `sing_rew_movement`) — brief sections 2 and 4. The biggest moves,
-   the lowest risk, and gated exactly.
-4. **Optional cleanup:** `_fa_stat_count` / `_fa_stat_rate`'s legacy string branches are now
-   unreachable (`DECISIONS.md` section 5) and can go.
+1. **Session selectors threaded** (`ff3aaea`, `78c1ff7`, `543271b`). `_filter_sessions` /
+   `_filter_session_dirs` take all six keywords and forward them to the shared `filter_sessions`;
+   `session_selectors()` bundles the five non-date ones so each plotter forwards in one line.
+   **44 functions across 5 modules; nothing interprets them.** `session_index` stayed a selector
+   — no retrofit, no plot x-axis (`DECISIONS.md` §8).
+2. **The rolling call sites** (`87b6680`) — but not onto `rolling_mean`, which fits none of them.
+   They share the *windowing*, so that is the primitive: `rolling_windows`. `_rolling_pts` still
+   calls `over_windows`, and switchpoint keeps its `np.convolve`. `DECISIONS.md` §12.
+3. **`style_axis` dropped, deliberately** — 54 collapsible runs, ~76 lines, and no correctness
+   payoff. The despining it would have carried already lives in the style. `DECISIONS.md` §12.
+4. **Finding 10 and the shared prep module** (`463f0c4`, `2ce3dcc`) — **both briefs were wrong
+   about what was there.** Finding 10's helpers are mostly different rules sharing a name
+   (measured: `_infer_port` variants disagree on **63.8%** of trials), so two were shared and the
+   rest renamed. Section 2's helpers were not duplicated at all; the real defect was 15 names
+   imported *between sibling plotter modules*, now fixed by two leaves (`prep.py`, `panels.py`).
+   **Zero plotter-to-plotter imports remain.** `DECISIONS.md` §13.
+5. **The legacy `_fa_stat_*` string branches deleted** (`9dc66e1`).
 
-Two things a continuation should know that are not in the brief:
+**One stated completion criterion is deliberately not met:** "no plot function over ~100 lines".
+`visualization_utils` still averages ~280 lines per plotter. That was never a Phase 5 job — it is
+the Phase 10 split, and nothing here was going to move it.
+
+Two things worth carrying forward:
 
 - **`compute_if_missing` was removed** from `plot_behavior_metrics` and
   `hidden_rule_and_false_alarm`. It could not mean anything once metrics are always computed, and
@@ -443,9 +450,16 @@ why the distinction has to be explicit: it works until the one animal where it d
 **`index` selects; it does not position** — see `DECISIONS.md` §8. Do not make it a plot x-axis.
 
 **Risk:** low–med (plot-only changes don't move the `regression.py` fingerprint — which is
-precisely why `plot_regression.py` is the gate that matters here). **Done:** primitives used by
-all plotters; no plot function over ~100 lines; every public plotter accepts `dates`/`ses`/
-`index` and their range forms; no plotter reads `metrics_*.json`; both defects above fixed.
+precisely why `plot_regression.py` is the gate that matters here).
+
+**Delivered 2026-08-07** (`ff3aaea`, `78c1ff7`, `543271b`): every session-selecting function —
+44 across the five plotter modules — accepts `dates`/`ses`/`index` and their range forms and
+forwards them unchanged. `session_selectors()` in `utils/helpers.py` bundles the five non-date
+keywords. Verified against sub-040's 48 sessions: the keys intersect, `[]` matches nothing, and
+the legacy 2-tuple `dates` form is unchanged.
+
+*Of the original "Done" criteria, all are met except "no plot function over ~100 lines", which
+is Phase 10's split and was never reachable from here.*
 
 ---
 

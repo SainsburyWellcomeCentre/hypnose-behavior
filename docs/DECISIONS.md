@@ -380,7 +380,7 @@ poke was never written. `1..max` recovers it; plain membership loses a real posi
 
 ## 11. Group draw order must come from an ordered container *(Phase 5, 2026-08-07)*
 
-`pred_seq_utils._ordered_groups(group_keys, preferred)` draws `preferred`'s labels in their
+`prep._ordered_groups(group_keys, preferred)` draws `preferred`'s labels in their
 canonical order, then **every other label in the order `group_keys` yields them**. Three callers
 accumulated into a bare `set()`, so those residual labels were drawn in **string-hash order**,
 which varies between processes: two runs of the identical tree disagreed on 340 drawn values.
@@ -430,3 +430,114 @@ bar says `0.0 if np.isnan(sem) else sem` rather than having the primitive invent
 the gate's `MODULES` list or its cases read as "not found" — untestable, not green. And a
 primitive that calls `save_figure` needs `skip_modules=(__name__,)` or an explicit
 `provenance=`; see section 9.
+
+### The three shared modules, and what each is for *(Phase 5, 2026-08-07)*
+
+| module | holds |
+|---|---|
+| `visualization/primitives.py` | display **arithmetic** — `mean_sem`, `sem_band`, `rolling_windows`, `rolling_mean` |
+| `visualization/prep.py` | shared **non-drawing** code — trajectory prep, JSON/label parsing, colour and marker sizing, session collection, the figure-level loaders |
+| `visualization/panels.py` | the four shared helpers that **draw** |
+
+### What the rolling call sites actually shared
+
+The brief expected `rolling_mean` to absorb three call sites. **It fits none of them**, and the
+reason generalises: they differ in the statistic (mean vs median + IQR), in the **anchor** (the
+window's last element vs its centre) and in the NaN policy. What they share is the *windowing*,
+so that is the primitive — `rolling_windows(n, window, step, partial)`.
+
+- `partial` names a divergence that was silent while each site coerced its own window size: for
+  a series **shorter than one window**, `_rolling_median_iqr` clamped and emitted one window,
+  `_plot_summary_rolling` emitted none. Both behaviours are preserved, now explicitly. The
+  windowing was verified identical to both original loops over 3,332 `(n, window, step)`
+  combinations.
+- **`switchpoint/plots._rolling_mean` deliberately keeps `np.convolve`.** A windowed `np.mean`
+  disagrees with it in the last ULP on **66% of values** at `window=21`, measured on the binary
+  0/1 series it actually rolls. That file is in neither `MODULES` nor any case, so the drift
+  would have been caught by nothing. Section 1's rule: summation style is part of the quantity.
+
+### `style_axis` was dropped, deliberately
+
+The plan proposed it on the measurement that axis decoration is the largest repetition in
+`visualization/` (53 legends, 55 axis labels). Re-measured: **54 collapsible runs, ~130 lines →
+~54**, and *no correctness payoff at all* — three adjacent calls setting three independent
+strings are not duplication, they cannot drift, and `style_axis(ax, xlabel="Session")` is not
+clearer than `ax.set_xlabel("Session")`. Contrast `mean_sem`, which was worth having because the
+three idioms it replaced genuinely disagreed on NaN. **Counting lines is not finding duplication.**
+
+Two blind spots found while looking for somewhere to put it:
+
+- **The gate records no spine state.** It captures title, xlabel, ylabel, xlim, ylim and tick
+  labels. Any spine change is ungated.
+- **`nature_style()` / `poster_style()` already set `axes.spines.top/right = False`**, so the 13
+  explicit `spines[...].set_visible(False)` pairs are redundant *once `use_style()` has been
+  called* — and Phase 2a deliberately stopped calling it at import. Deleting them would make
+  those figures depend on a style the process may never have applied: section 7's
+  `_style_log_yaxis` fragility in reverse. **They stay.**
+
+---
+
+## 13. Finding 10 is not duplication — do not merge those helpers *(Phase 5, 2026-08-07)*
+
+The Phase 4 audit's finding 10 called the trajectory helpers in `movement_analysis_utils` ↔
+`movement_analysis/sing_rew_movement` "the worst duplication left in `visualization/`", listed
+seven of them duplicated 2-4× and said **"every row has a twin"**. Measured over 3,149 trials
+across 15 sessions of sub-040, that is false for all but two. They are **different rules wearing
+the same name**, and merging them changes what is plotted.
+
+| helper | copies | what differs | measured disagreement |
+|---|---|---|---|
+| `_infer_port` | 3, one per plotter | the column search list: 7 cols / 9 + odor-number + odor-label / 11 + supply + identity | **63.8%** of trials (A vs C); 0.3% (A vs B) |
+| `_last_poke_out` | 3 | last-by-position + `sequence_start` fallback / scan-back / **max** `poke_odor_end`, no fallback | **1.4%** — 44 trials |
+| `_extract_segment` | 2 | one drops NaN X/Y, requires ≥2 rows and `end > start`; the other does none of it | structural |
+| `_odor_letter` | 2 | one strips the `Odor` prefix (any letter); the other resolves **A/B only**, None otherwise | different contracts |
+| `_port_letter` | 1 | — | has no twin at all |
+
+The `_infer_port` figure has a concrete cause: variant C searches `first_supply_port` /
+`first_reward_poke_port` early, and those are populated on most completed trials where the other
+variant's seven columns are empty. Merging changes trace colour and grouping on two thirds of
+trials.
+
+`sing_rew_movement._last_poke_out`'s docstring already argued *against* the other rule — "never
+to `sequence_start` … we return NaT so the trace is skipped rather than started at the wrong
+place." A merge would have silently overruled a decision documented at the site.
+
+**What was genuinely shared, and is now in `visualization/prep.py`:** `resample_trace` (identical
+bar a redundant guard) and `smooth_xy` (identical wherever the three copies work today, and it
+also survives a duplicated `X`/`Y` column, which two of them would have raised on). Five
+definitions became two.
+
+**The rest were renamed rather than merged** — `_infer_port_from_response` /
+`_infer_port_with_odor_fallback` / `_infer_port_with_supply_identity`,
+`_last_poke_out_by_position` / `_last_poke_out_scanning_back`, and
+`sing_rew_movement._ab_letter` (an A/B *side* resolver, which is not what `_odor_letter` reads
+as). A same-named function that behaves differently is the trap; a differently-named one is
+documentation.
+
+`movement_analysis_utils._odor_letter` now wraps the canonical
+`metric_analysis.frames.odor_letter` and keeps only the `"Unknown"` label for a missing odor.
+Measured over every odor value in 15 sessions the two agree on all of them except NaN, and
+`"Unknown"` vs `"NAN"` only ever reaches a label, never a branch. The relabelling stays in the
+plotter — finding 14's rule.
+
+> **The general lesson:** "these look alike" is a hypothesis, not a finding. Three of the four
+> pairs above would pass casual inspection. Checking cost two measurement scripts; not checking
+> would have cost a 64% change in port assignment on a plotter that **no gate case covered**.
+
+**The gate is now 35 cases.** `plot_trial_traces_by_mode`, `plot_tortuosity_lines_overlay` and
+`plot_category_traces` — the three consumers of all of the above — were in no case until this
+work added them, so the de-duplication would otherwise have been verified by nothing.
+
+### What "the shared prep module" was actually pointing at
+
+Brief section 2's first table lists ~17 helpers as "shared in practice" between `pred_seq_utils`,
+`sing_rew` and `sing_rew_movement`. **Every one has exactly one definition** — there was no
+duplication to remove. The real defect was the direction of the dependency: **15 names were
+reached by importing from a sibling plotter module**, so `sing_rew` depended on `pred_seq_utils`
+for `_parse_json_value` and `movement_analysis_utils` on `visualization_utils` for
+`_clean_graph`.
+
+Fixed by moving them into two leaves (`prep.py`, `panels.py`), the same shape as section 3's
+`frames.py`: the shared thing becomes a leaf and every plotter depends on the leaf rather than on
+a peer. **Zero plotter-to-plotter imports remain**, and that is the invariant to preserve — it is
+cheap to check with one grep and it is what keeps `visualization/` splittable in Phase 10.

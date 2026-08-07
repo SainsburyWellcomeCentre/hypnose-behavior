@@ -9,19 +9,26 @@ not copied from the audit — the audit's numbers predate ~1,500 lines of deleti
 
 Read with `docs/DECISIONS.md`. This file says *what to move*; that file says *what not to break*.
 
-> **Status 2026-08-07 (`7daf246`) — Phase 5 is part-done and NOT closed.**
+> **Status 2026-08-07 (`2ce3dcc`) — Phase 5 is CLOSED. This brief is now history.**
+>
+> **Two of its sections were measurably wrong about the code, and were not followed.** Read
+> `DECISIONS.md` §13 before believing anything below about duplication.
 >
 > | section | state |
 > |---|---|
 > | 1 — FETCH, the metrics-JSON readers | ✅ **done**. `_ensure_metrics_json` deleted, all 6 call sites compute, trap discharged |
-> | 1 — FETCH that genuinely relocates | ❌ not started |
-> | 2 — PREP, the shared prep module | ❌ not started |
-> | 2 — finding 10 (trajectory prep), finding 14 | ❌ not started |
-> | 3 — DISPLAY-AGG, the 20 mean ± SEM sites | ✅ **done** — `visualization/primitives.mean_sem`, 18 sites converted. The remaining `.std(ddof=1)` sites are **SD, not SEM**: a different quantity, deliberately left |
-> | 3 — the other DISPLAY-AGG patterns (cumsum, per-day means, violins) | ❌ not started |
-> | 4 — rolling means | ⚠️ `primitives.rolling_mean` exists and is **unused**; the 4 call sites are not converted |
+> | 1 — FETCH that genuinely relocates | ✅ **done** as part of the layering fix — the shared loaders now sit in `visualization/prep.py` |
+> | 2 — PREP, the shared prep module | ⚠️ **premise false.** Every helper in the table had exactly **one** definition; nothing was duplicated. The real defect was 15 names imported *between sibling plotter modules*, fixed by `prep.py` + `panels.py` |
+> | 2 — finding 10 (trajectory prep) | ⚠️ **premise false.** "Every row has a twin" is wrong for 5 of 7 rows: `_infer_port` variants disagree on **63.8%** of trials, `_last_poke_out` on 1.4%, and `_port_letter` has no twin. Two were genuinely shared; the rest were **renamed, not merged** |
+> | 2 — finding 14 | ✅ **respected.** The `OdorG-C`/`OdorG-F` relabelling stayed a display relabelling, and `movement_analysis_utils._odor_letter` now wraps `frames.odor_letter` with only its `"Unknown"` label kept local |
+> | 3 — DISPLAY-AGG, the 20 mean ± SEM sites | ✅ **done** — `primitives.mean_sem`, 18 sites. The remaining `.std(ddof=1)` sites are **SD, not SEM** |
+> | 3 — the other DISPLAY-AGG patterns (cumsum, per-day means, violins) | ➖ **not done, and not proposed again.** Same test as `style_axis`: adjacent one-liners are not duplication |
+> | 4 — rolling means | ✅ **done, differently.** `rolling_mean` fits none of the three sites; they share the *windowing*, so `primitives.rolling_windows` is the primitive. switchpoint keeps `np.convolve` (66% ULP divergence, ungated file) |
 >
-> Also done, and not in this brief: both 4a defects, `position_data` laziness, `load_results_dir`.
+> Also done and not in this brief: both 4a defects, `position_data` laziness, `load_results_dir`,
+> the six session selectors on all 44 session-selecting functions, and **three new gate cases**
+> (32 → 35) covering the movement plotters this brief's section 2 sent us into unguarded.
+>
 > The ULP worry in section 3 **did not materialise** — the three SEM idioms are bit-identical on
 > clean data; it is NaN handling that differs. See `DECISIONS.md` §12.
 
