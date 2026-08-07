@@ -80,6 +80,7 @@ import re
 import numpy as np
 import json
 from hypnose_behavior.io.save import save_figure
+from hypnose_behavior.visualization.primitives import mean_sem, rolling_mean, sem_band
 from hypnose_behavior.io.loaders import _load_table_with_trial_data, _load_trial_views, _odor_to_letter
 
 
@@ -2263,8 +2264,9 @@ def plot_abortion_and_fa_rates(
             x_jitter = np.random.normal(x_pos, 0.04, size=len(rates))
             ax.scatter(x_jitter, rates, alpha=0.4, s=20, color='steelblue')
         
-        means = [df_fa_pos[df_fa_pos["position_or_odor"] == pos]["rate"].mean() for pos in positions]
-        sems = [df_fa_pos[df_fa_pos["position_or_odor"] == pos]["rate"].sem() for pos in positions]
+        _stats = [mean_sem(df_fa_pos[df_fa_pos["position_or_odor"] == pos]["rate"]) for pos in positions]
+        means = [m for m, _ in _stats]
+        sems = [e for _, e in _stats]
         
         ax.scatter(range(len(positions)), means, color='darkred', s=100, zorder=5, marker='D', 
                   edgecolors='black', linewidth=1.5, label='Mean ± SEM')
@@ -2294,8 +2296,9 @@ def plot_abortion_and_fa_rates(
             x_jitter = np.random.normal(x_pos, 0.04, size=len(rates))
             ax.scatter(x_jitter, rates, alpha=0.4, s=20, color='steelblue')
         
-        means = [df_fa_odor[df_fa_odor["position_or_odor"] == odor]["rate"].mean() for odor in odors]
-        sems = [df_fa_odor[df_fa_odor["position_or_odor"] == odor]["rate"].sem() for odor in odors]
+        _stats = [mean_sem(df_fa_odor[df_fa_odor["position_or_odor"] == odor]["rate"]) for odor in odors]
+        means = [m for m, _ in _stats]
+        sems = [e for _, e in _stats]
         
         ax.scatter(range(len(odors)), means, color='darkred', s=100, zorder=5, marker='D', 
                   edgecolors='black', linewidth=1.5, label='Mean ± SEM')
@@ -2323,8 +2326,9 @@ def plot_abortion_and_fa_rates(
             x_jitter = np.random.normal(pos, 0.04, size=len(rates))
             ax.scatter(x_jitter, rates, alpha=0.4, s=20, color='coral')
         
-        means = [df_ab_pos[df_ab_pos["position_or_odor"] == pos]["rate"].mean() for pos in positions]
-        sems = [df_ab_pos[df_ab_pos["position_or_odor"] == pos]["rate"].sem() for pos in positions]
+        _stats = [mean_sem(df_ab_pos[df_ab_pos["position_or_odor"] == pos]["rate"]) for pos in positions]
+        means = [m for m, _ in _stats]
+        sems = [e for _, e in _stats]
         
         ax.scatter(positions, means, color='darkred', s=100, zorder=5, marker='D', 
                   edgecolors='black', linewidth=1.5, label='Mean ± SEM')
@@ -2353,8 +2357,9 @@ def plot_abortion_and_fa_rates(
             x_jitter = np.random.normal(x_pos, 0.04, size=len(rates))
             ax.scatter(x_jitter, rates, alpha=0.4, s=20, color='coral')
         
-        means = [df_ab_odor[df_ab_odor["position_or_odor"] == odor]["rate"].mean() for odor in odors]
-        sems = [df_ab_odor[df_ab_odor["position_or_odor"] == odor]["rate"].sem() for odor in odors]
+        _stats = [mean_sem(df_ab_odor[df_ab_odor["position_or_odor"] == odor]["rate"]) for odor in odors]
+        means = [m for m, _ in _stats]
+        sems = [e for _, e in _stats]
         
         ax.scatter(range(len(odors)), means, color='darkred', s=100, zorder=5, marker='D', 
                   edgecolors='black', linewidth=1.5, label='Mean ± SEM')
@@ -2383,8 +2388,9 @@ def plot_abortion_and_fa_rates(
             x_jitter = np.random.normal(x_pos, 0.04, size=len(ratios))
             ax.scatter(x_jitter, ratios, alpha=0.4, s=20, color='steelblue')
         
-        means = [df_port[df_port["odor"] == odor]["fa_ratio_a"].mean() for odor in odors]
-        sems = [df_port[df_port["odor"] == odor]["fa_ratio_a"].sem() for odor in odors]
+        _stats = [mean_sem(df_port[df_port["odor"] == odor]["fa_ratio_a"]) for odor in odors]
+        means = [m for m, _ in _stats]
+        sems = [e for _, e in _stats]
         
         ax.scatter(range(len(odors)), means, color='darkred', s=100, zorder=5, marker='D', 
                   edgecolors='black', linewidth=1.5, label='Mean ± SEM')
@@ -2555,8 +2561,8 @@ def plot_response_times_completed_vs_fa(
             ax.scatter(x_jitter, values, alpha=0.4, s=80, color=color, zorder=3)
 
             # Calculate mean and SEM across sessions
-            mean_rt = values.mean()
-            sem_rt = values.std(ddof=1) / np.sqrt(len(values)) if len(values) > 1 else 0.0
+            mean_rt, sem_rt = mean_sem(values)
+            sem_rt = 0.0 if np.isnan(sem_rt) else sem_rt
 
             # Plot mean point with SEM bars
             ax.scatter([x_pos], [mean_rt], color='darkred', s=150, zorder=5, marker='D',
@@ -4213,9 +4219,8 @@ def plot_position_completion_rate(
 
             # Mean ± SEM across animals (each animal = mean of its session rates).
             animal_means = np.array([np.mean(per_animal[s]) for s in subj_order], dtype=float)
-            mean = float(animal_means.mean())
-            err = (float(animal_means.std(ddof=1) / np.sqrt(animal_means.size))
-                   if animal_means.size > 1 else 0.0)
+            mean, err = mean_sem(animal_means)
+            err = 0.0 if np.isnan(err) else err
         else:
             jitter = rng.uniform(-halfwidth, halfwidth, size=rates.size)
             xs = np.full_like(jitter, x_idx) + jitter
@@ -4474,9 +4479,8 @@ def plot_false_alarm_rate_by_position(
 
             # Mean ± SEM across animals (each animal = mean of its session rates).
             animal_means = np.array([np.mean(per_animal[s]) for s in subj_order], dtype=float)
-            mean = float(animal_means.mean())
-            err = (float(animal_means.std(ddof=1) / np.sqrt(animal_means.size))
-                   if animal_means.size > 1 else 0.0)
+            mean, err = mean_sem(animal_means)
+            err = 0.0 if np.isnan(err) else err
         else:
             jitter = rng.uniform(-halfwidth, halfwidth, size=rates.size)
             xs = np.full_like(jitter, x_idx) + jitter
@@ -4718,9 +4722,8 @@ def plot_poke_duration_by_position(
 
                 # Mean ± SEM across animals (each animal = mean of its session means).
                 animal_means = np.array([np.mean(per_animal[s]) for s in subj_order], dtype=float)
-                mean = float(animal_means.mean())
-                err = (float(animal_means.std(ddof=1) / np.sqrt(animal_means.size))
-                       if animal_means.size > 1 else 0.0)
+                mean, err = mean_sem(animal_means)
+                err = 0.0 if np.isnan(err) else err
             else:
                 values = np.array([r["mean_poke_ms"] for r in pos_rows], dtype=float)
                 jitter = rng.uniform(-halfwidth, halfwidth, size=values.size)
@@ -6564,8 +6567,8 @@ def plot_hidden_rule_abort_poke_gap(
         jitter = np.random.normal(loc=x_pos, scale=0.05, size=len(sub)) if len(sub) > 1 else [x_pos]
         ax.scatter(jitter, sub["delta_seconds"], color=point_color, alpha=0.8, s=50)
 
-        mean_val = sub["delta_seconds"].mean()
-        sem_val = sub["delta_seconds"].std(ddof=1) / np.sqrt(len(sub)) if len(sub) > 1 else 0.0
+        mean_val, sem_val = mean_sem(sub["delta_seconds"])
+        sem_val = 0.0 if np.isnan(sem_val) else sem_val
         ax.errorbar(x_pos, mean_val, yerr=sem_val, color="black", fmt='-', lw=2.5, capsize=6, alpha=0.9)
 
     ax.set_xticks(list(x_positions.values()))
@@ -6595,8 +6598,8 @@ def plot_hidden_rule_abort_poke_gap(
                 jitter = np.random.normal(loc=x_pos, scale=0.05, size=len(sub)) if len(sub) > 1 else [x_pos]
                 ax_start_end_obj.scatter(jitter, sub["delta_start_end_seconds"], color=point_color, alpha=0.8, s=50)
 
-                mean_val = sub["delta_start_end_seconds"].mean()
-                sem_val = sub["delta_start_end_seconds"].std(ddof=1) / np.sqrt(len(sub)) if len(sub) > 1 else 0.0
+                mean_val, sem_val = mean_sem(sub["delta_start_end_seconds"])
+                sem_val = 0.0 if np.isnan(sem_val) else sem_val
                 ax_start_end_obj.errorbar(x_pos, mean_val, yerr=sem_val, color="black", fmt='-', lw=2.5, capsize=6, alpha=0.9)
 
             ax_start_end_obj.set_xticks(list(x_positions.values()))

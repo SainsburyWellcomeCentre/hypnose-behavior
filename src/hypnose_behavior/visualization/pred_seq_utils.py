@@ -14,6 +14,7 @@ import matplotlib.colors as mcolors
 
 from hypnose_behavior.utils.helpers import _filter_session_dirs, _iter_subject_dirs
 from hypnose_behavior.metric_analysis.frames import build_position_data
+from hypnose_behavior.visualization.primitives import mean_sem
 from hypnose_behavior.metric_analysis.metrics.accuracy import decision_accuracy
 from hypnose_behavior.metric_analysis.metrics.false_alarm import (
     fa_latency_from_pokeout,
@@ -1332,12 +1333,8 @@ def fa_analysis(
 					x_pos = i + offset
 					xs = x_pos + rng.uniform(-jitter_half_width, jitter_half_width, size=len(values))
 					ax.scatter(xs, values, s=18, color=color, alpha=0.4, zorder=2)
-					mean_val = float(np.mean(values))
-					sem_val = (
-						float(np.std(values, ddof=1) / np.sqrt(len(values)))
-						if len(values) > 1
-						else 0.0
-					)
+					mean_val, sem_val = mean_sem(values)
+					sem_val = 0.0 if np.isnan(sem_val) else sem_val
 					ax.hlines(
 						mean_val,
 						x_pos - mean_half_width,

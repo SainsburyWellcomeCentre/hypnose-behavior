@@ -40,6 +40,7 @@ from hypnose_behavior.visualization.visualization_utils import (
     load_tracking_with_behavior,
 )
 from hypnose_behavior.io.loaders import _load_table_with_trial_data, _load_trial_views
+from hypnose_behavior.visualization.primitives import mean_sem
 # Moved out of this file in Phase 4a: the tracking loader is io/, and
 # compute_speed_analysis is a metrics module (it does no plotting at all).
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
@@ -3144,8 +3145,7 @@ def plot_movement_analysis_statistics(
                     x0 = cond_positions[cond]
                     x_jit = x0 + (np.random.rand(len(y)) - 0.5) * jitter_span
                     ax.scatter(x_jit, y, color=color, alpha=0.6, label=f"{cond} trials")
-                    mean = y.mean()
-                    sem = y.std(ddof=1) / np.sqrt(len(y)) if len(y) > 1 else np.nan
+                    mean, sem = mean_sem(y)
                     ax.errorbar(x0, mean, yerr=sem, fmt="o", color="black", capsize=4)
                 ax.set_xticks([cond_positions[c] for c in cond_order])
                 ax.set_xlim(_cond_xlim)
@@ -3177,8 +3177,7 @@ def plot_movement_analysis_statistics(
                     x0 = cond_positions[cond]
                     x_jit = x0 + (np.random.rand(len(y)) - 0.5) * jitter_span
                     ax_v.scatter(x_jit, y, color=color, alpha=0.6, label=f"{cond} trials")
-                    mean = y.mean()
-                    sem = y.std(ddof=1) / np.sqrt(len(y)) if len(y) > 1 else np.nan
+                    mean, sem = mean_sem(y)
                     ax_v.errorbar(x0, mean, yerr=sem, fmt="o", color="black", capsize=4)
                 ax_v.set_xticks([cond_positions[c] for c in cond_order])
                 ax_v.set_xlim(_cond_xlim)
@@ -3210,8 +3209,7 @@ def plot_movement_analysis_statistics(
                     x0 = cond_positions[cond]
                     x_jit = x0 + (np.random.rand(len(y)) - 0.5) * jitter_span
                     ax_p.scatter(x_jit, y, color=color, alpha=0.6, label=f"{cond} trials")
-                    mean = y.mean()
-                    sem = y.std(ddof=1) / np.sqrt(len(y)) if len(y) > 1 else np.nan
+                    mean, sem = mean_sem(y)
                     ax_p.errorbar(x0, mean, yerr=sem, fmt="o", color="black", capsize=4)
                 ax_p.set_xticks([cond_positions[c] for c in cond_order])
                 ax_p.set_xlim(_cond_xlim)
@@ -3243,8 +3241,7 @@ def plot_movement_analysis_statistics(
                     x0 = cond_positions[cond]
                     x_jit = x0 + (np.random.rand(len(y)) - 0.5) * jitter_span
                     ax_t.scatter(x_jit, y, color=color, alpha=0.6, label=f"{cond} trials")
-                    mean = y.mean()
-                    sem = y.std(ddof=1) / np.sqrt(len(y)) if len(y) > 1 else np.nan
+                    mean, sem = mean_sem(y)
                     ax_t.errorbar(x0, mean, yerr=sem, fmt="o", color="black", capsize=4)
                 ax_t.set_xticks([cond_positions[c] for c in cond_order])
                 ax_t.set_xlim(_cond_xlim)
@@ -3276,8 +3273,7 @@ def plot_movement_analysis_statistics(
                     x0 = cond_positions[cond]
                     x_jit = x0 + (np.random.rand(len(y)) - 0.5) * jitter_span
                     ax_to.scatter(x_jit, y, color=color, alpha=0.6, label=f"{cond} trials")
-                    mean = y.mean()
-                    sem = y.std(ddof=1) / np.sqrt(len(y)) if len(y) > 1 else np.nan
+                    mean, sem = mean_sem(y)
                     ax_to.errorbar(x0, mean, yerr=sem, fmt="o", color="black", capsize=4)
                 ax_to.set_xticks([cond_positions[c] for c in cond_order])
                 ax_to.set_xlim(_cond_xlim)

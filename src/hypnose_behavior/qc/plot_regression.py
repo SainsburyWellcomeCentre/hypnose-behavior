@@ -50,6 +50,10 @@ MODULES = [
     "hypnose_behavior.visualization.pred_seq_utils",
     "hypnose_behavior.visualization.sing_rew",
     "hypnose_behavior.visualization.movement_analysis_utils",
+    # Phase 5's display primitives. No case resolves here today, but a plotter
+    # moved onto them later must stay resolvable -- an unlisted module reads as
+    # "function not found", which is untestable rather than green.
+    "hypnose_behavior.visualization.primitives",
     # Phase 4b split `metrics_utils` into the modules below. It is still named
     # here so the gate can resolve a case against a *pre-split* revision --
     # `_resolve` swallows the ImportError, so naming a module that no longer
