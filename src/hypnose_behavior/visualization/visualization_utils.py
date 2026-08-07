@@ -3327,7 +3327,17 @@ def _rolling_median_iqr(x, y, window_size, step_size):
 def _style_log_yaxis(ax):
     """Make a log Y axis clearly read as log: plain-number major labels at each
     decade, plus minor ticks at 2-9 within every decade (the 2x and 5x labelled
-    smaller). Without this a range spanning <1 decade shows almost no ticks."""
+    smaller). Without this a range spanning <1 decade shows almost no ticks.
+
+    The minor label size is resolved through matplotlib's own font machinery
+    rather than ``float()``. ``ytick.labelsize`` is allowed to be a *relative*
+    keyword -- and matplotlib's default is the string ``"medium"`` -- so the
+    plain cast raised ``ValueError`` in any process that had not applied the
+    repo style first, i.e. a bare notebook or script (restructure_2 Phase 5).
+    Under the style the key is numeric and both forms give the same number, so
+    this widens what works without moving a drawn figure.
+    """
+    from matplotlib.font_manager import FontProperties
     from matplotlib.ticker import LogLocator, ScalarFormatter, FuncFormatter
 
     ax.set_yscale("log")
@@ -3344,7 +3354,8 @@ def _style_log_yaxis(ax):
         return f"{value:g}" if round(lead) in (2, 5) else ""
 
     ax.yaxis.set_minor_formatter(FuncFormatter(_minor_fmt))
-    minor_labelsize = float(plt.rcParams.get("ytick.labelsize", 12)) * 0.6
+    base_labelsize = FontProperties(size=plt.rcParams["ytick.labelsize"]).get_size_in_points()
+    minor_labelsize = base_labelsize * 0.6
     ax.tick_params(axis="y", which="minor", left=True, labelleft=True, labelsize=minor_labelsize)
 
 
