@@ -50,10 +50,12 @@ MODULES = [
     "hypnose_behavior.visualization.pred_seq_utils",
     "hypnose_behavior.visualization.sing_rew",
     "hypnose_behavior.visualization.movement_analysis_utils",
+    "hypnose_behavior.visualization.movement_analysis.sing_rew_movement",
     # Phase 5's display primitives. No case resolves here today, but a plotter
     # moved onto them later must stay resolvable -- an unlisted module reads as
     # "function not found", which is untestable rather than green.
     "hypnose_behavior.visualization.primitives",
+    "hypnose_behavior.visualization.prep",
     # Phase 4b split `metrics_utils` into the modules below. It is still named
     # here so the gate can resolve a case against a *pre-split* revision --
     # `_resolve` swallows the ImportError, so naming a module that no longer
@@ -120,6 +122,16 @@ CASES = [
     # coverage session with SLEAP tracking *and* a speed_analysis.parquet.
     ("plot_epoch_speeds_by_condition", [40], {"dates": [20251124]}),
     ("plot_traces_with_speed_threshold", [40], {"dates": [20251124]}),
+    # Added in Phase 5 with the shared trajectory prep. These three are the
+    # consumers of `prep.resample_trace` / `prep.smooth_xy` and of the three
+    # divergent `_infer_port` variants, and until now none of them was covered
+    # -- so that de-duplication would have been verified by nothing.
+    ("plot_trial_traces_by_mode", [40], {"dates": [20251124], "mode": "all_trials",
+                                         "show_average": True, "save": False}),
+    ("plot_tortuosity_lines_overlay", [40], {"dates": [20251124], "save": False,
+                                             "verbose": False}),
+    ("plot_category_traces", [40], {"dates": [20251124], "show_average": True,
+                                    "save": False}),
 ]
 
 # Runs inside the child process, against whichever tree is on sys.path.

@@ -14,7 +14,7 @@ from matplotlib.colors import Normalize
 from collections import defaultdict
 from typing import Iterable, Optional, Union, Tuple
 from hypnose_behavior.io.load_results import load_session_results
-from hypnose_behavior.metric_analysis.frames import parse_json_column
+from hypnose_behavior.metric_analysis.frames import parse_json_column, odor_letter
 from hypnose_behavior.metric_analysis.run import run_all_metrics
 from datetime import timedelta, datetime
 from hypnose_behavior.trial_classification.classification_utils import load_all_streams, load_experiment
@@ -41,6 +41,7 @@ from hypnose_behavior.visualization.visualization_utils import (
     load_tracking_with_behavior,
 )
 from hypnose_behavior.io.loaders import _load_table_with_trial_data, _load_trial_views
+from hypnose_behavior.visualization.prep import resample_trace, smooth_xy
 from hypnose_behavior.visualization.primitives import mean_sem
 # Moved out of this file in Phase 4a: the tracking loader is io/, and
 # compute_speed_analysis is a metrics module (it does no plotting at all).
@@ -877,12 +878,14 @@ def plot_trial_traces_by_mode(
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
     def _odor_letter(val):
-        if pd.isna(val):
-            return "Unknown"
-        s = str(val)
-        return s.replace("Odor", "") if s.startswith("Odor") else s
+        """Canonical odor-token normaliser, plus this figure's label for a
+        missing odor. Measured over every odor value in 15 sessions, the two
+        agree on all of them except NaN -- and "Unknown" vs "NAN" only ever
+        reaches a label, never a branch. The relabelling stays here rather than
+        moving into `metric_analysis` (audit finding 14)."""
+        return "Unknown" if pd.isna(val) else odor_letter(val)
 
-    def _infer_port(row):
+    def _infer_port_from_response(row):
         for col in [
             "response_port",
             "rewarded_port",
@@ -919,25 +922,12 @@ def plot_trial_traces_by_mode(
         # Priority: explicit first_supply_odor_identity -> inferred port -> odor letter fallback
         port = _port_from_first_supply(row)
         if port is None:
-            port = _infer_port(row)
+            port = _infer_port_from_response(row)
         if port in {1, 2}:
             return ("A" if port == 1 else "B"), port
         odor = _odor_letter(row.get("last_odor_name") or row.get("last_odor"))
         category = "A" if odor in {"A", "OdorA"} else "B"
         return category, port
-
-    def _smooth_tracking(df):
-        def _as_series(col):
-            if isinstance(col, pd.DataFrame):
-                # take the first column when duplicate names exist
-                return col.iloc[:, 0]
-            return pd.Series(col)
-
-        if smooth_window > 1:
-            df = df.copy()
-            df["X"] = _as_series(df["X"]).rolling(window=smooth_window, center=True, min_periods=1).mean()
-            df["Y"] = _as_series(df["Y"]).rolling(window=smooth_window, center=True, min_periods=1).mean()
-        return df
 
     def _extract_segment(tracking_df, start, end):
         if pd.isna(start) or pd.isna(end):
@@ -950,7 +940,7 @@ def plot_trial_traces_by_mode(
             return None
         return seg["X"].to_numpy(), seg["Y"].to_numpy(), seg["time"].to_numpy()
 
-    def _last_poke_out(row):
+    def _last_poke_out_by_position(row):
         pts = row.get("position_poke_times")
         if isinstance(pts, str):
             try:
@@ -973,27 +963,6 @@ def plot_trial_traces_by_mode(
         if "sequence_start" in row:
             return pd.to_datetime(row.get("sequence_start"), errors="coerce")
         return pd.NaT
-
-    def _resample_trace(x, y, n_points=200):
-        """Resample a trajectory onto a normalized arc-length grid [0,1]."""
-        x = np.asarray(x, dtype=float)
-        y = np.asarray(y, dtype=float)
-        if x.size < 2 or y.size < 2:
-            return None
-        if not np.isfinite(x).all() or not np.isfinite(y).all():
-            return None
-        dx = np.diff(x)
-        dy = np.diff(y)
-        seg_len = np.hypot(dx, dy)
-        cumlen = np.concatenate(([0.0], np.cumsum(seg_len)))
-        total_len = cumlen[-1]
-        if total_len <= 0:
-            return None
-        s = cumlen / total_len  # normalized arc length in [0,1]
-        s_new = np.linspace(0.0, 1.0, num=n_points)
-        x_new = np.interp(s_new, s, x)
-        y_new = np.interp(s_new, s, y)
-        return x_new, y_new
 
     def _add_segment(store, axis_key, category, color, x, y, *, label=None, time=None, t_zero=None, speed_bins=None):
         store[axis_key].append({
@@ -1070,7 +1039,7 @@ def plot_trial_traces_by_mode(
         tracking = tracking.dropna(subset=["X", "Y"])
         # Drop duplicate columns to avoid DataFrame returns when selecting by name
         tracking = tracking.loc[:, ~tracking.columns.duplicated()]
-        tracking = _smooth_tracking(tracking)
+        tracking = smooth_xy(tracking, smooth_window)
 
         # Load speed analysis parquet if available (per-bin speeds + threshold times)
         speed_df = _get_from_cache(subjid, date_str, kind="speed_analysis")
@@ -1146,7 +1115,7 @@ def plot_trial_traces_by_mode(
                 seg = _extract_segment(tracking, start, end)
                 if seg is None:
                     continue
-                t_zero = _last_poke_out(row)
+                t_zero = _last_poke_out_by_position(row)
                 speed_bins = speed_analysis_cache.get(date_str, {}).get(idx_row)
                 yield idx_row, row, seg, t_zero, speed_bins
 
@@ -1162,14 +1131,14 @@ def plot_trial_traces_by_mode(
                 def _port_trial(row):
                     p = _port_from_first_supply(row)
                     if p is None:
-                        p = _infer_port(row)
+                        p = _infer_port_from_response(row)
                     return p
                 trial_color_map = _compute_trial_color_map(trials, _port_trial)
 
             for idx_row, row, seg, t_zero, speed_bins in iter_trials(trials):
                 port = None
                 if hr_flag and bool(row.get(hr_flag, False)):
-                    port = _port_from_first_supply(row) or _infer_port(row)
+                    port = _port_from_first_supply(row) or _infer_port_from_response(row)
                 category, port_fallback = _category_from_row(row)
                 if port is None:
                     port = port_fallback
@@ -1185,7 +1154,7 @@ def plot_trial_traces_by_mode(
                         color = trial_color_map.get((port, tid), color)
                 _add_segment(segments, "combined", category, color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
                 _add_segment(segments, category, category, color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
-                resampled = _resample_trace(seg[0], seg[1])
+                resampled = resample_trace(seg[0], seg[1])
                 if resampled is not None:
                     avg_pool["combined"][category].append(resampled)
                     avg_pool[category][category].append(resampled)
@@ -1205,7 +1174,7 @@ def plot_trial_traces_by_mode(
                     color = timeout_color
                 _add_segment(segments, "combined", category, color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
                 _add_segment(segments, category, category, color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
-                resampled = _resample_trace(seg[0], seg[1])
+                resampled = resample_trace(seg[0], seg[1])
                 if resampled is not None:
                     avg_pool["combined"][category].append(resampled)
                     avg_pool[category][category].append(resampled)
@@ -1224,7 +1193,7 @@ def plot_trial_traces_by_mode(
                 _add_segment(segments, "combined", category, color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
                 # Only include completed trials in the averages for all_trials
                 if not row.get("is_aborted"):
-                    resampled = _resample_trace(seg[0], seg[1])
+                    resampled = resample_trace(seg[0], seg[1])
                     if resampled is not None:
                         avg_pool["combined"][category].append(resampled)
 
@@ -1246,13 +1215,13 @@ def plot_trial_traces_by_mode(
             trial_color_map = {}
             if color_by_trial_id:
                 def _port_trial(row):
-                    p = row.get("fa_port") if pd.notna(row.get("fa_port")) else _infer_port(row)
+                    p = row.get("fa_port") if pd.notna(row.get("fa_port")) else _infer_port_from_response(row)
                     return p
                 trial_color_map = _compute_trial_color_map(fa_df, _port_trial)
 
             for idx_row, row, seg, t_zero, speed_bins in iter_trials(fa_df):
                 # Use FA port first, then supply/response port
-                port = row.get("fa_port") if pd.notna(row.get("fa_port")) else _infer_port(row)
+                port = row.get("fa_port") if pd.notna(row.get("fa_port")) else _infer_port_from_response(row)
                 if port not in {1, 2}:
                     continue
                 category = "A" if port == 1 else "B"
@@ -1267,7 +1236,7 @@ def plot_trial_traces_by_mode(
                         color = trial_color_map.get((port, tid), color)
                 _add_segment(segments, "combined", category, color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
                 _add_segment(segments, category, category, color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
-                resampled = _resample_trace(seg[0], seg[1])
+                resampled = resample_trace(seg[0], seg[1])
                 if resampled is not None:
                     avg_pool["combined"][category].append(resampled)
                     avg_pool[category][category].append(resampled)
@@ -1286,7 +1255,7 @@ def plot_trial_traces_by_mode(
             trial_color_map = {}
             if color_by_trial_id:
                 def _port_trial(row):
-                    p = row.get("fa_port") if pd.notna(row.get("fa_port")) else _infer_port(row)
+                    p = row.get("fa_port") if pd.notna(row.get("fa_port")) else _infer_port_from_response(row)
                     return p
                 trial_color_map = _compute_trial_color_map(fa_df, _port_trial)
 
@@ -1295,7 +1264,7 @@ def plot_trial_traces_by_mode(
                 odor = _odor_letter(odor_name)
                 if odor in {"A", "B", "OdorA", "OdorB"}:
                     continue
-                port = row.get("fa_port") if pd.notna(row.get("fa_port")) else _infer_port(row)
+                port = row.get("fa_port") if pd.notna(row.get("fa_port")) else _infer_port_from_response(row)
                 color = port_colors_fa.get(port, port_colors_fa[1])
                 if color_by_trial_id:
                     tid = row.get("global_trial_id")
@@ -1307,7 +1276,7 @@ def plot_trial_traces_by_mode(
                         color = trial_color_map.get((port, tid), color)
                 label = "FA to A" if port == 1 else ("FA to B" if port == 2 else "FA")
                 _add_segment(segments, odor, label, color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
-                resampled = _resample_trace(seg[0], seg[1])
+                resampled = resample_trace(seg[0], seg[1])
                 if resampled is not None:
                     avg_pool[odor][label].append(resampled)
 
@@ -1357,7 +1326,7 @@ def plot_trial_traces_by_mode(
                 def _port_trial(row):
                     p = _hr_port_from_identity(row.get("first_supply_odor_identity"))
                     if p is None:
-                        p = _infer_port(row)
+                        p = _infer_port_from_response(row)
                     return p
                 trial_color_map = _compute_trial_color_map(hr_trials, _port_trial)
             for idx_row, row, seg, t_zero, speed_bins in iter_trials(hr_trials):
@@ -1375,7 +1344,7 @@ def plot_trial_traces_by_mode(
 
                 port = _hr_port_from_identity(row.get("first_supply_odor_identity"))
                 if port is None:
-                    port = _infer_port(row)
+                    port = _infer_port_from_response(row)
                 rtc = str(row.get("response_time_category", "")).lower()
 
                 axis_key = f"HR {odor_match}"
@@ -1392,7 +1361,7 @@ def plot_trial_traces_by_mode(
                             color = trial_color_map.get((port, tid), color)
                     _add_segment(segments, axis_key, f"{label_base} rewarded", color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
                     _add_segment(segments, "HR Summary", f"{label_base} rewarded", color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
-                    resampled = _resample_trace(seg[0], seg[1])
+                    resampled = resample_trace(seg[0], seg[1])
                     if resampled is not None:
                         avg_pool[axis_key][f"{label_base} rewarded"].append(resampled)
                         avg_pool["HR Summary"][f"{label_base} rewarded"].append(resampled)
@@ -1400,7 +1369,7 @@ def plot_trial_traces_by_mode(
                     color = timeout_color
                     _add_segment(segments, axis_key, f"{label_base} timeout", color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
                     _add_segment(segments, "HR Summary", f"{label_base} timeout", color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
-                    resampled = _resample_trace(seg[0], seg[1])
+                    resampled = resample_trace(seg[0], seg[1])
                     if resampled is not None:
                         avg_pool[axis_key][f"{label_base} timeout"].append(resampled)
                         avg_pool["HR Summary"][f"{label_base} timeout"].append(resampled)
@@ -1408,7 +1377,7 @@ def plot_trial_traces_by_mode(
                     color = unrewarded_color
                     _add_segment(segments, axis_key, f"{label_base} unrewarded", color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
                     _add_segment(segments, "HR Summary", f"{label_base} unrewarded", color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
-                    resampled = _resample_trace(seg[0], seg[1])
+                    resampled = resample_trace(seg[0], seg[1])
                     if resampled is not None:
                         avg_pool[axis_key][f"{label_base} unrewarded"].append(resampled)
 
@@ -2065,7 +2034,7 @@ def plot_traces_with_speed_threshold(
         except Exception:
             return pd.NaT
 
-    def _last_poke_out(row):
+    def _last_poke_out_scanning_back(row):
         pts = row.get("position_poke_times")
         if isinstance(pts, str):
             try:
@@ -2098,7 +2067,7 @@ def plot_traces_with_speed_threshold(
             return _safe_dt(row.get("fa_time")) or _safe_dt(row.get("sequence_end"))
         return _safe_dt(row.get("sequence_end"))
 
-    def _infer_port(row):
+    def _infer_port_with_odor_fallback(row):
         # Try explicit port fields first
         for col in [
             "response_port", "rewarded_port", "reward_port", "supply_port",
@@ -2154,7 +2123,7 @@ def plot_traces_with_speed_threshold(
                     return int(float(row[preferred_col]))
                 except Exception:
                     pass
-        return _infer_port(row)
+        return _infer_port_with_odor_fallback(row)
 
     def _category_from_row(row):
         odor = str(row.get("last_odor_name") or row.get("last_odor") or "A")
@@ -2163,13 +2132,6 @@ def plot_traces_with_speed_threshold(
         if odor in {"B", "OdorB", "2"}:
             return "B"
         return "A"
-
-    def _smooth_tracking(df):
-        if smooth_window > 1:
-            df = df.copy()
-            df["X"] = pd.Series(df["X"]).rolling(window=smooth_window, center=True, min_periods=1).mean()
-            df["Y"] = pd.Series(df["Y"]).rolling(window=smooth_window, center=True, min_periods=1).mean()
-        return df
 
     traces = {"rewarded": [], "unrewarded": [], "fa": []}
     markers = {"rewarded": [], "unrewarded": [], "fa": []}
@@ -2232,7 +2194,7 @@ def plot_traces_with_speed_threshold(
         tracking = tracking.loc[:, ~tracking.columns.duplicated()]
         if tracking.empty:
             continue
-        tracking = _smooth_tracking(tracking)
+        tracking = smooth_xy(tracking, smooth_window)
 
         if use_saved_thresholds:
             # Strictly use stored threshold times; no recomputation
@@ -2250,7 +2212,7 @@ def plot_traces_with_speed_threshold(
                 else:
                     continue
 
-                t_zero = _last_poke_out(row)
+                t_zero = _last_poke_out_scanning_back(row)
                 if pd.isna(t_zero):
                     trial_id = row.get("trial_id", idx) if hasattr(row, "get") else idx
                     skipped_no_poke_end.append(trial_id)
@@ -2308,7 +2270,7 @@ def plot_traces_with_speed_threshold(
             else:
                 continue
 
-            t_zero = _last_poke_out(row)
+            t_zero = _last_poke_out_scanning_back(row)
             if pd.isna(t_zero):
                 trial_id = row.get("trial_id", idx) if hasattr(row, "get") else idx
                 skipped_no_poke_end.append(trial_id)
@@ -2615,7 +2577,7 @@ def plot_tortuosity_lines_overlay(
             return 2
         return None
 
-    def _infer_port(row):
+    def _infer_port_with_supply_identity(row):
         for col in [
             "response_port", "rewarded_port", "reward_port", "supply_port",
             "choice_port", "port", "fa_port", "first_supply_port",
@@ -2657,7 +2619,7 @@ def plot_tortuosity_lines_overlay(
                     return int(float(row[col]))
                 except Exception:
                     continue
-        return _infer_port(row)
+        return _infer_port_with_supply_identity(row)
 
     def _condition_label(row):
         rtc = str(row.get("response_time_category", "")).lower()

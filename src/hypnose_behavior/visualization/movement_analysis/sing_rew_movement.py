@@ -33,6 +33,7 @@ from matplotlib.lines import Line2D
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.metric_analysis.sing_rew_metrics import _classify_trial
 from hypnose_behavior.utils.helpers import session_selectors
+from hypnose_behavior.visualization.prep import resample_trace, smooth_xy
 from hypnose_behavior.visualization.movement_analysis_utils import _load_tracking_and_behavior
 from hypnose_behavior.visualization.pred_seq_utils import _collect_sessions
 
@@ -82,8 +83,13 @@ def _port_letter(value):
         return None
 
 
-def _odor_letter(value):
-    """Map an odor / identity (OdorA/A/1 -> A, OdorB/B/2 -> B) to A/B, else None."""
+def _ab_letter(value):
+    """Map an odor / identity (OdorA/A/1 -> A, OdorB/B/2 -> B) to A/B, else None.
+
+    Named for what it returns, not for its input: this is an A/B *side* resolver
+    and returns None for any other odor, where the canonical
+    `metric_analysis.frames.odor_letter` would return that odor's letter. It was
+    called `_odor_letter` and read as a copy of that normaliser; it is not one."""
     if value is None:
         return None
     try:
@@ -110,16 +116,16 @@ def _trial_port_group(row, main):
         if bool(row.get("is_aborted")):  # anticipatory
             return _port_letter(row.get("fa_port"))
         if str(row.get("response_time_category")) == "rewarded":
-            return _port_letter(row.get("first_supply_port")) or _odor_letter(row.get("first_supply_odor_identity"))
-        return _port_letter(row.get("first_reward_poke_port")) or _odor_letter(row.get("first_reward_poke_odor_identity"))
+            return _port_letter(row.get("first_supply_port")) or _ab_letter(row.get("first_supply_odor_identity"))
+        return _port_letter(row.get("first_reward_poke_port")) or _ab_letter(row.get("first_reward_poke_odor_identity"))
     if main == "false_alarm":
         if bool(row.get("is_aborted")):
             return _port_letter(row.get("fa_port"))
-        return _port_letter(row.get("fr_port")) or _odor_letter(row.get("fr_odor_identity"))
+        return _port_letter(row.get("fr_port")) or _ab_letter(row.get("fr_odor_identity"))
     if main in ("miss", "correct_rejection"):
-        return (_odor_letter(row.get("determined_final_odor"))
-                or _odor_letter(row.get("last_odor"))
-                or _odor_letter(row.get("last_odor_name")))
+        return (_ab_letter(row.get("determined_final_odor"))
+                or _ab_letter(row.get("last_odor"))
+                or _ab_letter(row.get("last_odor_name")))
     return None
 
 
@@ -203,16 +209,6 @@ def _segment_end(row, main, next_init):
     return pd.NaT
 
 
-def _smooth_tracking(tracking, smooth_window):
-    """Rolling-mean smooth of X/Y over the whole session (centered)."""
-    if smooth_window is None or smooth_window <= 1:
-        return tracking
-    df = tracking.copy()
-    df["X"] = pd.Series(df["X"]).rolling(window=smooth_window, center=True, min_periods=1).mean()
-    df["Y"] = pd.Series(df["Y"]).rolling(window=smooth_window, center=True, min_periods=1).mean()
-    return df
-
-
 def _extract_segment(tracking, start, end):
     """(X, Y, time) arrays of tracking frames within [start, end], or None."""
     if pd.isna(start) or pd.isna(end) or end <= start:
@@ -224,22 +220,6 @@ def _extract_segment(tracking, start, end):
     if len(seg) < 2:
         return None
     return seg["X"].to_numpy(dtype=float), seg["Y"].to_numpy(dtype=float), seg["time"].to_numpy()
-
-
-def _resample_trace(x, y, n_points):
-    """Resample a trajectory onto a normalized arc-length grid (for averaging)."""
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    if x.size < 2 or not np.isfinite(x).all() or not np.isfinite(y).all():
-        return None
-    seg_len = np.hypot(np.diff(x), np.diff(y))
-    cumlen = np.concatenate(([0.0], np.cumsum(seg_len)))
-    total = cumlen[-1]
-    if total <= 0:
-        return None
-    s = cumlen / total
-    s_new = np.linspace(0.0, 1.0, n_points)
-    return np.interp(s_new, s, x), np.interp(s_new, s, y)
 
 
 def _plot_category(segments, title, *,
@@ -275,7 +255,7 @@ def _plot_category(segments, title, *,
     if show_average:
         for group in ("A", "B"):
             grp = [s for s in segments if s["group"] == group]
-            resampled = [r for r in (_resample_trace(s["x"], s["y"], n_average_points) for s in grp)
+            resampled = [r for r in (resample_trace(s["x"], s["y"], n_average_points) for s in grp)
                          if r is not None]
             if resampled:
                 ax.plot(np.nanmean([r[0] for r in resampled], axis=0),
@@ -379,7 +359,7 @@ def plot_category_traces(
 
         tracking = tracking.copy()
         tracking["time"] = _naive_dt(tracking["time"])
-        tracking = _smooth_tracking(tracking, smooth_window)
+        tracking = smooth_xy(tracking, smooth_window)
 
         td = trial_data.sort_values("global_trial_id").reset_index(drop=True)
         next_init = _naive_dt(td["sequence_start"]).shift(-1) if "sequence_start" in td.columns \
