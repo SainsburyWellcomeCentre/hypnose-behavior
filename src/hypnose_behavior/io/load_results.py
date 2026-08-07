@@ -21,10 +21,9 @@ same directory via `_load_trial_views`: `loaders` is imported by
 `load_session_results` calls `metric_analysis.frames.build_position_data`. That
 edge is deliberate and was checked, not assumed: `frames.py` is a leaf (standard
 library and pandas only) and both package `__init__`s are docstring-only, so
-`io -> metric_analysis.frames` is one-way with no cycle. See "Where
-`build_position_data` lives" in `docs/metric_audit.md`. **Keep `frames.py` a
-leaf** -- the day it imports anything else in the package this becomes a real
-cycle.
+`io -> metric_analysis.frames` is one-way with no cycle. See `docs/DECISIONS.md`
+section 3. **Keep `frames.py` a leaf** -- the day it imports anything else in
+the package this becomes a real cycle.
 """
 
 import json

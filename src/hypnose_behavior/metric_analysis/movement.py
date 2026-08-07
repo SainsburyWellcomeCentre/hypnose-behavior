@@ -7,8 +7,8 @@ from __future__ import annotations
 Moved wholesale out of ``visualization/movement_analysis_utils.py`` in
 restructure_2 Phase 4a: ``compute_speed_analysis`` contains no plotting at all,
 so this was a metrics module filed under ``visualization/``. It supplies seven
-metrics that had no canonical version anywhere (checklist items 10-16 of
-``docs/metric_audit.md``):
+metrics that had no canonical version anywhere (checklist items 10-16 of the
+Phase 4a metric audit, now closed):
 
     binned speed epoch . baseline mu/sigma and vthresh . movement-onset latency
     . movement_onset_from_valve_s . path_length_px . travel_time_s . tortuosity

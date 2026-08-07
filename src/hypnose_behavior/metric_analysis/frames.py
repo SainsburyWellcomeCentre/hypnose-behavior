@@ -149,7 +149,8 @@ def sequence_depth(trial) -> Optional[int]:
     recovers it; plain membership would silently under-count.
 
     **On the source, and a deliberate difference from the audit's target
-    definition.** ``docs/metric_audit.md`` (Q5) specifies the eventual form as
+    definition.** The Phase 4a metric audit (Q5; closed, and superseded by
+    ``docs/DECISIONS.md`` section 10) specifies the eventual form as
     ``1..max(position in presentations)`` for every trial. That is the right end
     state, but it is not what the canonical metrics compute today: for an
     aborted trial they walk ``1..last_odor_position``, and the two disagree
