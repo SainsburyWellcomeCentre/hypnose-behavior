@@ -12,7 +12,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-from hypnose_behavior.utils.helpers import _filter_session_dirs, _iter_subject_dirs
+from hypnose_behavior.utils.helpers import (
+	_filter_session_dirs,
+	_iter_subject_dirs,
+	session_selectors,
+)
 from hypnose_behavior.metric_analysis.frames import build_position_data
 from hypnose_behavior.visualization.primitives import mean_sem
 from hypnose_behavior.metric_analysis.metrics.accuracy import decision_accuracy
@@ -55,14 +59,19 @@ def _normalize_date(value):
 	return int(digits) if digits.isdigit() else str(value)
 
 
-def _collect_sessions(subjids, dates):
+def _collect_sessions(subjids, dates, *, ses=None, index=None,
+                      date_range=None, ses_range=None, index_range=None):
+	select = session_selectors(
+		ses=ses, index=index, date_range=date_range,
+		ses_range=ses_range, index_range=index_range,
+	)
 	derivatives_dir = get_derivatives_root()
 	for subjid, subj_dir in _iter_subject_dirs(derivatives_dir, subjids):
 		if subjid is None:
 			continue
 		date_vals = []
 		results_dirs = []
-		for ses_dir in _filter_session_dirs(subj_dir, dates):
+		for ses_dir in _filter_session_dirs(subj_dir, dates, **select):
 			date_part = ses_dir.name.split("_date-")[-1]
 			date_val = _normalize_date(date_part)
 			if date_val is None:
@@ -630,6 +639,11 @@ def last_odor_poke_time(
 	subjids: Optional[Iterable[int]] = None,
 	dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
 	*,
+	ses=None,
+	index=None,
+	date_range=None,
+	ses_range=None,
+	index_range=None,
 	save: bool = False,
 	moving_avg: bool = False,
 	window_size: int = 10,
@@ -643,11 +657,19 @@ def last_odor_poke_time(
 	session mean is plotted (X axis: Session); with ``moving_avg=True`` a rolling
 	mean of size ``window_size`` (step ``step_size``) is plotted within each session
 	with X axis = continuous global trial id (no line continuation across days).
+
+	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+	selection further; they intersect with ``dates`` and with each other, and ``index``
+	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
 	"""
+	select = session_selectors(
+		ses=ses, index=index, date_range=date_range,
+		ses_range=ses_range, index_range=index_range,
+	)
 	figs = []
 	categories = ["rewarded", "unrewarded", "timeout_delayed"]
 	summary_cats = ["rewarded", "unrewarded"]
-	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates):
+	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
 		per_cat_pooled = {cat: {} for cat in categories}
 		per_cat_sessions = {cat: [] for cat in categories}
 
@@ -730,6 +752,11 @@ def trial_poke_duration(
 	subjids: Optional[Iterable[int]] = None,
 	dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
 	*,
+	ses=None,
+	index=None,
+	date_range=None,
+	ses_range=None,
+	index_range=None,
 	save: bool = False,
 	moving_avg: bool = False,
 	window_size: int = 10,
@@ -741,11 +768,19 @@ def trial_poke_duration(
 	Cross-date summary plots (one for rewarded, one for unrewarded) are produced
 	in addition to the per-session pooled boxplots. See ``last_odor_poke_time`` for
 	the meaning of ``moving_avg``, ``window_size``, ``step_size``.
+
+	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+	selection further; they intersect with ``dates`` and with each other, and ``index``
+	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
 	"""
+	select = session_selectors(
+		ses=ses, index=index, date_range=date_range,
+		ses_range=ses_range, index_range=index_range,
+	)
 	figs = []
 	categories = ["rewarded", "unrewarded", "timeout_delayed"]
 	summary_cats = ["rewarded", "unrewarded"]
-	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates):
+	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
 		per_cat_pooled = {cat: {} for cat in categories}
 		per_cat_sessions = {cat: [] for cat in categories}
 
@@ -824,6 +859,11 @@ def first_odor_poke_duration(
 	subjids: Optional[Iterable[int]] = None,
 	dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
 	*,
+	ses=None,
+	index=None,
+	date_range=None,
+	ses_range=None,
+	index_range=None,
 	save: bool = False,
 	moving_avg: bool = False,
 	window_size: int = 10,
@@ -839,10 +879,18 @@ def first_odor_poke_duration(
 
 	A cross-date summary plot is added when multiple sessions are loaded
 	(daily mean or rolling within session — see ``last_odor_poke_time``).
+
+	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+	selection further; they intersect with ``dates`` and with each other, and ``index``
+	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
 	"""
+	select = session_selectors(
+		ses=ses, index=index, date_range=date_range,
+		ses_range=ses_range, index_range=index_range,
+	)
 	figs = []
 	odor_filter = _build_odor_filter(odor)
-	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates):
+	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
 		pooled = {}
 		session_records = []
 		for results_dir in results_dirs:
@@ -913,6 +961,11 @@ def poke_time_all_pos(
 	subjids: Optional[Iterable[int]] = None,
 	dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
 	*,
+	ses=None,
+	index=None,
+	date_range=None,
+	ses_range=None,
+	index_range=None,
 	save: bool = False,
 	moving_avg: bool = False,
 	window_size: int = 10,
@@ -929,11 +982,19 @@ def poke_time_all_pos(
 	and one for aborted trials (is_aborted=True), so poke durations can be compared
 	between the two. Cross-date summary plots are added for each (daily mean per
 	session, or rolling within session if ``moving_avg=True``).
+
+	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+	selection further; they intersect with ``dates`` and with each other, and ``index``
+	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
 	"""
+	select = session_selectors(
+		ses=ses, index=index, date_range=date_range,
+		ses_range=ses_range, index_range=index_range,
+	)
 	figs = []
 	odor_filter = _build_odor_filter(odor)
 	categories = [("completed", False), ("aborted", True)]
-	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates):
+	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
 		per_cat_pooled = {name: {} for name, _ in categories}
 		per_cat_sessions = {name: [] for name, _ in categories}
 
@@ -1020,6 +1081,11 @@ def response_time(
 	subjids: Optional[Iterable[int]] = None,
 	dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
 	*,
+	ses=None,
+	index=None,
+	date_range=None,
+	ses_range=None,
+	index_range=None,
 	save: bool = False,
 	moving_avg: bool = False,
 	window_size: int = 10,
@@ -1030,10 +1096,18 @@ def response_time(
 
 	Cross-date summary plots are produced for rewarded and unrewarded trials
 	(daily mean per session, or rolling within session if ``moving_avg=True``).
+
+	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+	selection further; they intersect with ``dates`` and with each other, and ``index``
+	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
 	"""
+	select = session_selectors(
+		ses=ses, index=index, date_range=date_range,
+		ses_range=ses_range, index_range=index_range,
+	)
 	figs = []
 	summary_cats = ["rewarded", "unrewarded"]
-	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates):
+	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
 		# Pass 1: collect raw records per session (no filtering yet) so we can
 		# compute a group-wise outlier threshold from all sessions combined.
 		sessions_raw = []
@@ -1151,6 +1225,11 @@ def fa_analysis(
 	dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
 	fa_types: Optional[Iterable[str]] = None,
 	*,
+	ses=None,
+	index=None,
+	date_range=None,
+	ses_range=None,
+	index_range=None,
 	save: bool = False,
 	moving_avg: bool = False,
 	window_size: int = 10,
@@ -1164,13 +1243,21 @@ def fa_analysis(
 	  - FA poke time by odor.
 	  - FA response time, FA→A, by odor.
 	  - FA response time, FA→B, by odor.
+
+	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+	selection further; they intersect with ``dates`` and with each other, and ``index``
+	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
 	"""
+	select = session_selectors(
+		ses=ses, index=index, date_range=date_range,
+		ses_range=ses_range, index_range=index_range,
+	)
 	figs = []
 	odor_whitelist = {"OdorC", "OdorD", "OdorE", "OdorF", "OdorG"}
 	fa_labels = {"FA_time_in", "FA_time_out"}
 	if fa_types is not None:
 		fa_labels = set(fa_types)
-	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates):
+	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
 		poke_groups = {}
 		poke_session_records = []
 		# Raw FA response-time records per session: list of (trial_idx, odor, port, value).
@@ -1446,6 +1533,11 @@ def valve_to_reward(
 	subjids: Optional[Iterable[int]] = None,
 	dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
 	*,
+	ses=None,
+	index=None,
+	date_range=None,
+	ses_range=None,
+	index_range=None,
 	save: bool = False,
 	moving_avg: bool = False,
 	window_size: int = 10,
@@ -1458,11 +1550,19 @@ def valve_to_reward(
 	Cross-date summary plots (one for rewarded, one for unrewarded) are produced
 	in addition to the per-session pooled boxplots. See ``last_odor_poke_time``
 	for the meaning of ``moving_avg``, ``window_size``, ``step_size``.
+
+	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+	selection further; they intersect with ``dates`` and with each other, and ``index``
+	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
 	"""
+	select = session_selectors(
+		ses=ses, index=index, date_range=date_range,
+		ses_range=ses_range, index_range=index_range,
+	)
 	figs = []
 	categories = ["rewarded", "unrewarded"]
 	summary_cats = ["rewarded", "unrewarded"]
-	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates):
+	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
 		per_cat_pooled = {cat: {} for cat in categories}
 		per_cat_sessions = {cat: [] for cat in categories}
 
@@ -1714,6 +1814,11 @@ def performance(
 	subjids: Optional[Iterable[int]] = None,
 	dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
 	*,
+	ses=None,
+	index=None,
+	date_range=None,
+	ses_range=None,
+	index_range=None,
 	save: bool = False,
 	moving_avg: bool = False,
 	window_size: int = 10,
@@ -1735,9 +1840,17 @@ def performance(
 	line uses a rolling window over all completed trials in order.
 
 	Unlike most other functions here, this works for a single session.
+
+	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+	selection further; they intersect with ``dates`` and with each other, and ``index``
+	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
 	"""
+	select = session_selectors(
+		ses=ses, index=index, date_range=date_range,
+		ses_range=ses_range, index_range=index_range,
+	)
 	figs = []
-	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates):
+	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
 		# One frame per session, already reduced to the rows `decision_accuracy`
 		# scores: completed, sequence-labelled, timeouts dropped. VARIANT 5 -- the
 		# denominator then matches the canonical metric exactly, so the two plot
@@ -1780,6 +1893,11 @@ def cummulative_poke_time(
 	subjids: Optional[Iterable[int]] = None,
 	dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
 	*,
+	ses=None,
+	index=None,
+	date_range=None,
+	ses_range=None,
+	index_range=None,
 	save: bool = False,
 	moving_avg: bool = False,
 	window_size: int = 10,
@@ -1792,11 +1910,19 @@ def cummulative_poke_time(
 	Cross-date summary plots (one for rewarded, one for unrewarded) are added
 	when multiple sessions are loaded. See ``last_odor_poke_time`` for
 	``moving_avg``, ``window_size``, ``step_size`` semantics.
+
+	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+	selection further; they intersect with ``dates`` and with each other, and ``index``
+	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
 	"""
+	select = session_selectors(
+		ses=ses, index=index, date_range=date_range,
+		ses_range=ses_range, index_range=index_range,
+	)
 	figs = []
 	categories = ["rewarded", "unrewarded"]
 	summary_cats = ["rewarded", "unrewarded"]
-	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates):
+	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
 		per_cat_pooled = {cat: {} for cat in categories}
 		per_cat_sessions = {cat: [] for cat in categories}
 

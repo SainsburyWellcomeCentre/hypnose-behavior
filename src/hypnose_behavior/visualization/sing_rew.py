@@ -23,6 +23,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
 from hypnose_behavior.io.save import save_figure
+from hypnose_behavior.utils.helpers import session_selectors
 from hypnose_behavior.metric_analysis.frames import build_position_data
 from hypnose_behavior.visualization.primitives import mean_sem
 from hypnose_behavior.metric_analysis.metrics.common import reduce_rate
@@ -161,6 +162,12 @@ def FR_ratio(
     moving_avg: bool = False,
     window_size: int = 10,
     step_size: int = 1,
+    *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
 ):
     """Ratio of false-response trials to all completed trials.
 
@@ -182,9 +189,17 @@ def FR_ratio(
     - ``moving_avg=True``: a rolling ratio over the last ``window_size`` completed
       trials (step ``step_size``) within each session; X axis is the continuous
       (across-session) trial id. Reuses the rolling moving-average plotter.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     fr_labels = _normalize_fr_types(fr_types)
-    subjects = list(_collect_sessions(subjids, dates))
+    subjects = list(_collect_sessions(subjids, dates, **select))
     if not subjects:
         return []
 
@@ -433,6 +448,12 @@ def FR_latency(
     fr_types: Optional[Iterable[str]] = "FR_time_in",
     save: bool = False,
     split_AB: bool = False,
+    *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
 ):
     """Joint boxplot of false-response latency vs. reward response time per subject.
 
@@ -453,11 +474,19 @@ def FR_latency(
     With ``split_AB=True`` each group is further split by port — false responses
     by ``fr_port`` and rewards by ``first_supply_port`` — into A (red) and B
     (green), still grouped by False Response vs. Reward.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     fr_labels = _normalize_fr_types(fr_types)
     figs = []
     n_subjects_with_fr = 0
-    for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates):
+    for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
         # Per-session extraction in chronological order.
         sessions = []
         for results_dir in results_dirs:
@@ -1000,6 +1029,12 @@ def outcome_composition(
     dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
     save: bool = False,
     show_raw: bool = False,
+    *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
 ):
     """Stacked outcome-composition plots over sessions, per subject.
 
@@ -1016,11 +1051,19 @@ def outcome_composition(
     As a sanity check, the plotted subcategory sum is compared against the
     partition total (n_go / n_nogo) for each session; any mismatch (a category
     not fully covered by its subcategories) is flagged in the printed output.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     figs = []
     flags = []
     normalize_modes = (True, False) if show_raw else (True,)
-    for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates):
+    for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
         pairs = sorted(zip(date_vals, results_dirs), key=lambda p: str(p[0]))
         loaded = []  # (date_val, df_or_None) chronological
         for date_val, results_dir in pairs:
@@ -1146,9 +1189,15 @@ def _trim_timeline_to_singrew(timeline):
     }
 
 
-def _plot_cumulative_hit_cr(subjids, dates, *, by_trial, save, verbose,
+def _plot_cumulative_hit_cr(subjids, dates, *, ses=None, index=None, date_range=None,
+                            ses_range=None, index_range=None,
+                            by_trial, save, verbose,
                             show_gap_shading, show_session_boundaries, figsize):
     """Core for the cumulative Hit+CR plots (time axis or trial axis)."""
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     subjids, dates, dates_for = _normalize_subjids_dates(subjids, dates)
     single_subject = len(subjids) == 1
     gap_on = show_gap_shading and single_subject
@@ -1162,7 +1211,7 @@ def _plot_cumulative_hit_cr(subjids, dates, *, by_trial, save, verbose,
         if isinstance(dates, dict) and subj_dates is None:
             print(f"Warning: No date range provided in dict for subject {subjid}, skipping")
             continue
-        timeline = _load_subject_trial_timeline(subjid, subj_dates)
+        timeline = _load_subject_trial_timeline(subjid, subj_dates, **select)
         if timeline is None:
             print(f"Warning: No trials found for subject {subjid}")
             continue
@@ -1235,6 +1284,11 @@ def plot_cumulative_hit_cr(
     subjids,
     dates=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
     show_gap_shading=True,
@@ -1252,11 +1306,20 @@ def plot_cumulative_hit_cr(
     ``subjids`` may be a ``{subjid: date_range}`` dict (pass with ``dates=None``).
     ``show_gap_shading`` / ``show_session_boundaries`` apply to a single subject
     only. Returns ``(fig, ax)``.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     return _plot_cumulative_hit_cr(
         subjids, dates, by_trial=False, save=save, verbose=verbose,
         show_gap_shading=show_gap_shading, show_session_boundaries=show_session_boundaries,
         figsize=figsize,
+        **select,
     )
 
 
@@ -1264,6 +1327,11 @@ def plot_cumulative_hit_cr_by_trial(
     subjids,
     dates=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
     show_gap_shading=True,
@@ -1276,9 +1344,18 @@ def plot_cumulative_hit_cr_by_trial(
     ``global_trial_id`` (concatenated across sessions, like
     ``plot_cumulative_rewards_by_trial``): every trial advances X by one, and the
     curve steps up on Hit/CR, flat on Miss/FA. Returns ``(fig, ax)``.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     return _plot_cumulative_hit_cr(
         subjids, dates, by_trial=True, save=save, verbose=verbose,
         show_gap_shading=show_gap_shading, show_session_boundaries=show_session_boundaries,
         figsize=figsize,
+        **select,
     )

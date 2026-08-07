@@ -30,6 +30,7 @@ from hypnose_behavior.utils.helpers import (
     _get_from_cache,
     _iter_subject_dirs,
     _update_cache,
+    session_selectors,
     find_tracking_file,
     read_tracking_table,
 )
@@ -752,6 +753,11 @@ def plot_trial_traces_by_mode(
     fa_types="FA_time_in",
     invert_y=True,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
     return_paths=False,
@@ -803,7 +809,15 @@ def plot_trial_traces_by_mode(
         Print save status messages when saving figures.
     return_paths : bool
         If True and save=True, also return the saved figure paths alongside the figure handles.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
 
     allowed_modes = {
         "rewarded",
@@ -858,7 +872,7 @@ def plot_trial_traces_by_mode(
     derivatives_dir = get_derivatives_root()
     subj_dir = derivatives.subject_dir(subjid)
 
-    ses_dirs = _filter_session_dirs(subj_dir, dates)
+    ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
     if not ses_dirs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
@@ -1665,6 +1679,11 @@ def plot_epoch_speeds_by_condition(
     subjid,
     dates=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     bin_ms: int = 100,
     fa_label_filter=None,
     mode: str = "mean",
@@ -1681,7 +1700,15 @@ def plot_epoch_speeds_by_condition(
     Uses outputs from compute_speed_analysis (same parameters) to build per-session, per-condition
     per-trial traces with session mean overlay and optional threshold lines. Violin plots are omitted.
     Figures can optionally be saved into the movement_figures subdirectory when `save=True`.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
 
     saved_paths = []
 
@@ -1726,7 +1753,7 @@ def plot_epoch_speeds_by_condition(
     derivatives_dir = get_derivatives_root()
     subj_dir = derivatives.subject_dir(subjid)
 
-    ses_dirs = _filter_session_dirs(subj_dir, dates)
+    ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
     if not ses_dirs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
@@ -1864,6 +1891,11 @@ def plot_traces_with_speed_threshold(
     subjid,
     dates=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     xlim=None,
     ylim=None,
     position_units="cm",
@@ -1934,7 +1966,15 @@ def plot_traces_with_speed_threshold(
     -------
     dict with keys "rewarded", "unrewarded", "fa" mapping to matplotlib figures. When
     return_paths is True, also returns the list of saved file paths.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
 
     saved_paths = []
 
@@ -2012,7 +2052,7 @@ def plot_traces_with_speed_threshold(
     derivatives_dir = get_derivatives_root()
     subj_dir = derivatives.subject_dir(subjid)
 
-    ses_dirs = _filter_session_dirs(subj_dir, dates)
+    ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
     if not ses_dirs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
@@ -2474,6 +2514,11 @@ def plot_tortuosity_lines_overlay(
     subjid,
     dates=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     fa_types="FA_time_in",
     bin_ms: int = 100,
     fixed_start_xy=(575, 90),
@@ -2490,7 +2535,15 @@ def plot_tortuosity_lines_overlay(
     a line from start→goal derived from tracking, and a fixed start→goal line (A/B) using provided coordinates.
     Returns a dict of figures keyed by (date, condition). When save=True, PDFs are written into
     movement_figures via save_figure(), and return_paths controls whether saved paths are returned.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
 
     saved_paths = []
 
@@ -2542,7 +2595,7 @@ def plot_tortuosity_lines_overlay(
     subj_str = normalize_subjid(subjid)
     subj_dir = derivatives.subject_dir(subjid)
 
-    ses_dirs = _filter_session_dirs(subj_dir, dates)
+    ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
     if not ses_dirs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
@@ -2756,6 +2809,11 @@ def plot_movement_analysis_statistics(
     subjid,
     dates=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     fa_types="FA_time_in",
     figsize=(10, 6),
     clean_graph: bool = False,
@@ -2776,7 +2834,15 @@ def plot_movement_analysis_statistics(
     Returns dict with per-session figs and combined figs when multiple dates are provided. When
     save=True, each figure is written to movement_figures via save_figure(); return_paths=True
     additionally returns the list of saved file paths.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
 
     saved_paths = []
 
@@ -2819,7 +2885,7 @@ def plot_movement_analysis_statistics(
     subj_str = normalize_subjid(subjid)
     subj_dir = derivatives.subject_dir(subjid)
 
-    ses_dirs = _filter_session_dirs(subj_dir, dates)
+    ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
     if not ses_dirs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 

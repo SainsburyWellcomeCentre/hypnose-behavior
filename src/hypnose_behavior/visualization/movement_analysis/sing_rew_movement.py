@@ -32,6 +32,7 @@ from matplotlib.lines import Line2D
 
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.metric_analysis.sing_rew_metrics import _classify_trial
+from hypnose_behavior.utils.helpers import session_selectors
 from hypnose_behavior.visualization.movement_analysis_utils import _load_tracking_and_behavior
 from hypnose_behavior.visualization.pred_seq_utils import _collect_sessions
 
@@ -309,6 +310,11 @@ def plot_category_traces(
     subjid: int,
     dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     show_average: bool = False,
     plot_subcategories: bool = False,
     trial_number: Optional[int] = None,
@@ -342,9 +348,17 @@ def plot_category_traces(
     with a single subject.
 
     Returns a list of matplotlib figures.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     # Resolve the subject's sessions/dates via the shared iterator.
-    collected = list(_collect_sessions([subjid], dates))
+    collected = list(_collect_sessions([subjid], dates, **select))
     if not collected:
         print(f"[plot_category_traces] No sessions found for subject {subjid}.")
         return []
