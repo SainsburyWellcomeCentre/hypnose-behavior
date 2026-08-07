@@ -7,7 +7,8 @@ Information"). Completed non-rewarded ("no-go") sequences are scored via the
 analogous to the false-alarm columns used for aborted trials.
 
 General plotting helpers (boxplots, rolling/daily summary lines, marker sizing,
-session collection) are imported from ``pred_seq_utils`` and reused here.
+session collection) come from the shared leaves ``visualization.prep`` and
+``visualization.panels`` rather than from a sibling plotter module.
 """
 
 from __future__ import annotations
@@ -25,6 +26,21 @@ from matplotlib.ticker import MaxNLocator
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.utils.helpers import session_selectors
 from hypnose_behavior.metric_analysis.frames import build_position_data
+from hypnose_behavior.visualization.prep import (
+    _collect_sessions,
+    _count_to_marker_size,
+    _last_position_entry,
+    _load_sorted_session,
+    _load_subject_trial_timeline,
+    _nice_round,
+    _parse_json_value,
+    _summary_save_suffix,
+)
+from hypnose_behavior.visualization.panels import (
+    _add_size_legend,
+    _plot_summary_rolling,
+    _plot_violins_with_stats,
+)
 from hypnose_behavior.visualization.primitives import mean_sem
 from hypnose_behavior.metric_analysis.metrics.common import reduce_rate
 from hypnose_behavior.metric_analysis.metrics.false_alarm import (
@@ -35,19 +51,6 @@ from hypnose_behavior.metric_analysis.sing_rew_metrics import (
     compute_sing_rew_metrics,
     compute_sing_rew_rates,
     _classify_trial,
-)
-from hypnose_behavior.visualization.visualization_utils import _load_subject_trial_timeline
-from hypnose_behavior.visualization.pred_seq_utils import (
-    _collect_sessions,
-    _load_sorted_session,
-    _parse_json_value,
-    _last_position_entry,
-    _plot_violins_with_stats,
-    _plot_summary_rolling,
-    _count_to_marker_size,
-    _add_size_legend,
-    _nice_round,
-    _summary_save_suffix,
 )
 
 

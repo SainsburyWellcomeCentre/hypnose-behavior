@@ -35,13 +35,14 @@ from hypnose_behavior.utils.helpers import (
     read_tracking_table,
 )
 from hypnose_behavior.io.layout import derivatives, normalize_subjid
-from hypnose_behavior.visualization.visualization_utils import (
-    _clean_graph,
-    _load_protocol_from_summary,
-    load_tracking_with_behavior,
-)
 from hypnose_behavior.io.loaders import _load_table_with_trial_data, _load_trial_views
 from hypnose_behavior.visualization.prep import resample_trace, smooth_xy
+from hypnose_behavior.visualization.prep import (
+    load_tracking_with_behavior,
+)
+from hypnose_behavior.visualization.panels import (
+    _clean_graph,
+)
 from hypnose_behavior.visualization.primitives import mean_sem
 # Moved out of this file in Phase 4a: the tracking loader is io/, and
 # compute_speed_analysis is a metrics module (it does no plotting at all).

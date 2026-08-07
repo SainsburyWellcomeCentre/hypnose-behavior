@@ -18,6 +18,21 @@ from hypnose_behavior.utils.helpers import (
 	session_selectors,
 )
 from hypnose_behavior.metric_analysis.frames import build_position_data
+from hypnose_behavior.visualization.prep import (
+	_collect_sessions,
+	_count_to_marker_size,
+	_last_position_entry,
+	_load_sorted_session,
+	_ordered_groups,
+	_parse_json_value,
+	_resolve_color,
+	_summary_save_suffix,
+)
+from hypnose_behavior.visualization.panels import (
+	_add_size_legend,
+	_plot_summary_rolling,
+	_plot_violins_with_stats,
+)
 from hypnose_behavior.visualization.primitives import mean_sem, rolling_windows
 from hypnose_behavior.metric_analysis.metrics.accuracy import decision_accuracy
 from hypnose_behavior.metric_analysis.metrics.false_alarm import (
@@ -36,57 +51,6 @@ from hypnose_behavior.metric_analysis.resolvers import by_group, over_windows
 from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.io.save import save_figure, nice_x_locator
 from matplotlib.patches import Patch
-
-
-def _parse_json_value(val):
-	if isinstance(val, (dict, list)):
-		return val
-	if not isinstance(val, str):
-		return None
-	try:
-		return json.loads(val)
-	except Exception:
-		try:
-			return ast.literal_eval(val)
-		except Exception:
-			return None
-
-
-def _normalize_date(value):
-	if value is None:
-		return None
-	digits = "".join(ch for ch in str(value) if ch.isdigit())
-	return int(digits) if digits.isdigit() else str(value)
-
-
-def _collect_sessions(subjids, dates, *, ses=None, index=None,
-                      date_range=None, ses_range=None, index_range=None):
-	select = session_selectors(
-		ses=ses, index=index, date_range=date_range,
-		ses_range=ses_range, index_range=index_range,
-	)
-	derivatives_dir = get_derivatives_root()
-	for subjid, subj_dir in _iter_subject_dirs(derivatives_dir, subjids):
-		if subjid is None:
-			continue
-		date_vals = []
-		results_dirs = []
-		for ses_dir in _filter_session_dirs(subj_dir, dates, **select):
-			date_part = ses_dir.name.split("_date-")[-1]
-			date_val = _normalize_date(date_part)
-			if date_val is None:
-				continue
-			date_vals.append(date_val)
-			results_dirs.append(ses_dir / "saved_analysis_results")
-		if results_dirs:
-			yield subjid, date_vals, results_dirs
-
-
-def _load_trial_data(results_dir: Path) -> pd.DataFrame:
-	parquet_path = results_dir / "trial_data.parquet"
-	if not parquet_path.exists():
-		raise FileNotFoundError(f"Missing trial_data.parquet at {parquet_path}")
-	return pd.read_parquet(parquet_path)
 
 
 def _sequence_label(seq):
@@ -116,26 +80,6 @@ def _normalize_odor_name(value):
 		text = text.replace("Odor", "", 1)
 	text = text.strip()
 	return f"Odor{text}" if text else None
-
-
-def _last_position_entry(pos_dict):
-	if not isinstance(pos_dict, dict):
-		return None
-	candidates = []
-	for key, entry in pos_dict.items():
-		if not isinstance(entry, dict):
-			continue
-		position = entry.get("position")
-		if position is None:
-			try:
-				position = int(key)
-			except Exception:
-				position = None
-		candidates.append((position, entry))
-	if not candidates:
-		return None
-	candidates.sort(key=lambda x: (x[0] is None, x[0]))
-	return candidates[-1][1]
 
 
 def _extract_position_entry(pos_dict, position: int):
@@ -174,133 +118,6 @@ def _ordered_position_entries(pos_dict):
 	resolved.sort(key=lambda x: (x[0] is None, x[0]))
 	return resolved
 
-
-def _count_to_marker_size(count, *, base_area=36.0, ref_count=10.0, min_area=10.0, max_area=300.0):
-	"""Scale scatter marker area linearly with event count.
-
-	A count of ``ref_count`` produces area ``base_area`` (matches the default
-	``markersize=6`` used elsewhere). Sizing is absolute (no per-plot
-	normalization) so the same count always produces the same dot across
-	figures, and small differences in count produce small differences in size.
-	"""
-	if count is None or count <= 0:
-		return min_area
-	size = base_area * (float(count) / float(ref_count))
-	return float(np.clip(size, min_area, max_area))
-
-
-def _nice_round(n):
-	"""Round a count to a readable integer for legend labels."""
-	n = float(n)
-	if n <= 0:
-		return 0
-	if n < 5:
-		return int(round(n))
-	if n < 20:
-		return int(round(n / 5.0) * 5)
-	if n < 100:
-		return int(round(n / 10.0) * 10)
-	if n < 500:
-		return int(round(n / 50.0) * 50)
-	if n < 2000:
-		return int(round(n / 100.0) * 100)
-	return int(round(n / 500.0) * 500)
-
-
-def _add_size_legend(ax, counts, *, loc="lower right", title="Trials per point"):
-	"""Add a secondary legend showing reference dot sizes for nicely rounded
-	counts (min / mid / max of the counts actually plotted on the axes).
-	Preserves any pre-existing legend.
-	"""
-	from matplotlib.lines import Line2D
-	if not counts:
-		return
-	cmin = min(counts)
-	cmax = max(counts)
-	if cmin == cmax:
-		ref_values = [_nice_round(cmin)]
-	else:
-		cmid = (cmin + cmax) / 2.0
-		ref_values = []
-		seen = set()
-		for v in (cmin, cmid, cmax):
-			rv = _nice_round(v)
-			if rv > 0 and rv not in seen:
-				seen.add(rv)
-				ref_values.append(rv)
-		ref_values.sort()
-	if not ref_values:
-		return
-	primary_legend = ax.get_legend()
-	handles = []
-	labels = []
-	for v in ref_values:
-		markersize = float(np.sqrt(_count_to_marker_size(v)))
-		handles.append(
-			Line2D(
-				[], [],
-				marker="o",
-				linestyle="",
-				color="#cccccc",
-				markeredgecolor="#444444",
-				markersize=markersize,
-			)
-		)
-		labels.append(f"n={v}")
-	ax.legend(
-		handles,
-		labels,
-		loc=loc,
-		title=title,
-		labelspacing=1.2,
-		borderpad=0.7,
-		handletextpad=1.0,
-		frameon=True,
-	)
-	if primary_legend is not None:
-		ax.add_artist(primary_legend)
-
-
-def _plot_violins_with_stats(ax, groups, y_label, x_label, *, color_map=None):
-	"""One violin per category (coloured by color_map, matching the summary
-	line plots), with a dark SD whisker and a white mean marker on top."""
-	labels = list(groups.keys())
-	data = [groups[label] for label in labels]
-	whisker_lw = 1.6
-	cap_half_width = 0.06
-	for i, values in enumerate(data, start=1):
-		if not values:
-			continue
-		label = labels[i - 1]
-		color = _resolve_color(label, color_map) if color_map is not None else "#4c72b0"
-		edge = _darken(color)
-		mean_val = float(np.mean(values))
-		if len(values) > 1:
-			parts = ax.violinplot(
-				[values], positions=[i], widths=0.8,
-				showextrema=False, showmeans=False, showmedians=False,
-			)
-			for body in parts["bodies"]:
-				body.set_facecolor(color)
-				body.set_edgecolor(edge)
-				body.set_alpha(0.8)
-				body.set_linewidth(1.2)
-			err_val = float(np.std(values, ddof=1))
-		else:
-			# Single sample cannot form a violin; mark the point.
-			ax.scatter([i], values, s=30, color=color, edgecolors=edge, linewidths=1.0, zorder=4)
-			err_val = 0.0
-		# SD whisker with small caps (dark neutral, reads on any fill colour).
-		if err_val > 0:
-			ax.vlines(i, mean_val - err_val, mean_val + err_val, colors="#2b2b2b", linewidth=whisker_lw, zorder=4)
-			ax.hlines([mean_val - err_val, mean_val + err_val], i - cap_half_width, i + cap_half_width, colors="#2b2b2b", linewidth=whisker_lw, zorder=4)
-		# Mean: white dot with a dark edge, clearly visible on any violin colour.
-		ax.scatter([i], [mean_val], s=44, facecolor="white", edgecolors="#2b2b2b", linewidths=1.5, zorder=5)
-	ax.set_xlim(0.5, len(labels) + 0.5)
-	ax.set_ylabel(y_label)
-	ax.set_xlabel(x_label)
-	ax.set_xticks(range(1, len(labels) + 1))
-	ax.set_xticklabels(labels, rotation=45, ha="right")
 
 def _order_sequence_labels(groups):
 	preferred = ["F-G-A", "E-D-A", "E-D-B", "C-G-B"]
@@ -346,15 +163,6 @@ SEQUENCE_ORDER = ["F-G-A", "E-D-A", "E-D-B", "C-G-B"]
 ODOR_ORDER = ["OdorA", "OdorB", "OdorC", "OdorD", "OdorE", "OdorF", "OdorG-F", "OdorG-C", "OdorG"]
 
 
-def _darken(color, factor=0.62):
-	"""Return a darker shade of a colour (for violin edges)."""
-	r, g, b = mcolors.to_rgb(color)
-	return (r * factor, g * factor, b * factor)
-
-
-def _resolve_color(label, color_map, default="#444444"):
-	return color_map.get(label, default)
-
 def _canonical_odor(value) -> str:
 	"""Bare upper-case odor letter: 'OdorC' / 'odor c' / 'C' -> 'C'."""
 	t = str(value).strip()
@@ -368,49 +176,6 @@ def _build_odor_filter(odor):
 		return None
 	items = [odor] if isinstance(odor, str) else list(odor)
 	return {_canonical_odor(o) for o in items}
-
-
-def _ordered_groups(group_keys, preferred):
-	"""Labels in `preferred`'s canonical order first, then every other label in
-	the order `group_keys` yields them.
-
-	**`group_keys` must be ordered.** Until restructure_2 Phase 5 the three
-	multi-session callers accumulated into a bare `set()`, so every label outside
-	`preferred` was drawn in string-hash order -- which varies between processes,
-	making those figures irreproducible run to run rather than merely oddly
-	ordered. It went unnoticed because `preferred` lists only the four 3-odor
-	sequences: on a 5-odor protocol *every* drawn series took the hash path.
-
-	An unordered input is sorted rather than iterated, since a set has no order
-	to preserve and sorting is the only deterministic thing left to do with one.
-	That is a guard against the defect returning, not the normal path.
-	"""
-	if isinstance(group_keys, (set, frozenset)):
-		group_keys = sorted(group_keys)
-	result = []
-	for name in preferred:
-		if name in group_keys:
-			result.append(name)
-	for name in group_keys:
-		if name not in result:
-			result.append(name)
-	return result
-
-
-def _load_sorted_session(results_dir):
-	df = _load_trial_data(results_dir)
-	if df.empty:
-		return df
-	df = df.copy()
-	if "sequence_start" in df.columns:
-		df["_order_key"] = pd.to_datetime(df["sequence_start"], errors="coerce")
-		df = df.sort_values("_order_key", na_position="last")
-	elif "timestamp" in df.columns:
-		df["_order_key"] = pd.to_datetime(df["timestamp"], errors="coerce")
-		df = df.sort_values("_order_key", na_position="last")
-	df = df.reset_index(drop=True)
-	df["_trial_idx"] = np.arange(1, len(df) + 1)
-	return df
 
 
 def _plot_summary_daily(session_data, *, color_map, group_order, ylabel, title, ylim_bottom=None):
@@ -471,105 +236,6 @@ def _plot_summary_daily(session_data, *, color_map, group_order, ylabel, title, 
 	return fig
 
 
-def _plot_summary_rolling(session_data, *, color_map, group_order, ylabel, title, window_size, step_size, ylim_bottom=None):
-	"""
-	Plot rolling mean within each session per group; X axis is continuous global trial id.
-	Lines do not bridge session boundaries (gaps at day lines).
-	"""
-	window_n = max(1, int(window_size))
-	step_n = max(1, int(step_size))
-
-	if not session_data:
-		return None
-
-	# First-seen order, not a `set` -- see `_ordered_groups`.
-	all_groups = {}
-	for s in session_data:
-		for group in s["groups"]:
-			all_groups.setdefault(group)
-	if not all_groups:
-		return None
-	groups = _ordered_groups(all_groups, group_order)
-
-	fig, ax = plt.subplots(figsize=(12, 6))
-
-	# Width reserved on the X axis for a session that has no plottable rolling-window
-	# points (e.g. fewer than window_size trials of any group). Keeps multi-day plots
-	# from different categories visually aligned in day count.
-	empty_session_span = 20
-
-	global_offset = 0
-	boundary_lines = []
-	legend_done = set()
-
-	for s in session_data:
-		# Compute rolling-window points and per-session local bounds in one pass.
-		session_points = {}
-		min_x = None
-		max_x = None
-		for group in groups:
-			entries = s["groups"].get(group, [])
-			if not entries:
-				continue
-			entries_sorted = sorted(entries, key=lambda x: x[0])
-			idxs = np.array([e[0] for e in entries_sorted])
-			vals = np.array([e[1] for e in entries_sorted], dtype=float)
-			pts = []
-			# `partial=False`: a session shorter than one window plots nothing.
-			for start, end in rolling_windows(len(vals), window_n, step=step_n):
-				rate = float(np.nanmean(vals[start:end]))
-				local_x = int(idxs[end - 1])
-				pts.append((local_x, rate))
-				min_x = local_x if min_x is None else min(min_x, local_x)
-				max_x = local_x if max_x is None else max(max_x, local_x)
-			if pts:
-				session_points[group] = pts
-
-		if global_offset > 0:
-			boundary_lines.append(global_offset - 0.5)
-
-		if min_x is None:
-			global_offset += empty_session_span
-			continue
-
-		shift = global_offset - min_x
-		for group, pts in session_points.items():
-			xs = [lx + shift for lx, _ in pts]
-			ys = [y for _, y in pts]
-			color = _resolve_color(group, color_map)
-			label = group if group not in legend_done else None
-			legend_done.add(group)
-			ax.plot(xs, ys, color=color, linewidth=2, alpha=0.9, label=label)
-
-		global_offset += max_x - min_x + 1
-
-	for x in boundary_lines:
-		ax.axvline(
-			x=x,
-			color="#1f77b4",
-			linestyle=":",
-			linewidth=1.2,
-			alpha=0.7,
-			zorder=1,
-		)
-
-	ax.set_xlabel("Trials (adjusted)")
-	ax.set_ylabel(ylabel)
-	ax.set_title(title)
-	if global_offset > 0:
-		ax.set_xlim(left=0, right=global_offset - 1)
-	else:
-		ax.set_xlim(left=0)
-	ax.spines["top"].set_visible(False)
-	ax.spines["right"].set_visible(False)
-	if ylim_bottom is not None:
-		ax.set_ylim(bottom=ylim_bottom)
-	if legend_done:
-		ax.legend(loc="best")
-	fig.tight_layout()
-	return fig
-
-
 def _plot_summary(
 	session_data,
 	*,
@@ -626,12 +292,6 @@ def _apply_shared_ylim(figs_to_share, *, bottom_zero=False):
 	common_top = max(tops)
 	for a in axes:
 		a.set_ylim(common_bottom, common_top)
-
-
-def _summary_save_suffix(moving_avg, window_size, step_size):
-	if moving_avg:
-		return f"rolling_w{int(window_size)}_s{int(step_size)}"
-	return "daily"
 
 
 def last_odor_poke_time(

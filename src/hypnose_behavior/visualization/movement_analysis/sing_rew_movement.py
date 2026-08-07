@@ -17,7 +17,8 @@ thick mean trace per group (one for A, one for B) across all overlaid sessions.
 Intended to be called with a single subject.
 
 Reuses ``_load_tracking_and_behavior`` (tracking + behavior loader) and
-``_classify_trial`` (categorisation); the small trace helpers are local.
+``_classify_trial`` (categorisation); the shared trace helpers live in
+``visualization.prep``.
 """
 
 from __future__ import annotations
@@ -34,8 +35,8 @@ from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.metric_analysis.sing_rew_metrics import _classify_trial
 from hypnose_behavior.utils.helpers import session_selectors
 from hypnose_behavior.visualization.prep import resample_trace, smooth_xy
-from hypnose_behavior.visualization.movement_analysis_utils import _load_tracking_and_behavior
-from hypnose_behavior.visualization.pred_seq_utils import _collect_sessions
+from hypnose_behavior.io.tracking import _load_tracking_and_behavior
+from hypnose_behavior.visualization.prep import _collect_sessions
 
 
 CATEGORY_ORDER = ["hit", "miss", "false_alarm", "correct_rejection"]
