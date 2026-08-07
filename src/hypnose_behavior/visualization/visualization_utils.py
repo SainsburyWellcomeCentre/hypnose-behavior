@@ -14,7 +14,7 @@ from matplotlib.colors import Normalize
 from matplotlib.ticker import MaxNLocator
 from collections import defaultdict
 from typing import Iterable, Optional, Union, Tuple
-from hypnose_behavior.io.load_results import load_session_results
+from hypnose_behavior.io.load_results import SessionResults, load_session_results
 from hypnose_behavior.metric_analysis.frames import (
     build_position_data,
     odor_letter,
@@ -22,6 +22,7 @@ from hypnose_behavior.metric_analysis.frames import (
 )
 from hypnose_behavior.metric_analysis.metrics.accuracy import (
     decision_accuracy,
+    global_choice_accuracy,
     rolling_reward_fraction,
 )
 from hypnose_behavior.metric_analysis.metrics.false_alarm import (
@@ -49,7 +50,7 @@ from hypnose_behavior.metric_analysis.metrics.timing import (
     inter_trial_interval,
 )
 from hypnose_behavior.metric_analysis.resolvers import by_group
-from hypnose_behavior.metric_analysis.run import run_all_metrics
+from hypnose_behavior.metric_analysis.run import REGISTRY, run_all_metrics
 from datetime import timedelta, datetime
 from hypnose_behavior.trial_classification.classification_utils import load_all_streams, load_experiment
 from hypnose_behavior.utils.helpers import (
@@ -237,6 +238,34 @@ def _load_protocol_from_summary(results_dir: Path) -> str:
     except Exception:
         pass
     return "Unknown"
+
+def _session_frames(results_dir: Path):
+    """A `results` mapping for a saved session directory, so registry specs resolve.
+
+    The compute-side counterpart to `_ensure_metrics_json`: plotters compute
+    through the registry rather than reading `metrics_*.json`, which is an export
+    and a record of an analysis run, not a plotting input (`docs/DECISIONS.md`
+    section 5). That deletes the staleness problem instead of managing it -- a
+    saved file predates every metric change made since it was written, and the
+    three quantities obtained *both* ways could make two figures disagree.
+
+    `position_data` stays unbuilt unless a metric's declared frame needs it.
+    """
+    return SessionResults.from_trials(
+        _load_trial_views(results_dir).get("trial_data", pd.DataFrame()))
+
+
+def _computed_metric(results_dir: Path, name: str):
+    """One registered metric, computed for a session, in its saved-JSON shape.
+
+    Applies the spec's `adapter` so the value matches what the corresponding key
+    in `metrics_*.json` has always held -- callers that used to parse that file
+    keep working on the returned object unchanged.
+    """
+    spec = REGISTRY[name]
+    value = spec.call(_session_frames(results_dir))
+    return spec.adapter(value) if spec.adapter else value
+
 
 def _ensure_metrics_json(subjid: int, date: Union[int, str], results_dir: Path, compute_if_missing: bool) -> Optional[dict]:
     """
@@ -1212,36 +1241,37 @@ def plot_decision_accuracy_by_odor(
             if not results_dir.exists():
                 continue
             
-            metrics = _ensure_metrics_json(sid, date_str, results_dir, compute_if_missing=False)
-            if metrics is None:
+            # Computed through the registry, not read from metrics_*.json --
+            # `decision_accuracy` was one of the three quantities this repo
+            # obtained both ways (`docs/DECISIONS.md` section 5). `_computed_metric`
+            # returns the saved key's exact shape, so `_collect_odor_acc_rows`
+            # below is unchanged.
+            td = _load_trial_views(results_dir).get("trial_data", pd.DataFrame())
+            if td.empty:
                 continue
-            
-            # Extract DA by odor using the helper function
-            acc_by_odor = metrics.get('decision_accuracy_by_odor', {})
-            acc_total = _extract_metric_value(metrics, 'decision_accuracy')
-            
+
             # Add odor-specific accuracies (supports legacy flat dict and new nested schema)
-            rows.extend(_collect_odor_acc_rows(acc_by_odor, int(date_str)))
-            
+            rows.extend(_collect_odor_acc_rows(
+                _computed_metric(results_dir, "decision_accuracy_by_odor"), int(date_str)))
+
             # Add total accuracy
+            acc_total = decision_accuracy(td)[2]
             if isinstance(acc_total, (int, float)) and not np.isnan(acc_total):
                 rows.append({
                     "date": int(date_str),
                     "odor": "Total",
                     "accuracy": float(acc_total)
                 })
-            
+
             # Add global choice accuracy if requested
             if plot_choice_acc:
-                gca = metrics.get('global_choice_accuracy', None)
-                if isinstance(gca, (tuple, list)) and len(gca) >= 3:
-                    gca_value = gca[2]
-                    if isinstance(gca_value, (int, float)) and not np.isnan(gca_value):
-                        rows.append({
-                            "date": int(date_str),
-                            "odor": "Global Choice Accuracy",
-                            "accuracy": float(gca_value)
-                        })
+                gca_value = global_choice_accuracy(td)[2]
+                if isinstance(gca_value, (int, float)) and not np.isnan(gca_value):
+                    rows.append({
+                        "date": int(date_str),
+                        "odor": "Global Choice Accuracy",
+                        "accuracy": float(gca_value)
+                    })
     
     if not rows:
         print("No data found")
@@ -2432,20 +2462,17 @@ def plot_response_times_completed_vs_fa(
             if not results_dir.exists():
                 continue
 
-            # Prefer trial_data-derived means; fall back to metrics JSON if missing
-            views = _load_trial_views(results_dir)
+            # Both means come from the canonical metrics over trial_data. There
+            # used to be a fall-back to metrics_*.json here, which made this one
+            # of the three quantities obtainable two ways -- so two figures could
+            # show it and disagree, since a saved JSON predates any later metric
+            # change. `docs/DECISIONS.md` section 5 settles that on compute.
+            # (The two paths did not even agree on the key: the JSON branch read
+            # "Aborted FA Time In" where the metric returns "FA Time In".)
+            td = _load_trial_views(results_dir).get("trial_data", pd.DataFrame())
 
-            # Completed mean response time -- the canonical metric, not a
-            # recompute; its "Rewarded + Unrewarded" entry is this exact mean.
-            completed_rt = avg_response_time(views.get("trial_data", pd.DataFrame())).get(
+            completed_rt = avg_response_time(td).get(
                 "Average Response Time (Rewarded + Unrewarded)")
-            if completed_rt is not None and np.isnan(completed_rt):
-                completed_rt = None
-            if completed_rt is None:
-                metrics = _ensure_metrics_json(sid, date_str, results_dir, compute_if_missing=False)
-                if metrics:
-                    avg_resp_times = metrics.get("avg_response_time", {})
-                    completed_rt = avg_resp_times.get("Average Response Time (Rewarded + Unrewarded)")
             if completed_rt is not None and not np.isnan(completed_rt):
                 rows.append({
                     "date": int(date_str),
@@ -2453,15 +2480,7 @@ def plot_response_times_completed_vs_fa(
                     "response_time_ms": float(completed_rt)
                 })
 
-            # FA Time In mean latency -- canonical `FA_avg_response_times`.
-            fa_rt = FA_avg_response_times(views.get("trial_data", pd.DataFrame())).get("FA Time In")
-            if fa_rt is not None and np.isnan(fa_rt):
-                fa_rt = None
-            if fa_rt is None:
-                metrics = locals().get("metrics") if "metrics" in locals() else _ensure_metrics_json(sid, date_str, results_dir, compute_if_missing=False)
-                if metrics:
-                    fa_resp_times = metrics.get("FA_avg_response_times", {})
-                    fa_rt = fa_resp_times.get("Aborted FA Time In")
+            fa_rt = FA_avg_response_times(td).get("FA Time In")
             if fa_rt is not None and not np.isnan(fa_rt):
                 rows.append({
                     "date": int(date_str),

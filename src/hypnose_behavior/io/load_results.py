@@ -59,6 +59,20 @@ class SessionResults(dict):
     from ever escaping as a value.
     """
 
+    @classmethod
+    def from_trials(cls, trial_data):
+        """A results mapping over an already-loaded trial table.
+
+        For callers that hold `trial_data` and want to evaluate registered
+        metrics against it -- `visualization/` reads a session directory through
+        `_load_trial_views`, not `load_session_results`, but still wants
+        `MetricSpec.call`. `position_data` stays lazy, so a `frame="trials"`
+        metric never derives one.
+        """
+        obj = cls(trial_data=trial_data)
+        dict.__setitem__(obj, "position_data", _UNBUILT)
+        return obj
+
     def __getitem__(self, key):
         value = dict.__getitem__(self, key)
         if value is _UNBUILT:
