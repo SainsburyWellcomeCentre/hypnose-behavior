@@ -1021,9 +1021,9 @@ def plot_trial_traces_by_mode(
                 color_map[(p, tid)] = trial_cmap(frac)
         return color_map
 
-    for ses in ses_dirs:
-        date_str = ses.name.split("_date-")[-1]
-        results_dir = ses / "saved_analysis_results"
+    for ses_dir in ses_dirs:
+        date_str = ses_dir.name.split("_date-")[-1]
+        results_dir = ses_dir / "saved_analysis_results"
         if not results_dir.exists():
             continue
 
@@ -1736,9 +1736,9 @@ def plot_epoch_speeds_by_condition(
     per_session = []
     combined_data = {"rewarded": [], "unrewarded": [], "fa": []}
 
-    for ses in ses_dirs:
-        date_str = ses.name.split("_date-")[-1]
-        results_dir = ses / "saved_analysis_results"
+    for ses_dir in ses_dirs:
+        date_str = ses_dir.name.split("_date-")[-1]
+        results_dir = ses_dir / "saved_analysis_results"
         if not results_dir.exists():
             continue
 
@@ -2133,9 +2133,9 @@ def plot_traces_with_speed_threshold(
 
     traces = {"rewarded": [], "unrewarded": [], "fa": []}
     markers = {"rewarded": [], "unrewarded": [], "fa": []}
-    for ses in ses_dirs:
-        date_str = ses.name.split("_date-")[-1]
-        results_dir = ses / "saved_analysis_results"
+    for ses_dir in ses_dirs:
+        date_str = ses_dir.name.split("_date-")[-1]
+        results_dir = ses_dir / "saved_analysis_results"
         if not results_dir.exists():
             continue
         skipped_no_poke_end = []
@@ -2620,9 +2620,9 @@ def plot_tortuosity_lines_overlay(
 
     figs = {}
 
-    for ses in ses_dirs:
-        date_str = ses.name.split("_date-")[-1]
-        results_dir = ses / "saved_analysis_results"
+    for ses_dir in ses_dirs:
+        date_str = ses_dir.name.split("_date-")[-1]
+        results_dir = ses_dir / "saved_analysis_results"
         if not results_dir.exists():
             continue
 
@@ -2995,11 +2995,11 @@ def plot_movement_analysis_statistics(
         fig_seq.tight_layout()
         return fig_seq
 
-    for ses in ses_dirs:
-        date_str = ses.name.split("_date-")[-1]
+    for ses_dir in ses_dirs:
+        date_str = ses_dir.name.split("_date-")[-1]
         date_scope = [int(date_str)] if str(date_str).isdigit() else [date_str]
         date_slug = _slugify(date_str)
-        results_dir = ses / "saved_analysis_results"
+        results_dir = ses_dir / "saved_analysis_results"
         if not results_dir.exists():
             continue
 
@@ -3293,7 +3293,7 @@ def plot_movement_analysis_statistics(
             per_session.append(entry)
 
     # Build chronological session order for combined plots (index = 0..N-1)
-    raw_dates = [ses.name.split("_date-")[-1] for ses in ses_dirs]
+    raw_dates = [ses_dir.name.split("_date-")[-1] for ses_dir in ses_dirs]
     try:
         session_dates_order = sorted(set(raw_dates), key=int)
     except Exception:

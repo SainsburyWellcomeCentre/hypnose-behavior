@@ -437,9 +437,9 @@ def plot_behavior_metrics(
     # Gather sessions
     for sid, subj_dir, subj_dates in subject_iter:
         ses_dirs = _filter_session_dirs(subj_dir, subj_dates)
-        for session_num, ses in enumerate(ses_dirs, start=1):
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = ses / "saved_analysis_results"
+        for session_num, ses_dir in enumerate(ses_dirs, start=1):
+            date_str = ses_dir.name.split("_date-")[-1]
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
             # Protocol (for coloring)
@@ -918,9 +918,9 @@ def hidden_rule_and_false_alarm(
     observed_hr_letters = set()
     for sid, subj_dir, subj_dates in subject_iter:
         ses_dirs = _filter_session_dirs(subj_dir, subj_dates)
-        for session_num, ses in enumerate(ses_dirs, start=1):
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = ses / "saved_analysis_results"
+        for session_num, ses_dir in enumerate(ses_dirs, start=1):
+            date_str = ses_dir.name.split("_date-")[-1]
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
 
@@ -1259,9 +1259,9 @@ def plot_decision_accuracy_by_odor(
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_dirs = _filter_session_dirs(subj_dir, dates)
-        for ses in ses_dirs:
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = ses / "saved_analysis_results"
+        for ses_dir in ses_dirs:
+            date_str = ses_dir.name.split("_date-")[-1]
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
             
@@ -1455,9 +1455,9 @@ def plot_decision_accuracy_rolling_average(
     session_rows = []
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_dirs = _filter_session_dirs(subj_dir, dates)
-        for ses in ses_dirs:
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = ses / "saved_analysis_results"
+        for ses_dir in ses_dirs:
+            date_str = ses_dir.name.split("_date-")[-1]
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
             td = _load_table_with_trial_data(results_dir, "trial_data")
@@ -1478,7 +1478,7 @@ def plot_decision_accuracy_rolling_average(
 
             td = td.reset_index(drop=True)
             td["date"] = int(date_str) if str(date_str).isdigit() else date_str
-            td["_session_uid"] = str(ses.name)
+            td["_session_uid"] = str(ses_dir.name)
             session_rows.append(td)
 
     if not session_rows:
@@ -1685,9 +1685,9 @@ def plot_sampling_times_analysis(
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_dirs = _filter_session_dirs(subj_dir, dates)
-        for session_num, ses in enumerate(ses_dirs, start=1):
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = ses / "saved_analysis_results"
+        for session_num, ses_dir in enumerate(ses_dirs, start=1):
+            date_str = ses_dir.name.split("_date-")[-1]
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
 
@@ -2079,9 +2079,9 @@ def plot_abortion_and_fa_rates(
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_dirs = _filter_session_dirs(subj_dir, dates)
-        for ses in ses_dirs:
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = ses / "saved_analysis_results"
+        for ses_dir in ses_dirs:
+            date_str = ses_dir.name.split("_date-")[-1]
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
             
@@ -2498,9 +2498,9 @@ def plot_response_times_completed_vs_fa(
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_dirs = _filter_session_dirs(subj_dir, dates)
-        for ses in ses_dirs:
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = ses / "saved_analysis_results"
+        for ses_dir in ses_dirs:
+            date_str = ses_dir.name.split("_date-")[-1]
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
 
@@ -2616,9 +2616,9 @@ def plot_fa_ratio_a_over_sessions(
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_dirs = _filter_session_dirs(subj_dir, dates)
         
-        for session_num, ses in enumerate(ses_dirs, start=1):
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = ses / "saved_analysis_results"
+        for session_num, ses_dir in enumerate(ses_dirs, start=1):
+            date_str = ses_dir.name.split("_date-")[-1]
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
             
@@ -2832,9 +2832,9 @@ def plot_cumulative_rewards(
 
         # Use _filter_session_dirs to get session directories
         ses_dirs = _filter_session_dirs(subj_dir, subj_dates)
-        for ses in ses_dirs:
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = ses / "saved_analysis_results"
+        for ses_dir in ses_dirs:
+            date_str = ses_dir.name.split("_date-")[-1]
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
             
@@ -3128,9 +3128,9 @@ def plot_cumulative_rewards_by_trial(
 
         # Sessions in chronological (date) order.
         sessions = []
-        for ses in _filter_session_dirs(subj_dir, subj_dates):
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = ses / "saved_analysis_results"
+        for ses_dir in _filter_session_dirs(subj_dir, subj_dates):
+            date_str = ses_dir.name.split("_date-")[-1]
+            results_dir = ses_dir / "saved_analysis_results"
             if results_dir.exists():
                 sessions.append((date_str, results_dir))
         sessions.sort(key=lambda t: t[0])
@@ -3254,9 +3254,9 @@ def _load_subject_trial_timeline(subjid, subj_dates):
         return None
 
     sessions = []
-    for ses in _filter_session_dirs(subj_dir, subj_dates):
-        date_str = ses.name.split("_date-")[-1]
-        results_dir = ses / "saved_analysis_results"
+    for ses_dir in _filter_session_dirs(subj_dir, subj_dates):
+        date_str = ses_dir.name.split("_date-")[-1]
+        results_dir = ses_dir / "saved_analysis_results"
         if results_dir.exists():
             sessions.append((date_str, results_dir))
     sessions.sort(key=lambda t: t[0])
@@ -4951,8 +4951,8 @@ def plot_decision_accuracy(
             continue
 
         main_vals, hr_vals = [], []
-        for ses in _filter_session_dirs(subj_dir, subj_dates):
-            results_dir = ses / "saved_analysis_results"
+        for ses_dir in _filter_session_dirs(subj_dir, subj_dates):
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
             td = _load_trial_views(results_dir)["trial_data"]
@@ -5293,11 +5293,11 @@ def plot_poke_duration_by_odor(
         session_series = []  # per session-day: {series_key: [poke_ms, ...]}
         session_ind = []     # per session-day: {odor_letter: [poke_ms, ...]} (for show_lines)
         started = False
-        for ses in _filter_session_dirs(subj_dir, subj_date):
-            date_str = ses.name.split("_date-")[-1]
+        for ses_dir in _filter_session_dirs(subj_dir, subj_date):
+            date_str = ses_dir.name.split("_date-")[-1]
             if not (str(date_str).isdigit() and len(str(date_str)) == 8):
                 continue
-            results_dir = ses / "saved_analysis_results"
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
             td = _load_trial_views(results_dir)["trial_data"]
@@ -5625,9 +5625,9 @@ def plot_fa_ratio_by_hr_position(
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_dirs = _filter_session_dirs(subj_dir, dates)
         
-        for session_num, ses in enumerate(ses_dirs, 1):
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = ses / "saved_analysis_results"
+        for session_num, ses_dir in enumerate(ses_dirs, 1):
+            date_str = ses_dir.name.split("_date-")[-1]
+            results_dir = ses_dir / "saved_analysis_results"
             
             if not results_dir.exists():
                 continue
@@ -6049,9 +6049,9 @@ def plot_fa_ratio_by_abort_odor(
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_dirs = _filter_session_dirs(subj_dir, dates)
         
-        for session_num, ses in enumerate(ses_dirs, 1):
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = ses / "saved_analysis_results"
+        for session_num, ses_dir in enumerate(ses_dirs, 1):
+            date_str = ses_dir.name.split("_date-")[-1]
+            results_dir = ses_dir / "saved_analysis_results"
             
             if not results_dir.exists():
                 continue
@@ -6496,14 +6496,14 @@ def plot_hidden_rule_abort_poke_gap(
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_dirs = _filter_session_dirs(subj_dir, dates)
 
-        for ses in ses_dirs:
-            date_str = ses.name.split("_date-")[-1]
+        for ses_dir in ses_dirs:
+            date_str = ses_dir.name.split("_date-")[-1]
             try:
                 date_val = int(date_str)
             except Exception:
                 date_val = date_str
 
-            results_dir = ses / "saved_analysis_results"
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
 
@@ -6685,14 +6685,14 @@ def plot_hr_reward_fraction_over_trials(
     frames = []
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_dirs = _filter_session_dirs(subj_dir, dates)
-        for ses in ses_dirs:
-            date_str = ses.name.split("_date-")[-1]
+        for ses_dir in ses_dirs:
+            date_str = ses_dir.name.split("_date-")[-1]
             try:
                 date_val = int(date_str)
             except Exception:
                 date_val = date_str
 
-            results_dir = ses / "saved_analysis_results"
+            results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
 
