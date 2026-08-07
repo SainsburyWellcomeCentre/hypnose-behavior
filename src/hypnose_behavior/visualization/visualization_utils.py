@@ -68,6 +68,7 @@ from hypnose_behavior.utils.helpers import (
     _update_cache,
     find_tracking_file,
     read_tracking_table,
+    session_selectors,
 )
 from hypnose_behavior.io.layout import derivatives, list_sessions, normalize_subjid
 from hypnose_behavior.io.paths import (
@@ -328,6 +329,11 @@ def plot_behavior_metrics(
     dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
     variables: Optional[Iterable[str]] = None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     protocol_filter: Optional[str] = None,
     verbose: bool = True,
     black_white: bool = False,
@@ -379,7 +385,15 @@ def plot_behavior_metrics(
 
     Returns:
     - List of matplotlib Figure objects, or (figs, paths) if return_paths is True.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     if not variables:
         raise ValueError("Please provide `variables` (list of metric names or dot-paths).")
 
@@ -436,7 +450,7 @@ def plot_behavior_metrics(
 
     # Gather sessions
     for sid, subj_dir, subj_dates in subject_iter:
-        ses_dirs = _filter_session_dirs(subj_dir, subj_dates)
+        ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
         for session_num, ses_dir in enumerate(ses_dirs, start=1):
             date_str = ses_dir.name.split("_date-")[-1]
             results_dir = ses_dir / "saved_analysis_results"
@@ -812,6 +826,11 @@ def hidden_rule_and_false_alarm(
     figsize=(12, 9),
     title=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save: bool = False,
     verbose: bool = True,
     show_title: bool = True,
@@ -863,7 +882,15 @@ def hidden_rule_and_false_alarm(
     Returns
     -------
     fig, ax
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     # Subject/date resolution (same pattern as plot_behavior_metrics / plot_cumulative_rewards)
     if isinstance(subjids, dict):
         dates = subjids if not isinstance(dates, dict) or dates is None else dates
@@ -917,7 +944,7 @@ def hidden_rule_and_false_alarm(
     rows = []
     observed_hr_letters = set()
     for sid, subj_dir, subj_dates in subject_iter:
-        ses_dirs = _filter_session_dirs(subj_dir, subj_dates)
+        ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
         for session_num, ses_dir in enumerate(ses_dirs, start=1):
             date_str = ses_dir.name.split("_date-")[-1]
             results_dir = ses_dir / "saved_analysis_results"
@@ -1180,6 +1207,11 @@ def plot_decision_accuracy_by_odor(
     plot_AB=True,
     clean_graph=False,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
 ):
@@ -1206,7 +1238,15 @@ def plot_decision_accuracy_by_odor(
     Returns:
     --------
     fig, ax : matplotlib figure and axes
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     rows = []
     base_path = get_rawdata_root()
     server_root = get_server_root()
@@ -1258,7 +1298,7 @@ def plot_decision_accuracy_by_odor(
         return collected
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         for ses_dir in ses_dirs:
             date_str = ses_dir.name.split("_date-")[-1]
             results_dir = ses_dir / "saved_analysis_results"
@@ -1402,6 +1442,12 @@ def plot_decision_accuracy_rolling_average(
     step_size=1.0,
     include_avg=False,
     hr_only=False,
+    *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
 ):
     """
     Plot rolling decision accuracy for one subject across one or more sessions.
@@ -1446,7 +1492,15 @@ def plot_decision_accuracy_rolling_average(
     -------
     (fig_completed, ax_completed, fig_all, ax_all)
         Matplotlib figures and axes for completed-only and all-trials views.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     derivatives_dir = get_derivatives_root()
     window_n = max(1, int(window_size))
     step_n = max(1, int(step_size))
@@ -1454,7 +1508,7 @@ def plot_decision_accuracy_rolling_average(
     # Collect per-session trial tables in chronological order.
     session_rows = []
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         for ses_dir in ses_dirs:
             date_str = ses_dir.name.split("_date-")[-1]
             results_dir = ses_dir / "saved_analysis_results"
@@ -1663,6 +1717,11 @@ def plot_sampling_times_analysis(
     dates=None,
     figsize=(16, 18),
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
 ):
@@ -1673,7 +1732,15 @@ def plot_sampling_times_analysis(
     scattered raw values, `poke_duration_by_{position,odor}` for the mean ± SD
     markers and for the per-session series in the bottom row. The two blob
     extractors this used to carry were finding 5 of the metric audit.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     base_path = get_rawdata_root()
     server_root = get_server_root()
     derivatives_dir = get_derivatives_root()
@@ -1684,7 +1751,7 @@ def plot_sampling_times_analysis(
     session_by_odor = []
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         for session_num, ses_dir in enumerate(ses_dirs, start=1):
             date_str = ses_dir.name.split("_date-")[-1]
             results_dir = ses_dir / "saved_analysis_results"
@@ -2032,6 +2099,11 @@ def plot_abortion_and_fa_rates(
     figsize=(18, 14),
     fa_types='FA_time_in',
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
 ):
@@ -2056,7 +2128,15 @@ def plot_abortion_and_fa_rates(
         If True, save each subplot as an individual PDF (default: False).
     verbose : bool, optional
         If True, print save status messages (default: True).
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     base_path = get_rawdata_root()
     server_root = get_server_root()
     derivatives_dir = get_derivatives_root()
@@ -2078,7 +2158,7 @@ def plot_abortion_and_fa_rates(
     fa_port_rows = []
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         for ses_dir in ses_dirs:
             date_str = ses_dir.name.split("_date-")[-1]
             results_dir = ses_dir / "saved_analysis_results"
@@ -2464,6 +2544,11 @@ def plot_response_times_completed_vs_fa(
     figsize=(12, 8),
     y_limit=20000,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
 ):
@@ -2489,7 +2574,15 @@ def plot_response_times_completed_vs_fa(
     Returns:
     --------
     fig, ax : matplotlib figure and axes
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     base_path = get_rawdata_root()
     server_root = get_server_root()
     derivatives_dir = get_derivatives_root()
@@ -2497,7 +2590,7 @@ def plot_response_times_completed_vs_fa(
     rows = []
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         for ses_dir in ses_dirs:
             date_str = ses_dir.name.split("_date-")[-1]
             results_dir = ses_dir / "saved_analysis_results"
@@ -2601,12 +2694,26 @@ def plot_fa_ratio_a_over_sessions(
     subjid,
     dates=None,
     figsize=(14, 10),
+    *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
 ):
     """
     Plot FA Ratio A/(A+B) over sessions for each odor (OPTIMIZED).
     
     Parameters similar to original, but now loads only necessary data.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     base_path = get_rawdata_root()
     server_root = get_server_root()
     derivatives_dir = get_derivatives_root()
@@ -2614,7 +2721,7 @@ def plot_fa_ratio_a_over_sessions(
     fa_data = {}  # {odor: [(session_num, ratio, n_a, n_b, n_total), ...]}
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         
         for session_num, ses_dir in enumerate(ses_dirs, start=1):
             date_str = ses_dir.name.split("_date-")[-1]
@@ -2723,6 +2830,11 @@ def plot_cumulative_rewards(
     figsize=(12, 6.5),
     title=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
     show_gap_shading=True,
@@ -2778,7 +2890,15 @@ def plot_cumulative_rewards(
     Returns:
     --------
     fig, ax : matplotlib figure and axes
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     # Ensure subjids is a list
     if isinstance(subjids, dict):
         # Convenience: allow passing one dict for both ({subjid: date_range}).
@@ -2831,7 +2951,7 @@ def plot_cumulative_rewards(
             continue
 
         # Use _filter_session_dirs to get session directories
-        ses_dirs = _filter_session_dirs(subj_dir, subj_dates)
+        ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
         for ses_dir in ses_dirs:
             date_str = ses_dir.name.split("_date-")[-1]
             results_dir = ses_dir / "saved_analysis_results"
@@ -3057,6 +3177,11 @@ def plot_cumulative_rewards_by_trial(
     dates=None,
     figsize=(12, 6.5),
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
     show_gap_shading=True,
@@ -3081,7 +3206,15 @@ def plot_cumulative_rewards_by_trial(
     Returns
     -------
     fig, ax : matplotlib figure and axes
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     if isinstance(subjids, dict):
         dates = subjids if (dates is None or not isinstance(dates, dict)) else dates
         subjids = list(subjids.keys())
@@ -3128,7 +3261,7 @@ def plot_cumulative_rewards_by_trial(
 
         # Sessions in chronological (date) order.
         sessions = []
-        for ses_dir in _filter_session_dirs(subj_dir, subj_dates):
+        for ses_dir in _filter_session_dirs(subj_dir, subj_dates, **select):
             date_str = ses_dir.name.split("_date-")[-1]
             results_dir = ses_dir / "saved_analysis_results"
             if results_dir.exists():
@@ -3236,7 +3369,8 @@ def _coerce_tz_naive(series):
     return s
 
 
-def _load_subject_trial_timeline(subjid, subj_dates):
+def _load_subject_trial_timeline(subjid, subj_dates, *, ses=None, index=None,
+                                 date_range=None, ses_range=None, index_range=None):
     """Build a per-trial timeline for one subject across sessions.
 
     Returns a dict with the concatenated all-trial DataFrame (chronological,
@@ -3245,7 +3379,15 @@ def _load_subject_trial_timeline(subjid, subj_dates):
     ``plot_cumulative_rewards_by_trial``), plus ``iti_seconds`` (within-session
     inter-trial interval) and ``is_rewarded``. Also returns the time- and
     trial-axis gap spans and session boundaries. ``None`` if no data.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     derivatives_dir = get_derivatives_root()
     subj_str = normalize_subjid(subjid)
     subj_dir = derivatives.subject_dir(subjid, missing_ok=True)
@@ -3254,7 +3396,7 @@ def _load_subject_trial_timeline(subjid, subj_dates):
         return None
 
     sessions = []
-    for ses_dir in _filter_session_dirs(subj_dir, subj_dates):
+    for ses_dir in _filter_session_dirs(subj_dir, subj_dates, **select):
         date_str = ses_dir.name.split("_date-")[-1]
         results_dir = ses_dir / "saved_analysis_results"
         if results_dir.exists():
@@ -3424,6 +3566,11 @@ def _plot_metric_over_sessions(
     subjids,
     dates,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     value_col,
     metric_name,
     unit,
@@ -3440,6 +3587,10 @@ def _plot_metric_over_sessions(
 ):
     """Core for latency/ITI plots: a time-axis rolling median+IQR figure and a
     trial-axis cumulative figure. See the public wrappers for the contract."""
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     if isinstance(subjids, dict):
         dates = subjids if (dates is None or not isinstance(dates, dict)) else dates
         subjids = list(subjids.keys())
@@ -3473,7 +3624,7 @@ def _plot_metric_over_sessions(
         if isinstance(dates, dict) and subj_dates is None:
             print(f"Warning: No date range provided in dict for subject {subjid}, skipping")
             continue
-        timeline = _load_subject_trial_timeline(subjid, subj_dates)
+        timeline = _load_subject_trial_timeline(subjid, subj_dates, **select)
         if timeline is None:
             print(f"Warning: No trials found for subject {subjid}")
             continue
@@ -3582,6 +3733,11 @@ def plot_latency_over_time(
     subjids,
     dates=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     rewarded_only=False,
     window_size=20,
     step_size=5,
@@ -3608,13 +3764,22 @@ def plot_latency_over_time(
     dict (pass with ``dates=None``).
 
     Returns ``(fig_time, ax_time, fig_trial, ax_trial)``.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     return _plot_metric_over_sessions(
         subjids, dates, value_col="response_time_ms", metric_name="Response Time",
         unit="ms", rewarded_only=rewarded_only, window_size=window_size, step_size=step_size,
         save=save, save_key="latency_over_time", verbose=verbose,
         show_gap_shading=show_gap_shading, show_session_boundaries=show_session_boundaries,
         figsize=figsize, show_iqr=show_iqr,
+        **select,
     )
 
 
@@ -3622,6 +3787,11 @@ def plot_iti_over_time(
     subjids,
     dates=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     window_size=20,
     step_size=5,
     show_iqr=False,
@@ -3640,13 +3810,22 @@ def plot_iti_over_time(
     band), and trial axis with cumulative ITI. No ``rewarded_only`` toggle.
 
     Returns ``(fig_time, ax_time, fig_trial, ax_trial)``.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     return _plot_metric_over_sessions(
         subjids, dates, value_col="iti_seconds", metric_name="ITI", unit="s",
         rewarded_only=False, window_size=window_size, step_size=step_size,
         save=save, save_key="iti_over_time", verbose=verbose,
         show_gap_shading=show_gap_shading, show_session_boundaries=show_session_boundaries,
-        figsize=figsize, show_iqr=show_iqr
+        figsize=figsize, show_iqr=show_iqr,
+        **select,
     )
 
 
@@ -3658,6 +3837,11 @@ def plot_choice_history(
     xlim=None,
     fa_types=("FA_time_in", "FA_time_out"),
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
     show_legend=True,
@@ -3702,7 +3886,15 @@ def plot_choice_history(
     Returns:
     --------
     fig, ax : matplotlib figure and axis objects
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     base_path = get_rawdata_root()
     server_root = get_server_root()
     derivatives_dir = get_derivatives_root()
@@ -3716,7 +3908,7 @@ def plot_choice_history(
     subject_dir = derivatives.subject_dir(subjid)
     
     # Get session directories
-    ses_dirs = _filter_session_dirs(subject_dir, dates)
+    ses_dirs = _filter_session_dirs(subject_dir, dates, **select)
     if not ses_dirs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
     
@@ -4054,6 +4246,11 @@ def plot_position_completion_rate(
     figsize=(8, 6.8),
     title=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
     show_title=True,
@@ -4111,7 +4308,15 @@ def plot_position_completion_rate(
     Returns
     -------
     fig, ax
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     # Mirror plot_cumulative_rewards's input flexibility.
     if isinstance(subjids, dict):
         dates = subjids if not isinstance(dates, dict) or dates is None else dates
@@ -4155,7 +4360,7 @@ def plot_position_completion_rate(
                 print(f"Warning: No subject directory found for {subj_str}")
             continue
 
-        ses_dirs = _filter_session_dirs(subj_dir, subj_dates)
+        ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
         for ses_dir in ses_dirs:
             results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
@@ -4319,6 +4524,11 @@ def plot_false_alarm_rate_by_position(
     figsize=(8, 6.8),
     title=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
     show_title=True,
@@ -4366,7 +4576,15 @@ def plot_false_alarm_rate_by_position(
     Returns
     -------
     fig, ax
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     # Mirror plot_position_completion_rate's input flexibility.
     if isinstance(subjids, dict):
         dates = subjids if not isinstance(dates, dict) or dates is None else dates
@@ -4418,7 +4636,7 @@ def plot_false_alarm_rate_by_position(
                 print(f"Warning: No subject directory found for {subj_str}")
             continue
 
-        ses_dirs = _filter_session_dirs(subj_dir, subj_dates)
+        ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
         for ses_dir in ses_dirs:
             results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
@@ -4554,6 +4772,11 @@ def plot_poke_duration_by_position(
     figsize=(8, 6.8),
     title=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
     show_title=True,
@@ -4611,7 +4834,15 @@ def plot_poke_duration_by_position(
     Returns
     -------
     fig_completed, ax_completed, fig_aborted, ax_aborted
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     # Mirror plot_position_completion_rate's input flexibility.
     if isinstance(subjids, dict):
         dates = subjids if not isinstance(dates, dict) or dates is None else dates
@@ -4647,7 +4878,7 @@ def plot_poke_duration_by_position(
             print(f"Warning: No date range provided in dict for subject {sid}, skipping")
             continue
 
-        ses_dirs = _filter_session_dirs(subj_dir, subj_dates)
+        ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
         for ses_dir in ses_dirs:
             results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
@@ -4801,6 +5032,11 @@ def plot_decision_accuracy(
     figsize=(10, 7),
     title=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=False,
     verbose=True,
     show_title=True,
@@ -4867,7 +5103,15 @@ def plot_decision_accuracy(
     Returns
     -------
     fig, ax
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     # Mirror plot_behavior_metrics's input flexibility.
     if isinstance(subjids, dict):
         dates = subjids if not isinstance(dates, dict) or dates is None else dates
@@ -4951,7 +5195,7 @@ def plot_decision_accuracy(
             continue
 
         main_vals, hr_vals = [], []
-        for ses_dir in _filter_session_dirs(subj_dir, subj_dates):
+        for ses_dir in _filter_session_dirs(subj_dir, subj_dates, **select):
             results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
@@ -5116,6 +5360,11 @@ def plot_poke_duration_by_odor(
     figsize=(10, 7),
     title=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     show_mean=True,
     show_lines=False,
     pool_subjids=False,
@@ -5190,7 +5439,15 @@ def plot_poke_duration_by_odor(
     Returns
     -------
     fig, ax
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     # Mirror plot_decision_accuracy's input flexibility.
     if isinstance(subjid, dict):
         date = subjid if not isinstance(date, dict) or date is None else date
@@ -5293,7 +5550,7 @@ def plot_poke_duration_by_odor(
         session_series = []  # per session-day: {series_key: [poke_ms, ...]}
         session_ind = []     # per session-day: {odor_letter: [poke_ms, ...]} (for show_lines)
         started = False
-        for ses_dir in _filter_session_dirs(subj_dir, subj_date):
+        for ses_dir in _filter_session_dirs(subj_dir, subj_date, **select):
             date_str = ses_dir.name.split("_date-")[-1]
             if not (str(date_str).isdigit() and len(str(date_str)) == 8):
                 continue
@@ -5569,7 +5826,13 @@ def plot_fa_ratio_by_hr_position(
     print_statistics=False,
     exclude_last_pos=False,
     last_odor_num=5,
-    debug=False
+    debug=False,
+    *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
 ):
     """
     Plot FA Ratio (A-B)/(A+B) by hidden rule odor position across sessions.
@@ -5605,7 +5868,15 @@ def plot_fa_ratio_by_hr_position(
     Returns:
     --------
     fig, axes : matplotlib figure and axes array
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     base_path = get_rawdata_root()
     server_root = get_server_root()
     derivatives_dir = get_derivatives_root()
@@ -5623,7 +5894,7 @@ def plot_fa_ratio_by_hr_position(
     rows = []  # {date, session_num, odor_num, hr_odor, category, port_a, port_b, total, ratio}
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         
         for session_num, ses_dir in enumerate(ses_dirs, 1):
             date_str = ses_dir.name.split("_date-")[-1]
@@ -5992,7 +6263,13 @@ def plot_fa_ratio_by_abort_odor(
     subjid,
     dates=None,
     figsize=(18, 8),
-    fa_types='FA_time_in'
+    fa_types='FA_time_in',
+    *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
 ):
     """
     Plot FA Ratio (A-B)/(A+B) by abortion odor, comparing HR and non-HR aborted sequences.
@@ -6021,7 +6298,15 @@ def plot_fa_ratio_by_abort_odor(
     Returns:
     --------
     fig, axes : matplotlib figure and axes array
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     base_path = get_rawdata_root()
     server_root = get_server_root()
     derivatives_dir = get_derivatives_root()
@@ -6047,7 +6332,7 @@ def plot_fa_ratio_by_abort_odor(
     }
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         
         for session_num, ses_dir in enumerate(ses_dirs, 1):
             date_str = ses_dir.name.split("_date-")[-1]
@@ -6439,6 +6724,11 @@ def plot_hidden_rule_abort_poke_gap(
     make_second_plot: bool = True,
     return_both: bool = False,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save: bool = False,
     verbose: bool = True,
 ):
@@ -6477,7 +6767,15 @@ def plot_hidden_rule_abort_poke_gap(
     Notes
     -----
     If `save=True`, each generated figure is written via save_figure().
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
 
     derivatives_dir = get_derivatives_root()
 
@@ -6494,7 +6792,7 @@ def plot_hidden_rule_abort_poke_gap(
     rows = []
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
 
         for ses_dir in ses_dirs:
             date_str = ses_dir.name.split("_date-")[-1]
@@ -6646,6 +6944,11 @@ def plot_hr_reward_fraction_over_trials(
     figsize=(10, 5),
     ax=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save: bool = False,
     verbose: bool = True,
 ):
@@ -6677,14 +6980,22 @@ def plot_hr_reward_fraction_over_trials(
     -------
     (fig, ax, df)
         Matplotlib figure/axes and the dataframe with rolling percentage.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
+    selection further; they intersect with ``dates`` and with each other, and ``index``
+    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
     """
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
 
     window_size = max(int(window_size), 1)
     derivatives_dir = get_derivatives_root()
 
     frames = []
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         for ses_dir in ses_dirs:
             date_str = ses_dir.name.split("_date-")[-1]
             try:
