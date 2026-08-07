@@ -18,7 +18,7 @@ from hypnose_behavior.utils.helpers import (
 	session_selectors,
 )
 from hypnose_behavior.metric_analysis.frames import build_position_data
-from hypnose_behavior.visualization.primitives import mean_sem
+from hypnose_behavior.visualization.primitives import mean_sem, rolling_windows
 from hypnose_behavior.metric_analysis.metrics.accuracy import decision_accuracy
 from hypnose_behavior.metric_analysis.metrics.false_alarm import (
     fa_latency_from_pokeout,
@@ -514,10 +514,9 @@ def _plot_summary_rolling(session_data, *, color_map, group_order, ylabel, title
 			entries_sorted = sorted(entries, key=lambda x: x[0])
 			idxs = np.array([e[0] for e in entries_sorted])
 			vals = np.array([e[1] for e in entries_sorted], dtype=float)
-			n = len(vals)
 			pts = []
-			for end in range(window_n, n + 1, step_n):
-				start = end - window_n
+			# `partial=False`: a session shorter than one window plots nothing.
+			for start, end in rolling_windows(len(vals), window_n, step=step_n):
 				rate = float(np.nanmean(vals[start:end]))
 				local_x = int(idxs[end - 1])
 				pts.append((local_x, rate))

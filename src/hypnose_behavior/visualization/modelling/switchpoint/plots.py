@@ -93,7 +93,17 @@ __all__ = [
 
 
 def _rolling_mean(s: np.ndarray, window: int = _ROLLING_WINDOW) -> tuple[np.ndarray, np.ndarray]:
-    """Centred moving average of ``s``; returns ``(x, y)``, both empty if ``s`` is too short."""
+    """Centred moving average of ``s``; returns ``(x, y)``, both empty if ``s`` is too short.
+
+    **Deliberately not moved onto `visualization.primitives.rolling_mean`** (Phase 5).
+    The convolution is a dot product; a windowed `np.mean` sums pairwise, and the two
+    disagree in the last ULP on **66% of values** at ``window=21`` -- measured on the
+    binary 0/1 series this actually rolls (max abs 3.3e-16). This module is not in
+    `qc/plot_regression.py`'s `MODULES` and no case exercises it, so that drift would
+    be caught by nothing. Same rule as `DECISIONS.md` section 1: summation style is
+    part of the quantity. The primitive also anchors at the window's last element,
+    where this anchors at its centre.
+    """
     if s.size < window:
         return np.zeros(0), np.zeros(0)
     y = np.convolve(s.astype(float), np.ones(window) / window, mode="valid")

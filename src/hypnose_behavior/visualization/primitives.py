@@ -28,7 +28,7 @@ what `mean_sem` does.
 import numpy as np
 import pandas as pd
 
-__all__ = ["mean_sem", "sem_band", "rolling_mean"]
+__all__ = ["mean_sem", "sem_band", "rolling_windows", "rolling_mean"]
 
 
 def _finite(values) -> np.ndarray:
@@ -73,30 +73,52 @@ def sem_band(ax, x, mean, sem, **kwargs):
     return ax.fill_between(x, mean - sem, mean + sem, **kwargs)
 
 
-def rolling_mean(series, window: int, *, step: int = 1, min_periods=None):
-    """Trailing rolling mean of `series`, as ``(end_index, value)`` pairs.
+def rolling_windows(n: int, window: int, *, step: int = 1, partial: bool = False):
+    """``(start, end)`` slice bounds for each trailing window over `n` items.
+
+    The windowing the rolling call sites share -- what they do *inside* each
+    window (mean, median + IQR) and where they anchor it on the x axis (last
+    element, centre element) is the caller's, and differs at every site.
 
     Anchored the way `metric_analysis.resolvers.over_windows` anchors: the first
-    window ends at position ``window - 1``, and `min_periods` defaults to `window`,
-    so there are no partial windows at the head. Returned positions are *positional*
-    indices into `series`, which is what a caller needs to look up the x value of
-    each window's last element.
+    window ends at position ``window - 1``, so there are no partial windows at
+    the head.
+
+    `partial` decides the one case where the existing call sites genuinely
+    disagree -- a series **shorter than one window**. With ``partial=False`` (the
+    default, and what `over_windows` does) nothing is emitted; with
+    ``partial=True`` a single window covering everything is. That divergence was
+    silent while each site coerced its own window size:
+    `_rolling_median_iqr` clamped to ``n`` and `_plot_summary_rolling` did not.
+    """
+    n = int(n)
+    window = max(1, int(window))
+    step = max(1, int(step))
+    if n <= 0:
+        return []
+    span = min(window, n) if partial else window
+    return [(end - span, end) for end in range(span, n + 1, step)]
+
+
+def rolling_mean(series, window: int, *, step: int = 1, min_periods=None,
+                 partial: bool = False):
+    """Trailing rolling mean of `series`, as ``(end_index, value)`` pairs.
+
+    Windowed by `rolling_windows`; `min_periods` defaults to the window length,
+    so a window containing any non-finite value is dropped rather than averaged
+    over what is left. Returned positions are *positional* indices into `series`,
+    which is what a caller needs to look up the x value of each window's last
+    element.
 
     **For values only.** Rolling a rate through this is the error `DECISIONS.md`
     section 1 exists to prevent -- use `over_windows` on the metric core instead.
     """
     values = pd.Series(series, dtype="float64").to_numpy()
-    window = max(1, int(window))
-    step = max(1, int(step))
-    if values.size == 0:
-        return []
-    span = min(window, values.size)
-    required = span if min_periods is None else max(1, int(min_periods))
-
     out = []
-    for end in range(span, values.size + 1, step):
-        chunk = values[end - span:end]
+    for start, end in rolling_windows(values.size, window, step=step, partial=partial):
+        chunk = values[start:end]
         finite = chunk[np.isfinite(chunk)]
+        required = (end - start) if min_periods is None else max(1, int(min_periods))
         if finite.size < required:
             continue
         out.append((end - 1, float(finite.mean())))

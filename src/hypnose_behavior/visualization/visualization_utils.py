@@ -81,7 +81,7 @@ import re
 import numpy as np
 import json
 from hypnose_behavior.io.save import save_figure
-from hypnose_behavior.visualization.primitives import mean_sem, rolling_mean, sem_band
+from hypnose_behavior.visualization.primitives import mean_sem, rolling_windows
 from hypnose_behavior.io.loaders import _load_table_with_trial_data, _load_trial_views, _odor_to_letter
 
 
@@ -3513,11 +3513,9 @@ def _rolling_median_iqr(x, y, window_size, step_size):
     n = len(y)
     if n == 0:
         return (np.array([]),) * 4
-    win = min(max(1, int(window_size)), n)
-    step = max(1, int(step_size))
     mx, med, q25, q75 = [], [], [], []
-    for end in range(win, n + 1, step):
-        start = end - win
+    # `partial=True`: a run shorter than one window still yields one window here.
+    for start, end in rolling_windows(n, window_size, step=step_size, partial=True):
         seg = y[start:end]
         med.append(np.nanmedian(seg))
         q25.append(np.nanpercentile(seg, 25))
