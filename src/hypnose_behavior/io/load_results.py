@@ -11,7 +11,9 @@ every metric wrapper consumes. Moved out of
 plumbing from metric definitions.
 
 **Not** `metrics_*.json` -- that is a different file, written by
-`metric_analysis.run` and read by `visualization._ensure_metrics_json`.
+`metric_analysis.run`. Nothing reads it back: since restructure_2 Phase 5 the
+plotters compute through the registry, so it is an export and the record of an
+analysis run, never an input (`docs/DECISIONS.md` section 5).
 
 Deliberately its own module rather than part of `io/loaders.py`, which reads the
 same directory via `_load_trial_views`: `loaders` is imported by
@@ -27,13 +29,14 @@ the package this becomes a real cycle.
 """
 
 import json
+from pathlib import Path
 
 import pandas as pd
 
 from hypnose_behavior.io.layout import derivatives
 from hypnose_behavior.metric_analysis.frames import build_position_data
 
-__all__ = ["SessionResults", "load_session_results"]
+__all__ = ["SessionResults", "load_results_dir", "load_session_results"]
 
 _UNBUILT = object()
 
@@ -103,12 +106,25 @@ def load_session_results(subjid, date):
     # available sessions on a miss and raises rather than warning on an ambiguous
     # subject or date.
     session = derivatives.find_session(subjid, date=date)
-    subject_dir = session.subject_dir
-    session_dir = session.path
 
-    results_dir = session_dir / "saved_analysis_results"
+    results_dir = session.path / "saved_analysis_results"
     if not results_dir.exists():
         raise FileNotFoundError(f"Results directory not found: {results_dir}")
+    return load_results_dir(results_dir)
+
+
+def load_results_dir(results_dir):
+    """The same `results` mapping, for a `saved_analysis_results` path you already hold.
+
+    Split out of `load_session_results` in restructure_2 Phase 5. The two differ
+    only in how the directory is found, and finding it is the expensive half: a
+    cold `derivatives.find_session` walk costs 14.6 s against 29 ms to compute
+    every metric for the session it found (`docs/DECISIONS.md` section 5). Every
+    plotter already holds the directory, having walked the tree once itself, so
+    routing them through the subject/date resolver would re-pay that walk per
+    session purely to arrive back where they started.
+    """
+    results_dir = Path(results_dir)
 
     # Load manifest and summary
     manifest = json.load(open(results_dir / "manifest.json"))

@@ -14,7 +14,9 @@ from matplotlib.colors import Normalize
 from matplotlib.ticker import MaxNLocator
 from collections import defaultdict
 from typing import Iterable, Optional, Union, Tuple
-from hypnose_behavior.io.load_results import SessionResults, load_session_results
+import contextlib
+import io
+from hypnose_behavior.io.load_results import load_results_dir, load_session_results
 from hypnose_behavior.metric_analysis.frames import (
     build_position_data,
     odor_letter,
@@ -50,7 +52,11 @@ from hypnose_behavior.metric_analysis.metrics.timing import (
     inter_trial_interval,
 )
 from hypnose_behavior.metric_analysis.resolvers import by_group
-from hypnose_behavior.metric_analysis.run import REGISTRY, run_all_metrics
+from hypnose_behavior.metric_analysis.run import (
+    REGISTRY,
+    _report_fa_abortion_stats,
+    run_all_metrics,
+)
 from datetime import timedelta, datetime
 from hypnose_behavior.trial_classification.classification_utils import load_all_streams, load_experiment
 from hypnose_behavior.utils.helpers import (
@@ -200,6 +206,12 @@ def print_cache_keys():
 def _extract_metric_value(metrics: dict, var_path: str):
     """
     Extract a numeric value from metrics dict given a dot-path.
+
+    A navigator over a metrics mapping, not a reader of one: since Phase 5 the
+    mapping comes from `_computed_metrics`, not from `metrics_*.json`. The
+    dot-path is how a plot names a sub-entry of a metric ("avg_response_time.Rewarded"),
+    so it survives the move to computing.
+
     Examples:
       - "decision_accuracy" -> uses the 3rd element (value) if tuple/list (num, denom, value)
       - "avg_response_time.Rewarded" -> nested dict lookup
@@ -239,54 +251,57 @@ def _load_protocol_from_summary(results_dir: Path) -> str:
         pass
     return "Unknown"
 
-def _session_frames(results_dir: Path):
-    """A `results` mapping for a saved session directory, so registry specs resolve.
-
-    The compute-side counterpart to `_ensure_metrics_json`: plotters compute
-    through the registry rather than reading `metrics_*.json`, which is an export
-    and a record of an analysis run, not a plotting input (`docs/DECISIONS.md`
-    section 5). That deletes the staleness problem instead of managing it -- a
-    saved file predates every metric change made since it was written, and the
-    three quantities obtained *both* ways could make two figures disagree.
-
-    `position_data` stays unbuilt unless a metric's declared frame needs it.
-    """
-    return SessionResults.from_trials(
-        _load_trial_views(results_dir).get("trial_data", pd.DataFrame()))
-
-
-def _computed_metric(results_dir: Path, name: str):
-    """One registered metric, computed for a session, in its saved-JSON shape.
-
-    Applies the spec's `adapter` so the value matches what the corresponding key
-    in `metrics_*.json` has always held -- callers that used to parse that file
-    keep working on the returned object unchanged.
-    """
-    spec = REGISTRY[name]
-    value = spec.call(_session_frames(results_dir))
-    return spec.adapter(value) if spec.adapter else value
-
-
-def _ensure_metrics_json(subjid: int, date: Union[int, str], results_dir: Path, compute_if_missing: bool) -> Optional[dict]:
-    """
-    Return metrics dict by loading metrics_{subjid}_{date}.json if present,
-    else compute via run_all_metrics if compute_if_missing=True.
-    """
-    subjid_i = int(subjid)
-    date_s = str(date)
-    metrics_path = results_dir / f"metrics_{subjid_i}_{date_s}.json"
-    if metrics_path.exists():
-        try:
-            return json.load(open(metrics_path, "r", encoding="utf-8"))
-        except Exception:
-            pass
-    if compute_if_missing:
-        try:
-            session_results = load_session_results(subjid_i, date_s)
-            return run_all_metrics(session_results, save_txt=True, save_json=True)
-        except Exception:
-            return None
+def _metric_name_for_key(key: str) -> Optional[str]:
+    """Registry name for a `metrics_*.json` key. They differ in exactly one place,
+    `hidden_rule_counts_by_odor`, always saved as `hidden_rule_by_odor`."""
+    if key in REGISTRY:
+        return key
+    for name, spec in REGISTRY.items():
+        if spec.key == key:
+            return name
     return None
+
+
+def _computed_metrics(results_dir: Path, keys: Iterable[str]) -> dict:
+    """Compute the named metrics for a session, keyed and shaped exactly as
+    `metrics_*.json` holds them.
+
+    The compute-side replacement for `_ensure_metrics_json`. Plotters go through
+    the registry rather than reading the saved file, which is an export and the
+    record of an analysis run -- not a plotting input (`docs/DECISIONS.md`
+    section 5). That deletes the staleness problem rather than managing it.
+
+    `adapter(session(results))` is deliberately the *same expression* `run.py`
+    uses to build the file, so what a plotter now computes and what would have
+    been saved cannot drift apart by construction. The wrapper is used rather
+    than the bare core because several cores take session configuration as
+    keywords -- `hidden_rule_counts_by_odor` wants `hr_odors`/`hr_positions` --
+    and knowing how to dig those out of `results` is precisely the wrapper's job.
+    Its printing is suppressed: this asks for a value, not a report.
+    """
+    results = load_results_dir(results_dir)
+    metrics = {}
+    for key in keys:
+        name = _metric_name_for_key(key)
+        if name is None:
+            continue
+        spec = REGISTRY[name]
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            # `fa_abortion_stats` reports three tables rather than a value, so it
+            # does not fit the wrapper -> adapter shape and `run.py` special-cases
+            # it too. Calling the same builder keeps the shapes identical.
+            if key == "fa_abortion_stats":
+                metrics[key] = _report_fa_abortion_stats(results)
+                continue
+            value = spec.session(results)
+        metrics[key] = spec.adapter(value) if spec.adapter else value
+    return metrics
+
+
+def _computed_metric(results_dir: Path, key: str):
+    """One metric, in its saved-JSON shape. See `_computed_metrics`."""
+    return _computed_metrics(results_dir, [key]).get(key)
 
 
 # =========================================================== Metrics Plotting Functions =============================================================================
@@ -313,7 +328,6 @@ def plot_behavior_metrics(
     variables: Optional[Iterable[str]] = None,
     *,
     protocol_filter: Optional[str] = None,
-    compute_if_missing: bool = False,
     verbose: bool = True,
     black_white: bool = False,
     y_range: Optional[Tuple[float, float]] = None,
@@ -334,7 +348,8 @@ def plot_behavior_metrics(
     - One figure per variable.
     - Marker shape encodes subject; dot color encodes protocol; connecting lines are thin black.
     - Protocol filtering optional (substring match).
-    - Values are read from metrics_{subjid}_{date}.json; if missing and compute_if_missing=True, metrics are computed.
+    - Values are computed through the metric registry, never read from
+      metrics_*.json (`docs/DECISIONS.md` section 5).
 
     Parameters:
     - subjids: List of subject IDs to include, or None to include all subjects with matching dates.
@@ -346,7 +361,6 @@ def plot_behavior_metrics(
         windows don't overlap). Subjids missing from the dict are skipped with a warning.
     - variables: List of metric names or dot-paths to plot.
     - protocol_filter: Optional substring to filter sessions by protocol.
-    - compute_if_missing: If True, compute metrics if missing.
     - verbose: If True, print progress and warnings.
     - y_range: Optional tuple (ymin, ymax); if provided, sets y-limits for each plot.
     - plot_HR_separately: If True and plotting hidden_rule_detection_rate, also plot per-HR-odor detection alongside total.
@@ -432,10 +446,17 @@ def plot_behavior_metrics(
             if protocol_filter and (protocol is None or protocol_filter not in str(protocol)):
                 continue
             # Load metrics (json or compute)
-            metrics = _ensure_metrics_json(sid, date_str, results_dir, compute_if_missing)
-            if metrics is None:
+            # Computed through the registry rather than read from metrics_*.json
+            # (`docs/DECISIONS.md` section 5). Only the roots actually requested
+            # are evaluated, so a three-variable plot does not run all 25.
+            wanted = {str(v).split(".")[0] for v in variables}
+            if plot_HR_separately:
+                wanted.add("hidden_rule_by_odor")
+            try:
+                metrics = _computed_metrics(results_dir, wanted)
+            except Exception as e:
                 if verbose:
-                    print(f"[plot_behavior_metrics] Skipping sub-{sid:03d} {date_str}: metrics JSON missing.")
+                    print(f"[plot_behavior_metrics] Skipping sub-{sid:03d} {date_str}: {e}")
                 continue
             for var in variables:
                 val = _extract_metric_value(metrics, var)
@@ -790,7 +811,6 @@ def hidden_rule_and_false_alarm(
     figsize=(12, 9),
     title=None,
     *,
-    compute_if_missing: bool = False,
     save: bool = False,
     verbose: bool = True,
     show_title: bool = True,
@@ -838,8 +858,6 @@ def hidden_rule_and_false_alarm(
         Multipliers on line widths and marker sizes (poster scaling).
     save : bool
         Save via ``save_figure``; dict ``dates`` are flattened to a date span.
-    compute_if_missing : bool
-        Forwarded to ``_ensure_metrics_json``.
 
     Returns
     -------
@@ -905,8 +923,13 @@ def hidden_rule_and_false_alarm(
             if not results_dir.exists():
                 continue
 
-            # Hidden rule detection rate from the cached metrics json
-            metrics = _ensure_metrics_json(sid, date_str, results_dir, compute_if_missing)
+            # Hidden rule detection rate, computed through the registry rather
+            # than read from metrics_*.json (`docs/DECISIONS.md` section 5).
+            try:
+                metrics = _computed_metrics(
+                    results_dir, ["hidden_rule_detection_rate", "hidden_rule_by_odor"])
+            except Exception:
+                metrics = None
             hr_val = None
             if metrics is not None:
                 v = _extract_metric_value(metrics, "hidden_rule_detection_rate")
@@ -1252,7 +1275,7 @@ def plot_decision_accuracy_by_odor(
 
             # Add odor-specific accuracies (supports legacy flat dict and new nested schema)
             rows.extend(_collect_odor_acc_rows(
-                _computed_metric(results_dir, "decision_accuracy_by_odor"), int(date_str)))
+                _computed_metric(results_dir, "decision_accuracy_by_odor") or {}, int(date_str)))
 
             # Add total accuracy
             acc_total = decision_accuracy(td)[2]
@@ -2061,15 +2084,20 @@ def plot_abortion_and_fa_rates(
             if not results_dir.exists():
                 continue
             
-            # Load metrics JSON for FA rates
-            metrics = _ensure_metrics_json(sid, date_str, results_dir, compute_if_missing=False)
-            if metrics is None:
-                # No metrics JSON - we'll still try to get FA stats from CSVs below
+            # Computed through the registry rather than read from metrics_*.json.
+            # This plotter was the trap in `docs/DECISIONS.md` section 5: 4b made
+            # `fa_abortion_stats` numeric, but every saved file still holds the
+            # legacy `"3/10 (0.30)"` strings, so dropping the string parsing while
+            # this still read those files would have made the plot draw nothing --
+            # silently, because it skips what it cannot parse. Computing is what
+            # discharges that, and it happens here in one step.
+            try:
+                metrics = _computed_metrics(results_dir, [
+                    "fa_abortion_stats", "odorx_abortion_rate", "abortion_rate_positionX"])
+            except Exception:
                 metrics = {}
-            
-            
-            # Extract FA rates from metrics (no need to load raw CSVs)
-            fa_stats = metrics.get("fa_abortion_stats", {})
+
+            fa_stats = metrics.get("fa_abortion_stats") or {}
 
             # FA rate per odor (FA Time In only)
             fa_by_odor = fa_stats.get("by_odor", [])
@@ -2131,6 +2159,7 @@ def plot_abortion_and_fa_rates(
             except Exception:
                 pass
             # ============ ABORTION RATES - prioritize fa_abortion_stats.by_position ============
+            have_position_rates = False
             fa_by_position_full = fa_stats.get("by_position", [])
             if isinstance(fa_by_position_full, list):
                 for item in fa_by_position_full:
@@ -2159,6 +2188,7 @@ def plot_abortion_and_fa_rates(
                             "position_or_odor": int(pos),
                             "rate": float(rate_val)
                         })
+                        have_position_rates = True
                     except Exception:
                         continue
 
@@ -2176,8 +2206,14 @@ def plot_abortion_and_fa_rates(
                         "rate": float(rate)
                     })
 
-            # Legacy abortion rate per position (if fa_abortion_stats missing)
-            ab_pos_data = metrics.get("abortion_rate_positionX", {})
+            # Abortion rate per position, only when `fa_abortion_stats` gave none
+            # -- which is what this block's comment always claimed and the code
+            # never did. It used to append a *second*, duplicate set of position
+            # rows on every session; that stayed invisible only because JSON
+            # stringifies dict keys, so `int("1.0")` raised and the bare `except`
+            # below swallowed all of it. Computing the metric yields real float
+            # keys, `int(1.0)` succeeds, and the duplicates become visible.
+            ab_pos_data = metrics.get("abortion_rate_positionX", {}) if not have_position_rates else {}
             if isinstance(ab_pos_data, dict):
                 for pos, rate in ab_pos_data.items():
                     if rate is None or not isinstance(rate, (int, float)):

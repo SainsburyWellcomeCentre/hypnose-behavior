@@ -36,9 +36,7 @@ from hypnose_behavior.utils.helpers import (
 from hypnose_behavior.io.layout import derivatives, normalize_subjid
 from hypnose_behavior.visualization.visualization_utils import (
     _clean_graph,
-    _extract_metric_value,
     _load_protocol_from_summary,
-    _ensure_metrics_json,
     load_tracking_with_behavior,
 )
 from hypnose_behavior.io.loaders import _load_table_with_trial_data, _load_trial_views
