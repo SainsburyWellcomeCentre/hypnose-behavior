@@ -2044,53 +2044,28 @@ def plot_sampling_times_analysis(
     return fig, axes
 
 def _fa_stat_count(item, key):
-    """A count out of `fa_abortion_stats`, numeric or in the legacy string form.
+    """A count out of `fa_abortion_stats`.
 
-    Phase 4b made the metric numeric (the audit's finding 3), but every
-    `metrics_*.json` written before that holds `"5 (0.50)"`, and this reads
-    those files rather than recomputing -- so both forms have to be understood
-    until the whole tree has been re-analysed.
+    The legacy `"5 (0.50)"` string form is gone: Phase 4b made the metric
+    numeric (the audit's finding 3), and this plotter no longer reads
+    `metrics_*.json` at all, so the only shape that reaches here is the one the
+    registry computes -- counts `int`, rates `float`. `DECISIONS.md` section 5.
+
+    `bool` is excluded before the numeric test because it is a subclass of
+    `int`, and `True` would otherwise read as the count 1.
     """
     val = item.get(key)
-    if isinstance(val, bool):
+    if isinstance(val, bool) or not isinstance(val, (int, float)):
         return None
-    if isinstance(val, (int, float)):
-        return int(val)
-    if isinstance(val, str) and val.strip():
-        try:
-            return int(val.split()[0])
-        except (ValueError, IndexError):
-            return None
-    return None
+    return int(val)
 
 
 def _fa_stat_rate(item, key):
-    """A rate out of `fa_abortion_stats`; parses the legacy `"n/d (v)"` string.
-
-    The parenthesised value is rounded to 2dp, so a legacy file is slightly
-    coarser than a numeric one -- which is why the caller still prefers
-    `"Abortion Rate Value"`, the exact number those files also carry.
-    """
+    """A rate out of `fa_abortion_stats`. See `_fa_stat_count` for the shape."""
     val = item.get(key)
-    if isinstance(val, bool):
+    if isinstance(val, bool) or not isinstance(val, (int, float)):
         return None
-    if isinstance(val, (int, float)):
-        return float(val)
-    if not isinstance(val, str):
-        return None
-    if "(" in val and ")" in val:
-        try:
-            return float(val.split("(")[-1].split(")")[0])
-        except ValueError:
-            pass
-    if "/" in val:
-        try:
-            num_s, denom_s = val.split("/")[:2]
-            denom = float(denom_s.split()[0].strip())
-            return float(num_s.strip()) / denom if denom > 0 else None
-        except (ValueError, IndexError):
-            return None
-    return None
+    return float(val)
 
 
 def plot_abortion_and_fa_rates(
@@ -2248,13 +2223,10 @@ def plot_abortion_and_fa_rates(
                         continue
                     pos = item.get("Position")
 
-                    # "Abortion Rate Value" first: legacy files carry both it and
-                    # the string, and only it is exact -- the string's
-                    # parenthesised value is rounded to 2dp. Numeric files (Phase
-                    # 4b) have dropped it, and their "Abortion Rate" is exact.
-                    rate_val = _fa_stat_rate(item, "Abortion Rate Value")
-                    if rate_val is None:
-                        rate_val = _fa_stat_rate(item, "Abortion Rate")
+                    # The computed shape carries "Abortion Rate" on `by_position`
+                    # rows; the "Abortion Rate Value" probe that used to come
+                    # first went with the legacy string form (DECISIONS.md 5).
+                    rate_val = _fa_stat_rate(item, "Abortion Rate")
                     if rate_val is None:
                         rate_val = _fa_stat_rate(item, "FA Abortion Rate")
 
