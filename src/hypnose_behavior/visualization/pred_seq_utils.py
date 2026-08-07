@@ -361,6 +361,22 @@ def _build_odor_filter(odor):
 
 
 def _ordered_groups(group_keys, preferred):
+	"""Labels in `preferred`'s canonical order first, then every other label in
+	the order `group_keys` yields them.
+
+	**`group_keys` must be ordered.** Until restructure_2 Phase 5 the three
+	multi-session callers accumulated into a bare `set()`, so every label outside
+	`preferred` was drawn in string-hash order -- which varies between processes,
+	making those figures irreproducible run to run rather than merely oddly
+	ordered. It went unnoticed because `preferred` lists only the four 3-odor
+	sequences: on a 5-odor protocol *every* drawn series took the hash path.
+
+	An unordered input is sorted rather than iterated, since a set has no order
+	to preserve and sorting is the only deterministic thing left to do with one.
+	That is a guard against the defect returning, not the normal path.
+	"""
+	if isinstance(group_keys, (set, frozenset)):
+		group_keys = sorted(group_keys)
 	result = []
 	for name in preferred:
 		if name in group_keys:
@@ -400,9 +416,12 @@ def _plot_summary_daily(session_data, *, color_map, group_order, ylabel, title, 
 	if n_sessions == 0:
 		return None
 
-	all_groups = set()
+	# First-seen order, not a `set` -- see `_ordered_groups`. Each session's
+	# `groups` is itself built in trial order, so this is well defined.
+	all_groups = {}
 	for s in session_data:
-		all_groups.update(s["groups"].keys())
+		for group in s["groups"]:
+			all_groups.setdefault(group)
 	if not all_groups:
 		return None
 	groups = _ordered_groups(all_groups, group_order)
@@ -453,9 +472,11 @@ def _plot_summary_rolling(session_data, *, color_map, group_order, ylabel, title
 	if not session_data:
 		return None
 
-	all_groups = set()
+	# First-seen order, not a `set` -- see `_ordered_groups`.
+	all_groups = {}
 	for s in session_data:
-		all_groups.update(s["groups"].keys())
+		for group in s["groups"]:
+			all_groups.setdefault(group)
 	if not all_groups:
 		return None
 	groups = _ordered_groups(all_groups, group_order)
@@ -1538,7 +1559,10 @@ def _plot_performance_daily(sessions_frames, subjid):
 		stats = by_group(decision_accuracy, sub, "sequence", values_only=False)
 		# First-seen order, not `by_group`'s sorted index: it decides the insertion
 		# order of `sequence_data`, and `_ordered_groups` draws any label outside
-		# SEQUENCE_ORDER in exactly that order.
+		# SEQUENCE_ORDER in exactly that order. This call site was already the
+		# deterministic one -- it feeds an ordered dict -- which is why Phase 5's
+		# `_ordered_groups` fix moved the other three onto the same rule rather
+		# than moving this one.
 		for seq_label in sub["sequence"].drop_duplicates():
 			r, t, _ = stats[seq_label]
 			if t > 0:
@@ -1600,10 +1624,13 @@ def _plot_performance_rolling(sessions_frames, window_size, step_size, subjid):
 	boundary_lines = []
 	legend_done = set()
 
-	all_seq_labels = set()
+	# First-seen order, not a `set` -- see `_ordered_groups`. This matches how
+	# `_plot_performance_daily` below reaches the same set of labels.
+	all_seq_labels = {}
 	for sub in sessions_frames:
 		if sub is not None and not sub.empty:
-			all_seq_labels.update(sub["sequence"].tolist())
+			for label in sub["sequence"]:
+				all_seq_labels.setdefault(label)
 	ordered_seqs = _ordered_groups(all_seq_labels, SEQUENCE_ORDER)
 
 	def _rolling_pts(frame):
