@@ -165,12 +165,56 @@ show the same quantity and disagree.
 
 **Items:**
 
-1. **Phase 5** — route the three dual-sourced quantities through one path. Pick compute.
-2. **Phase 5 or 7b** — make `position_data` lazy (22 of the 29 ms, and most metrics never touch
-   it), then convert the remaining JSON readers.
+1. ~~**Phase 5** — route the three dual-sourced quantities through one path. Pick compute.~~
+   **Done** 2026-08-07 (`d35638e`).
+2. ~~**Phase 5 or 7b** — make `position_data` lazy, then convert the remaining JSON readers.~~
+   **Done** 2026-08-07 (`c56107f`, `c3e21d6`). **No plotter reads `metrics_*.json`.**
 3. **Phase 7b** — decide where the nine per-trial tables live; they ride with `position_data`.
 4. **Anytime** — `false_response_ratio` into `run.REPORT` if it should be saved (new key on
    every session ⇒ `--generate` in its own commit).
+
+### How a plotter computes a metric *(settled in Phase 5 — do not re-derive)*
+
+`visualization._computed_metrics(results_dir, keys)` evaluates
+**`spec.adapter(spec.session(results))`** — deliberately the *same expression* `run.py` uses to
+build the file, so what a plotter computes and what would have been saved cannot drift apart by
+construction. Three things make that the right expression and not an obvious simpler one:
+
+- **The wrapper, not the bare core.** Several cores take session configuration as keywords —
+  `hidden_rule_counts_by_odor` needs `hr_odors`/`hr_positions`, which `_extract_hr_config` digs
+  out of `manifest`/`summary`. `spec.call(results)` raises `TypeError` for those. Knowing how to
+  find that config *is* the wrapper's job.
+- **The adapter matters.** `spec.call()` alone is **not** the saved shape: `decision_accuracy_by_odor`
+  returns a DataFrame whose saved form is `to_dict()`, and several wrappers return a Series
+  where the key has always held a dict.
+- **`fa_abortion_stats` is special-cased in both.** It reports three tables rather than a value,
+  so it fits neither `wrapper -> adapter` nor `call`. Both `run.py` and `_computed_metrics` call
+  `_report_fa_abortion_stats`.
+
+Wrappers print; `_computed_metrics` suppresses that. A plotter is asking for a value, not a report.
+
+**`load_results_dir(results_dir)` exists because the lookup is the expensive half.** It is
+`load_session_results` minus `derivatives.find_session` — 14.6 s cold against 29 ms to compute
+every metric. Plotters have already walked the tree, so routing them through the subject/date
+resolver would re-pay that walk per session to arrive where they started.
+
+### The trap is discharged — and what it was hiding
+
+The legacy `fa_abortion_stats` string reader was safe to drop the moment
+`plot_abortion_and_fa_rates` stopped reading the file, which is now. `_fa_stat_count` /
+`_fa_stat_rate` still understand both forms; **their string branches are now unreachable** and
+may be deleted whenever convenient.
+
+Converting that plotter exposed a **second, latent bug the JSON path was hiding**. The block
+commented *"Legacy abortion rate per position (if fa_abortion_stats missing)"* had no such
+guard, and appended a duplicate set of position rows on every session. That stayed invisible
+only because JSON stringifies dict keys: `int("1.0")` raised, and a bare `except ... : continue`
+swallowed it. Computing yields real float keys, `int(1.0)` succeeds, and five duplicate rows per
+session appear. Now guarded on `have_position_rates`, which is what the comment always claimed.
+
+> **The general lesson, worth more than the instance:** a bare `except: continue` around a
+> parse turned a duplicated-data bug into silence. The JSON round-trip was load-bearing by
+> accident. Expect more of these wherever a reader is replaced by a compute.
 
 **Caveat:** switching a plotter from load to compute *can* move a curve, for any session whose
 saved JSON predates a metric change. That is the staleness surfacing, which is the point — so it
@@ -226,8 +270,12 @@ Three properties to know before relying on it:
   `MODULES` or their cases become "not found", which reads as untestable, not as green.
 - **It seeds the global RNG (`np.random.seed(0)`) before each call**, because several plotters
   jitter points and never seed it. It also pins `PYTHONHASHSEED=0` and applies `use_style("nature")`
-  in the child. All three are *workarounds*: two of them hide real defects (see the plan's Phase 5
-  section), and a "both raise, unchanged" case is an ungated one, not a green one.
+  in the child. A "both raise, unchanged" case is an ungated one, not a green one.
+  *(Phase 5 fixed the two defects the last two were hiding — see sections 11 and 12 — so they now
+  guard against a regression rather than mask a live bug. The RNG seeding is not in that
+  category: the jitter is genuinely unseeded, and **that also makes the diff sensitive to how
+  many points are drawn**, since one extra point shifts every subsequent draw. A change in point
+  count therefore shows up as dozens of "changed" values, not just as "added" ones.)*
 - **Two non-zero diffs are accepted and recorded:** a sub-nanosecond recovery the trial-timing
   metrics inherit from `e9516e4` (max rel 2.2e-07) and one ULP choice in
   `plot_sampling_times_analysis`.
@@ -327,3 +375,58 @@ for *reached* and perfectly natural for *sampled*.
 The contiguous `1..max` fill is doing real work until the fix lands — `sub-057 gid=108` has
 `position_poke_times` keys `[2, 3]` and `num_odors=2`, but position 1 *was* presented and its 0 ms
 poke was never written. `1..max` recovers it; plain membership loses a real position.
+
+---
+
+## 11. Group draw order must come from an ordered container *(Phase 5, 2026-08-07)*
+
+`pred_seq_utils._ordered_groups(group_keys, preferred)` draws `preferred`'s labels in their
+canonical order, then **every other label in the order `group_keys` yields them**. Three callers
+accumulated into a bare `set()`, so those residual labels were drawn in **string-hash order**,
+which varies between processes: two runs of the identical tree disagreed on 340 drawn values.
+
+It went unnoticed for a reason worth remembering: `preferred` (`SEQUENCE_ORDER`) lists only the
+four *3-odor* sequences, so on sub-040's 5-odor protocol **every one of its ~125 series** took
+the hash path. A "preferred list" that covers none of the live data is not a partial ordering,
+it is no ordering.
+
+- The three callers now accumulate **first-seen**, matching `_plot_performance_daily`, which fed
+  an ordered dict and was already deterministic — so that one did not move.
+- `_ordered_groups` **sorts** an input that is a `set`/`frozenset`. A set has no order to
+  preserve, so sorting is the only deterministic thing left to do with one. That is a guard
+  against the defect returning, not the normal path.
+
+Verified a **pure permutation**: the sorted multiset of every drawn point is identical old vs new
+across all four affected figures. `_order_sequence_labels` has the same shape but is only ever
+fed dicts, so it was never at risk.
+
+---
+
+## 12. Display arithmetic: `visualization/primitives.py` *(Phase 5, 2026-08-07)*
+
+Taking the mean ± SEM of a metric across the subjects or sessions on a plot is a property of the
+**figure**, not of the data. It lives in `visualization/primitives.py` and never in
+`metric_analysis`. `mean_sem` replaced 18 longhand sites.
+
+**These may roll or average *values*; they must never re-absorb a rate reduction** — that is
+section 1's rule, and `over_windows` owns it.
+
+**The NaN rule, which is why one primitive was worth having.** Three idioms were in use, and
+they are bit-identical on clean data — measured, **0 disagreements in 20,000 random samples** on
+the pinned pandas 3.0.1 / numpy 1.26.4, so the "last ULP" concern the Phase 5 brief inherited
+does *not* materialise. They diverge the moment a NaN appears:
+
+| idiom | denominator with a NaN present |
+|---|---|
+| `Series.sem()` | count of **finite** values — correct |
+| `Series.std(ddof=1) / sqrt(len(s))` | full length — **understates the error** |
+| `np.std(v, ddof=1) / sqrt(len(v))` | propagates `nan` |
+
+`mean_sem` drops non-finite values first, so `n` is what actually contributed. It returns `nan`
+for fewer than two finite values, where SEM is undefined; a caller wanting a zero-height error
+bar says `0.0 if np.isnan(sem) else sem` rather than having the primitive invent one.
+
+**Two `plot_regression` obligations for anything added here.** Register a new plotter module in
+the gate's `MODULES` list or its cases read as "not found" — untestable, not green. And a
+primitive that calls `save_figure` needs `skip_modules=(__name__,)` or an explicit
+`provenance=`; see section 9.

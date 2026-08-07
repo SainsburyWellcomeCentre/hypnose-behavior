@@ -160,7 +160,7 @@ Update this table at the end of each phase, in the same commit as the work.
 | 3 re-baseline QC | **done** — superseded by 0 | `481110b` | Nothing further to do |
 | 4a strip metrics from visualization | **done** 2026-08-06 | audit `58387ce`..`6aac5de`; moves `9672f1e`..`aa0355f` | **`visualization/` fetches and plots, and computes no metrics.** 32 sites of metric math resolved: 24 metrics added to `metric_analysis`, 8 exact dedups, 9 variants collapsed onto `by_group`/`over_windows`. D0 complete for every tier. `compute_speed_analysis` (711 lines, 7 movement metrics) moved wholesale to `metric_analysis/movement.py`. Two deliberate output changes landed (non-initiated trials left the metric set; `ambiguous_rate`/`correct_rejection_rate` added). `qc/plot_regression.py` written and grown to 32 cases. **Deviation that outranks the audit: `_load_tracking_and_behavior` → `io/tracking.py`, not `visualization/io/`** |
 | 4b modularise metric_analysis | **done** 2026-08-07 | `604355f`..`cbc7059` | **`metrics_utils.py` (2,639 lines) is gone.** Plumbing to `io/load_results.py` + `run`/`merge`/`summary`; definitions to 7 modules under `metrics/`. Registry: 43 registered / 25 reported. Every carve verified by an ast pass requiring all 112 pre-4b function bodies byte-identical. One intended output change (`fa_abortion_stats` numeric). **Registry contract, `frames.py`-as-leaf and the legacy-reader trap — `DECISIONS.md` §3-5** |
-| 5 visualization primitives | **not started — unblocked** | | 4a and 4b are both done. See the Phase 5 section and `docs/phase5_brief.md` |
+| 5 visualization primitives | **partly done** 2026-08-07 — **NOT closed** | `e532ab7`..`7daf246` | **Both 4a defects fixed** (`_style_log_yaxis` unstyled-crash; `_ordered_groups` hash order, a verified pure permutation). **No plotter reads `metrics_*.json`** — the whole load-vs-compute item, trap discharged, and it exposed a duplicate-rows bug the JSON path was hiding. `position_data` lazy; `load_results_dir` split out. `visualization/primitives.py` with `mean_sem` (18 sites) / `sem_band` / `rolling_mean`. **Still open: the session selectors, the shared prep module, finding 10, `style_axis`, and the 4 rolling call sites — see "What Phase 5 still owes"** |
 | 6 trial classification dedup | not started | | unit tests first |
 | 7a manifest provenance | not started | | ~40% done in advance by 2c |
 | 7b schema & formats | not started | | intended output change |
@@ -311,7 +311,41 @@ files and can be re-imported.
 for every plot type it supports and becomes a god-function. Thin primitives plus one small
 function per metric give the same ergonomics without that.
 
-### Two defects 4a found and deliberately did not fix
+### What Phase 5 still owes  *(status 2026-08-07, `7daf246`)*
+
+Phase 5 is **not closed**. Done: both 4a defects, the entire load-vs-compute item, and the
+`mean_sem` primitive. What a continuation chat picks up, roughly in value order:
+
+1. **Thread the session selectors** (`dates`/`ses`/`index` + range forms) through every public
+   plotter — the section below, untouched. ~36 `_filter_session_dirs` call sites; `_filter_sessions`
+   in `utils/helpers.py` currently accepts `dates` only and is the place to widen first.
+   **Read the semantics table before starting: the keys combine, and `None` vs `[]` is
+   load-bearing.**
+2. **`style_axis`**, and the 4 rolling call sites onto `primitives.rolling_mean`
+   (`_rolling_median_iqr`, `_plot_summary_rolling`, `modelling/switchpoint/plots._rolling_mean`).
+   `_rolling_pts` is **not** one of them — it carries the rate windowing rule and must keep
+   calling `over_windows`. `rolling_mean` is written and unused; the call sites are the work.
+3. **The shared prep module** and **finding 10** (trajectory prep duplicated 2-4× across
+   `movement_analysis_utils` ↔ `sing_rew_movement`) — brief sections 2 and 4. The biggest moves,
+   the lowest risk, and gated exactly.
+4. **Optional cleanup:** `_fa_stat_count` / `_fa_stat_rate`'s legacy string branches are now
+   unreachable (`DECISIONS.md` section 5) and can go.
+
+Two things a continuation should know that are not in the brief:
+
+- **`compute_if_missing` was removed** from `plot_behavior_metrics` and
+  `hidden_rule_and_false_alarm`. It could not mean anything once metrics are always computed, and
+  a parameter that does nothing is worse than no parameter — but it *is* a public signature
+  change, so a notebook passing it now raises `TypeError`.
+- **The gate's jitter sensitivity.** Several plotters jitter from an unseeded global RNG, so a
+  change in the *number* of drawn points shifts every later draw and surfaces as dozens of
+  "changed" values rather than a clean "added" list. Read a RED's `added`/`removed` counts first.
+
+### Two defects 4a found and deliberately did not fix — **both now fixed**
+
+Fixed in `7eddf84` (`_style_log_yaxis`, no drawn change) and `372d262` (`_ordered_groups`, an
+intended reordering verified to be a pure permutation). `DECISIONS.md` sections 11 and 7 carry
+what outlived them. The original statements follow for context.
 
 Both surfaced while wiring `qc/plot_regression.py` up to the remaining plotters. Neither is
 metric math, so neither belonged in 4a; both are exactly Phase 5's subject matter, and **both
@@ -338,17 +372,16 @@ are currently worked *around* in the gate rather than fixed in the source.**
    an output change** — it reorders series and legends — so it wants its own commit and a look
    at the affected figures.
 
-### Load vs compute — plotters stop reading `metrics_*.json`
+### Load vs compute — plotters stop reading `metrics_*.json`  ✅ **done**
 
-Decided 2026-08-07, measured before deciding. **The decision, the numbers, why a provenance
-stamp was rejected, and the legacy-reader trap are in `DECISIONS.md` §5.** Items 1 and 2 of its
-sequencing list are this phase's share:
+Delivered in `c56107f`, `d35638e`, `c3e21d6`. `_ensure_metrics_json` is gone and **no plotter
+reads the file**; `_computed_metrics` evaluates `adapter(session(results))`, the same expression
+`run.py` uses to write it. `position_data` is lazy and `load_results_dir` splits the directory
+read from the expensive session lookup.
 
-1. Route the three dual-sourced quantities (`decision_accuracy`, `avg_response_time`,
-   `FA_avg_response_times`) through one path. **Pick compute.**
-2. Make `position_data` lazy, then convert the remaining `_ensure_metrics_json` call sites.
-
-It is settled and measured — do not re-derive it.
+**How a plotter computes a metric, why the bare core is not enough, and what converting the trap
+exposed are now in `DECISIONS.md` §5** — read that, not this. Item 3 (where the nine per-trial
+tables live) remains Phase 7b's.
 
 ### Thread the session selectors through the plotters *(decided 2026-08-04)*
 

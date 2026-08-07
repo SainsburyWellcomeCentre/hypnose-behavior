@@ -9,6 +9,22 @@ not copied from the audit — the audit's numbers predate ~1,500 lines of deleti
 
 Read with `docs/DECISIONS.md`. This file says *what to move*; that file says *what not to break*.
 
+> **Status 2026-08-07 (`7daf246`) — Phase 5 is part-done and NOT closed.**
+>
+> | section | state |
+> |---|---|
+> | 1 — FETCH, the metrics-JSON readers | ✅ **done**. `_ensure_metrics_json` deleted, all 6 call sites compute, trap discharged |
+> | 1 — FETCH that genuinely relocates | ❌ not started |
+> | 2 — PREP, the shared prep module | ❌ not started |
+> | 2 — finding 10 (trajectory prep), finding 14 | ❌ not started |
+> | 3 — DISPLAY-AGG, the 20 mean ± SEM sites | ✅ **done** — `visualization/primitives.mean_sem`, 18 sites converted. The remaining `.std(ddof=1)` sites are **SD, not SEM**: a different quantity, deliberately left |
+> | 3 — the other DISPLAY-AGG patterns (cumsum, per-day means, violins) | ❌ not started |
+> | 4 — rolling means | ⚠️ `primitives.rolling_mean` exists and is **unused**; the 4 call sites are not converted |
+>
+> Also done, and not in this brief: both 4a defects, `position_data` laziness, `load_results_dir`.
+> The ULP worry in section 3 **did not materialise** — the three SEM idioms are bit-identical on
+> clean data; it is NaN handling that differs. See `DECISIONS.md` §12.
+
 ---
 
 ## 0. The destination rule — where the audit was overruled
