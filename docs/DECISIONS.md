@@ -320,61 +320,94 @@ Related: `function` is only ever "the nearest frame we did not skip", frequently
 
 ---
 
-## 10. Phase 7b TODO — the 0 ms positions and `poke_source`
+## 10. The unpoked positions and `poke_source` *(Phase 6b, 2026-08-10)*
 
-Two data-writing bugs make the position record incomplete and ambiguous, and both surface as
-per-position metrics that cannot be defined consistently.
+**Intended output change, fixtures regenerated 2026-08-10.**
 
-1. **Write the 0 ms / no-poke positions.** A position whose poke registers as ~0 ms is currently
-   omitted from `position_poke_times`, `presentations` *and* `num_odors`, even though the odor was
-   presented and the sequence advanced through it. Write it with `poke_time_ms = 0` and null
-   `poke_odor_start` / `poke_odor_end`.
-2. **Add `poke_source`** to every position entry: `"poke"` for a genuine poke inside the odor
-   window, `"grace"` for one synthesised by the `PRE_ODOR_GRACE_MS` path
-   (`classification_utils:1281-1293`, where the poke ended *before* the valve opened), `"none"`
-   for a 0 ms / no-poke position. Today a grace entry is indistinguishable from a real short poke
-   except by the fragile tell `poke_first_in == poke_odor_start` — and animals genuinely poke for
-   under 20 ms, so the marker is the only reliable separator. Direct measurement (grace set to 0)
-   puts grace-derived entries at **~2-10 odors per session**.
+Every position whose valve opened is now written to `position_poke_times` and `presentations`,
+and every entry carries **`poke_source`**:
 
-Consumers must treat an **absent** `poke_source` as "unknown" and omit the filtered variant, never
-as "all real pokes" — older sessions will never carry the field. Alters `trial_data` ⇒ deliberate
-fixture regeneration with the diff confirming only the intended columns moved. The writing happens
-in `classify_trials`, so it lands naturally with Phase 6's trial-loop cleanup.
+| value | meaning | `poke_time_ms` | count, 9 sessions |
+|---|---|---|---|
+| `poke` | a genuine poke inside the odor window | measured | 4620 |
+| `grace` | no poke in the window; last poke-out within `PRE_ODOR_GRACE_MS` of the valve opening | `GRACE − gap`, synthetic | 91 |
+| `outside_grace` | no poke in the window and no grace credit | `0.0`, null timestamps | 83 |
 
-### What it unblocks, and why `sequence_depth` looks wrong until then
+The marker is the only reliable separator: animals genuinely poke for under 20 ms, so duration
+cannot distinguish a grace entry, and the tell `poke_first_in == poke_odor_start` is also
+satisfied by a real poke already in progress when the valve opened.
 
-`only_true_pokes` on the sampling metrics becomes computable, and `sequence_depth` collapses to a
-one-line change.
+> Consumers must treat an **absent** `poke_source` as "unknown" and omit the filtered variant,
+> never as "all real pokes" — sessions saved before 6b will never carry it (section 2).
+> `metrics.sampling._real_pokes` implements exactly that: it filters to `poke` when the column
+> is present and returns the rows untouched when it is not, so a pre-6b session keeps the
+> sampling averages it has always had.
 
-**`sequence_depth` deliberately reproduces *today's* rule, not the `presentations`-sourced target.**
-The target says the source is `presentations` and the set is `1..max(presented position)` for every
-trial; the canonical metrics instead walk `1..last_odor_position` for an **aborted** trial. Measured
-on the 9 fixture sessions, **10 of 1731 trials disagree**, moving `reached` counts on 3 sessions:
+### The brief said "write them into `num_odors`". Measured, that is wrong for aborted trials
 
-```
-sub-048  today={1:181, 2:152, 3:117, 4:91, 5:65}   presentations={1:181, 2:153, 3:118, 4:92, 5:65}
-sub-057  today={1:338, 2:283, 3:226}               presentations={1:339, 2:287, 3:227}
-sub-059  today={1:221, 2:208, 3:139}               presentations={1:221, 2:209, 3:140}
-```
+All 83 `outside_grace` positions are the same situation: **port OUT at valve open, and not one
+DIPort0 transition during the window** — the animal was demonstrably away from the port for the
+entire presentation. They are not 0 ms *measurements*, they are absences. And they are not
+valve-switching artefacts either: median valve duration 332 ms (range 28–736), only 5 of 83
+shorter than the odor's required minimum sampling time.
 
-The disagreeing trials are precisely the grace artifact. **Switching now would not be more correct
-— it would bake that artifact into the denominators of `abortion_rate_positionX` and
-`fa_abortion_stats`**, because nothing yet distinguishes a genuine short poke from a synthesised
-one. Only after `poke_source` exists can the two sources agree, at which point the
-aborted/completed branch collapses. The reasoning and the numbers are in the docstring.
+**75 of the 83 sit on aborted trials, all trailing.** Crediting those to `odor_sequence` /
+`num_odors` would put an odor the animal never smelled at the end of the sequence and make it
+`last_odor`. `abortion_classification` — a wholly independent pipeline — agrees: its
+`last_odor_position` is the last **poked** position on **74 of 74** non-null cases, and 0 of 74
+at the new maximum.
 
-### And why the two position helpers must stay separate
+So the rule is split by what the rig did, not by what the entry looks like:
 
-`sequence_depth` ("how far the sequence got") is **never** filtered; `sampled_positions` ("was this
-position sampled") **is**. A single filtered `reached_positions` produces physically impossible
-sets: dropping a non-`poke` entry from the middle of a trial credits it with reaching position 5
-but not position 3, which makes any per-position denominator non-monotonic. A gap is meaningless
-for *reached* and perfectly natural for *sampled*.
+- **completed trial** (reached AwaitReward): every presented position counts. The rig advanced
+  through all of them, including a final one our DIPort0 reconstruction scores as unpoked.
+- **aborted trial**: the sequence stops at the last `poke` (`_trim_unsampled_tail`). The
+  trailing entries are still **written** — only what the trial is *credited* with shrinks.
 
-The contiguous `1..max` fill is doing real work until the fix lands — `sub-057 gid=108` has
-`position_poke_times` keys `[2, 3]` and `num_odors=2`, but position 1 *was* presented and its 0 ms
-poke was never written. `1..max` recovers it; plain membership loses a real position.
+`_trim_unsampled_tail` returns a prefix and deletes nothing, so `position_poke_times` and
+`presentations` always hold the full presented record and `last_event_index` marks where the
+counted sequence ends. **Interior gaps are never trimmed** — a later valve opening proves the
+sequence moved past them.
+
+The trim is gated on AwaitReward, so **no rewarded trial can lose a position**. Verified:
+`is_aborted` changed on 0 trials, and every trial whose sequence shrank has null
+`await_reward_time`, `total_supply_count`, `first_supply_time` and `total_reward_pokes`.
+
+### What moved
+
+`sub-057` trial 277 is the headline: `['OdorE','OdorB']` → `['OdorG','OdorE','OdorB']`, a
+rewarded triple, so `sequence_rewarded` flips False→True and a trial scored `false_response`
+becomes `rewarded`. `qc/outcome_agreement.py` goes from 1 conflict to **0** (section 14).
+
+The column list in `regression.py` is wide because **a column's md5 moves if one cell does**:
+that single trial changes scoring branch, and the false-response and standard-scoring branches
+write different column families, so 16 columns move by one cell each. Cell-level diff against
+HEAD, sub-057 (339 trials): `position_poke_times` / `presentations` all 339 (the new field);
+`num_odors` / `odor_sequence` **10**; `reward_determinacy` 7; `last_odor` 5;
+`sequence_rewarded` **2**; everything else **1**. `last_event_index` reads 339 but is a dtype
+flip int64→float64 from a single new null — only 10 cells differ numerically.
+
+**Trailing `grace` entries are trimmed too**, not just `outside_grace` — the test is
+`poke_source != 'poke'`. That removes 11 entries that HEAD did write, and it is exactly the
+`presentations`-vs-`last_odor_position` disagreement this section previously measured at 10 of
+1731 trials. The two sources now agree. One aborted trial (`sub-057` 235) consequently drops
+`sequence_rewarded` True→False; it was never rewarded (no supply event, no AwaitReward), so no
+outcome moves. One trial (`sub-057` 332) trims to an *empty* sequence: both its positions were
+grace entries rescued by 0.36 ms and 0.104 ms of credit. Its positions are still recorded.
+
+### The two position helpers still must stay separate
+
+`sequence_depth` ("how far the sequence got") is **never** filtered; `sampled_positions` ("was
+this position sampled") **is**. A single filtered `reached_positions` produces physically
+impossible sets: dropping a non-`poke` entry from the middle of a trial credits it with reaching
+position 5 but not position 3, making any per-position denominator non-monotonic. A gap is
+meaningless for *reached* and perfectly natural for *sampled*.
+
+`sequence_depth` still branches: an **aborted** trial reads `last_odor_position`, a completed one
+reads `max(position_poke_times)`. Both are now correct for the same reason — the aborted blob's
+counted prefix and `last_odor_position` agree — so the branch may finally be collapsed onto
+`presentations`. That is a *separate* intended change with its own regeneration; it is no longer
+blocked, but it is not done here.
 
 ---
 

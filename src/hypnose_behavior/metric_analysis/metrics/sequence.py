@@ -69,7 +69,11 @@ def sequence_completion_rate_session(results):
 def presentation_counts_by_odor(position_data):
     """`{odor_name: n presentations}` -- the denominator of `odorx_abortion_rate`.
 
-    Counts `presentations` rows only, so the valve-only positions never enter.
+    Counts `presentations` rows, which since Phase 6b include a trailing position the
+    animal never poked: the valve opened and the odor *was* presented, so it belongs in a
+    count of presentations. It is deliberately not filtered on `poke_source` -- the
+    numerator is `last_odor_name`, the last odor actually sampled, so such a position
+    contributes a presentation and no abortion. `DECISIONS.md` section 10.
     """
     rows = _position_rows(position_data, "in_presentations")
     if rows is None or rows.empty:

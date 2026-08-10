@@ -51,6 +51,28 @@ __all__ = [
 ]
 
 
+def _real_pokes(rows):
+    """Keep only the positions the animal actually poked, when the session says which.
+
+    `poke_source` marks every position entry `poke` / `grace` / `outside_grace`. A duration is
+    a *measurement* only on the first: a grace entry's is synthesised from
+    `PRE_ODOR_GRACE_MS`, and an `outside_grace` one is 0 ms because the valve opened while the
+    animal was away from the port. Averaging either into a sampling time understates it, which
+    is exactly the artefact writing the unpoked positions would otherwise introduce.
+
+    Sessions saved before the marker existed carry no `poke_source` at all. There the honest
+    answer is "unknown", so the rows are returned untouched and the metric keeps the value it
+    has always had, rather than being filtered on a column that is not there
+    (`DECISIONS.md` section 2).
+    """
+    if "poke_source" not in rows.columns:
+        return rows
+    source = rows["poke_source"]
+    if source.isna().all():
+        return rows
+    return rows[source == "poke"]
+
+
 def _sequential_mean(values):
     """Mean by left-to-right accumulation.
 
@@ -73,6 +95,7 @@ def avg_sampling_time_odor_x(position_data):
     rows = _position_rows(position_data, "in_poke_times", aborted=False)
     if rows is None or rows.empty:
         return pd.Series(dtype=float)
+    rows = _real_pokes(rows)
     rows = rows[rows["odor_name"].notna() & rows["poke_time_ms"].notna()]
     if rows.empty:
         return pd.Series(dtype=float)
@@ -100,6 +123,7 @@ def avg_sampling_time_completed_sequence(position_data):
     rows = _position_rows(position_data, "in_poke_times", aborted=False)
     if rows is None or rows.empty:
         return np.nan
+    rows = _real_pokes(rows)
     return _sequential_mean(rows.loc[rows["poke_time_ms"].notna(), "poke_time_ms"])
 
 
@@ -123,6 +147,7 @@ def avg_sampling_time_aborted_sequence(position_data):
     rows = _position_rows(position_data, "in_presentations", aborted=True)
     if rows is None or rows.empty:
         return np.nan
+    rows = _real_pokes(rows)
     idx = rows["index_in_trial"]
     keep = (idx.notna() & (idx != rows["last_event_index"])
             & rows["poke_time_ms"].notna())
@@ -180,12 +205,13 @@ def poke_durations(position_data, *, aborted=False):
     `presentations` with the abort event excluded -- the same sources, and the
     same exclusion, the canonical `avg_sampling_time_*` metrics use.
 
-    **No `poke_time_ms > 0` filter.** The four extractors in `visualization/`
-    each carried one; measured across all 9 fixture sessions it drops nothing,
-    because a ~0 ms position is currently omitted by the writer entirely. Once
-    Phase 7b writes those positions the filter would start excluding exactly the
-    rows that fix adds, so it is removed rather than relocated --
-    `sampled_positions(only_true_pokes=True)` is its proper successor.
+    **Filtered on `poke_source`, not on `poke_time_ms > 0`.** The four extractors
+    in `visualization/` each carried a `> 0` filter; measured across all 9 fixture
+    sessions it dropped nothing, because a ~0 ms position used to be omitted by
+    the writer entirely. Now that those positions are written, a bare `> 0` test
+    would exclude them but still average in the grace entries, whose durations are
+    synthesised rather than measured. `_real_pokes` excludes both, and leaves a
+    pre-marker session's value untouched.
     """
     empty = pd.DataFrame(columns=["position", "odor_name", "poke_time_ms"])
     if aborted:
@@ -198,6 +224,7 @@ def poke_durations(position_data, *, aborted=False):
         rows = _position_rows(position_data, "in_poke_times", aborted=False)
         if rows is None or rows.empty:
             return empty
+    rows = _real_pokes(rows)
     rows = rows[rows["poke_time_ms"].notna()]
     if rows.empty:
         return empty
@@ -251,9 +278,17 @@ def trial_poke_span(position_data):
     `poke_odor_end` at the deepest position minus `poke_odor_start` at position 1.
     Distinct from `trial_poke_total`: the span contains the travel between ports,
     the sum does not. Trials missing either timestamp are dropped.
+
+    Real pokes only. An `outside_grace` entry carries null timestamps, so leaving
+    it in would make the deepest position's `poke_odor_end` null and drop the
+    whole trial; a grace entry's `poke_odor_end` is synthetic and sits up to
+    `PRE_ODOR_GRACE_MS` after the animal actually left (`DECISIONS.md` section 15).
     """
     rows = _trial_position_frame(position_data, "in_poke_times")
     if rows is None:
+        return pd.Series(dtype=float)
+    rows = _real_pokes(rows)
+    if rows.empty:
         return pd.Series(dtype=float)
     frame = pd.DataFrame({
         "gid": rows["global_trial_id"].to_numpy(),
@@ -276,7 +311,8 @@ def trial_poke_total(position_data):
     rows = _position_rows(position_data, "in_poke_times")
     if rows is None or rows.empty or "global_trial_id" not in rows.columns:
         return pd.Series(dtype=float)
-    usable = rows[rows["poke_time_ms"].notna()]
+    usable = _real_pokes(rows)
+    usable = usable[usable["poke_time_ms"].notna()]
     if usable.empty:
         return pd.Series(dtype=float)
     return usable.groupby("global_trial_id")["poke_time_ms"].sum()

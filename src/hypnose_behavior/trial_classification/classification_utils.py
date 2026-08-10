@@ -32,6 +32,7 @@ import hypnose_behavior.trial_classification.detect_settings as detect_settings
 import hypnose_behavior.trial_classification.detect_stage as detect_stage_module
 import hypnose_behavior.trial_classification.windows as windows
 from hypnose_behavior.trial_classification.outcome import classify_completed_trial, latency_label
+from hypnose_behavior.utils.helpers import vprint
 from datetime import datetime, timezone, date
 from collections import defaultdict
 from bisect import bisect_left, bisect_right
@@ -51,9 +52,6 @@ from IPython import get_ipython
 
 
 # ============== General Utility Functions and Class Definitions =======================================
-def vprint(verbose: bool, *args, **kwargs):
-    if verbose:
-        print(*args, **kwargs)
 
 
 def _ensure_int_list(value, *, subtract_one: bool = False) -> list[int]:
@@ -930,16 +928,34 @@ def _position_valve_times(position_locations, max_positions, prior_presentations
 
 def _position_poke_times(position_locations, poke_data, max_positions, sample_offset_time_ms,
                          required_min_ms_for):
-    """Cue-port poke time per position, measured inside that position's valve window.
+    """Cue-port poke record per position, measured inside that position's valve window.
 
     Reports the **first merged block** of poking: intervals separated by less than
     ``sampleOffsetTime`` are one sample, and the first gap beyond it ends the measurement, so a
     later return to the port during the same odor does not inflate the sampling time.
 
-    A position whose block is zero-length is left out entirely, which is what makes
-    ``valid_positions`` downstream shorter than the valve sequence. The exception is the
-    pre-odor grace window: a poke that ended within ``PRE_ODOR_GRACE_MS`` before the valve
-    opened still counts, anchored at the window start.
+    **Every position with a valve activation gets an entry**, including the ones the animal
+    never poked: the odor was presented, and dropping it truncated ``odor_sequence``,
+    ``num_odors`` and ``presentations`` downstream. A position with no poke is written with
+    ``poke_time_ms = 0.0`` and null poke timestamps rather than omitted, and every entry
+    records where its poke time came from in ``poke_source``:
+
+    - ``"poke"``          -- a genuine poke inside the odor window;
+    - ``"grace"``         -- no poke in the window, but the animal's last poke-out landed
+      within ``PRE_ODOR_GRACE_MS`` of the valve opening, so the position is credited and
+      anchored at the window start;
+    - ``"outside_grace"`` -- no poke in the window and no grace credit: the valve opened and
+      the animal was out of the port for all of it.
+
+    ``poke_source`` is the only reliable separator. Animals genuinely poke for under 20 ms, so
+    a grace entry cannot be told from a real short poke by duration, and the tell
+    ``poke_first_in == poke_odor_start`` is also satisfied by a real poke already in progress
+    when the valve opened. Consumers must treat an **absent** ``poke_source`` as "unknown" and
+    omit the filtered variant, never as "all real pokes" -- sessions saved before this was
+    written will never carry it (``DECISIONS.md`` section 2).
+
+    Which of these positions count towards the trial's sequence is deliberately **not** decided
+    here; see ``_trim_unsampled_tail``.
     """
     position_poke_times = {}
     s_bool = poke_data.astype(bool)
@@ -956,6 +972,24 @@ def _position_poke_times(position_locations, poke_data, max_positions, sample_of
             'poke_odor_end': grace_end,
             'poke_first_in': odor_start,
             'required_min_sampling_time_ms': required_min_ms_for(loc['odor_name']),
+            'poke_source': 'grace',
+        }
+
+    def _unsampled_entry(position, loc):
+        """The odor was presented and the animal was not at the port for any of it.
+
+        Timestamps stay null on purpose: there is no poke to time, and a valve-window edge
+        written here would be indistinguishable from a measured one downstream.
+        """
+        return {
+            'position': position,
+            'odor_name': loc['odor_name'],
+            'poke_time_ms': 0.0,
+            'poke_odor_start': None,
+            'poke_odor_end': None,
+            'poke_first_in': None,
+            'required_min_sampling_time_ms': required_min_ms_for(loc['odor_name']),
+            'poke_source': 'outside_grace',
         }
 
     for position in range(1, max_positions + 1):
@@ -967,9 +1001,13 @@ def _position_poke_times(position_locations, poke_data, max_positions, sample_of
 
         intervals, _first_in = windows.poke_intervals_in_window(s_bool, odor_start, odor_end)
         if not intervals:
-            entry = _grace_entry(position, loc, odor_start, odor_end)
-            if entry is not None:
-                position_poke_times[position] = entry
+            # Grace is attempted only when the window holds no poke at all, which is the rule
+            # it has always had -- a zero-length block inside the window does not fall back
+            # to it.
+            position_poke_times[position] = (
+                _grace_entry(position, loc, odor_start, odor_end)
+                or _unsampled_entry(position, loc)
+            )
             continue
 
         merged = windows.merge_short_gaps(intervals, sample_offset_time_ms)
@@ -986,18 +1024,119 @@ def _position_poke_times(position_locations, poke_data, max_positions, sample_of
                 'poke_odor_end': first_block_end,
                 'poke_first_in': first_block_start,
                 'required_min_sampling_time_ms': required_min_ms_for(loc['odor_name']),
+                'poke_source': 'poke',
             }
+        else:
+            position_poke_times[position] = _unsampled_entry(position, loc)
 
     return position_poke_times
 
 
-def _build_presentations(valid_positions, position_valve_times, position_poke_times):
-    """One row per sampled position, in presentation order. Returns ``(rows, last_event_index)``."""
-    num_positions = len(valid_positions)
-    last_event_index = num_positions - 1 if num_positions else None
+def _trim_unsampled_tail(positions, position_poke_times):
+    """The leading run of positions the trial is credited with. Interior gaps stay.
+
+    Nothing is deleted: the caller keeps every presented position in ``position_poke_times``
+    and ``presentations`` and uses this only to decide how much of that counts as the
+    ``odor_sequence`` -- so the returned list is always a **prefix** of ``positions``.
+
+    Called only for a trial that never reached AwaitReward. There the last valve activation is
+    the odor the rig opened as the animal was leaving: it was presented, but the sequence did
+    not advance through it, and counting it would put an odor the animal never smelled at the
+    end of ``odor_sequence`` and make it ``last_odor``. ``abortion_classification`` agrees --
+    measured on the 9 regression sessions its ``last_odor_position``, derived by a wholly
+    independent pipeline, is the last **poked** position on 74 of 74.
+
+    An interior gap is the opposite case: the rig demonstrably opened a later valve, so the
+    sequence *did* move past that position and the odor belongs in the sequence. It stays, and
+    its ``poke_source`` is what keeps a 0 ms entry out of the poke-duration averages.
+
+    The test is ``poke_source != 'poke'``, so a trailing **grace** entry is trimmed too. That
+    is the ``presentations``-vs-``last_odor_position`` disagreement section 10 measured at 10
+    of 1731 trials, resolved in favour of the abort pipeline.
+
+    On a completed trial nothing is trimmed: reaching AwaitReward means the rig counted every
+    position it opened, including a final one our reconstruction from DIPort0 scores as
+    unpoked. ``DECISIONS.md`` section 10.
+    """
+    trimmed = list(positions)
+    while trimmed and (position_poke_times.get(trimmed[-1]) or {}).get('poke_source') != 'poke':
+        trimmed.pop()
+    return trimmed
+
+
+def _odourdisc_await_window(trial, *, trial_start, trial_end, valve_activations,
+                            await_reward_times, initiation_starts_sorted, cue_poke_starts_sorted,
+                            supply_port1_times, supply_port2_times, port1_pokes, port2_pokes):
+    """Where to look for this odour-discrimination trial's AwaitReward, and what is in there.
+
+    The task fires AwaitReward once the animal commits, which can be *after* the detected trial
+    window ends, so the search runs from the initiation to the next initiation rather than to
+    ``trial_end``. That makes it a wider window than the plain ``trial_start <= t <= trial_end``
+    test the standard protocol uses, and the two disagree.
+
+    Computed before the sequence is assembled because ``_trim_unsampled_tail`` needs to know
+    whether the trial completed, and returned whole so the scoring branch reuses these values
+    rather than recomputing them under a second definition.
+
+    An empty ``await_in_window`` means the trial aborted.
+    """
+    last_valve_event = valve_activations[-1] if valve_activations else None
+    last_valve_start = (last_valve_event or {}).get('start_time')
+
+    current_init_ts = pd.to_datetime(trial.get('initiation_sequence_time'), errors='coerce') \
+        if trial.get('initiation_sequence_time') is not None else pd.NaT
+    await_window_start = current_init_ts if not pd.isna(current_init_ts) else \
+        (trial_start if trial_start is not None else last_valve_start)
+
+    ctx = {
+        'last_valve_start': last_valve_start,
+        'await_window_start': await_window_start,
+        'next_init': None,
+        'recording_end': None,
+        'await_in_window': [],
+    }
+    if await_window_start is None or pd.isna(await_window_start):
+        return ctx
+
+    next_init = None
+    if not initiation_starts_sorted.empty and not pd.isna(current_init_ts):
+        idx = initiation_starts_sorted.searchsorted(current_init_ts, side='right')
+        if idx < len(initiation_starts_sorted):
+            next_init = initiation_starts_sorted.iloc[idx]
+
+    recording_end = _recording_end(initiation_starts_sorted, cue_poke_starts_sorted,
+                                   supply_port1_times, supply_port2_times,
+                                   port1_pokes, port2_pokes, trial_end)
+
+    await_upper_bound = next_init if next_init is not None else recording_end
+    ctx['next_init'] = next_init
+    ctx['recording_end'] = recording_end
+    ctx['await_in_window'] = [t for t in await_reward_times
+                              if await_window_start <= t <= await_upper_bound]
+    return ctx
+
+
+def _build_presentations(presented_positions, position_valve_times, position_poke_times,
+                         *, sampled_count=None):
+    """One row per **presented** position, in presentation order.
+
+    Every position whose valve opened gets a row, including a trailing one the animal never
+    poked: the record of what was presented stays complete, and ``poke_source`` on each row
+    says whether it was sampled.
+
+    ``last_event_index`` instead marks where the *counted* sequence ends -- on an aborted trial
+    the last real poke, with the unsampled trailing rows sitting after it. ``sampled_count`` is
+    the length of that leading run (see ``_trim_unsampled_tail``); it defaults to every row,
+    which is the completed-trial case.
+
+    Returns ``(rows, last_event_index)``.
+    """
+    if sampled_count is None:
+        sampled_count = len(presented_positions)
+    last_event_index = sampled_count - 1 if sampled_count else None
 
     presentations = []
-    for idx_in_trial, pos in enumerate(valid_positions):
+    for idx_in_trial, pos in enumerate(presented_positions):
         valve_info = position_valve_times.get(pos) or {}
         poke_info = position_poke_times.get(pos) or {}
         presentations.append({
@@ -1009,6 +1148,9 @@ def _build_presentations(valid_positions, position_valve_times, position_poke_ti
             'valve_duration_ms': float(valve_info.get('valve_duration_ms', 0.0) or 0.0),
             'poke_time_ms': float(poke_info.get('poke_time_ms', 0.0) or 0.0),
             'poke_first_in': poke_info.get('poke_first_in'),
+            # Carried so a consumer reading `presentations` can apply the same
+            # `poke_source` filter as one reading `position_poke_times`.
+            'poke_source': poke_info.get('poke_source'),
             'required_min_sampling_time_ms': valve_info.get('required_min_sampling_time_ms'),
             'is_last_event': last_event_index is not None and idx_in_trial == last_event_index,
         })
@@ -1405,13 +1547,37 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
         position_poke_times = _position_poke_times(
             position_locations, poke_data, max_positions, sample_offset_time_ms, required_min_ms_for)
 
-        # A position counts only if the animal actually poked during it.
-        valid_positions = [
-            pos for pos in sorted(position_valve_times.keys())
-            if position_poke_times.get(pos) and position_poke_times[pos].get('poke_time_ms', 0.0) > 0.0
-        ]
+        trial_await_rewards = [t for t in await_reward_times if trial_start <= t <= trial_end]
+
+        # Whether the rig reached AwaitReward decides how much of the valve sequence counts,
+        # so it has to be known before the sequence is assembled. The two protocols search
+        # different windows for it -- see `_odourdisc_await_window`.
+        odourdisc_ctx = None
+        if is_odour_discrimination:
+            odourdisc_ctx = _odourdisc_await_window(
+                trial, trial_start=trial_start, trial_end=trial_end,
+                valve_activations=valve_activations, await_reward_times=await_reward_times,
+                initiation_starts_sorted=initiation_starts_sorted,
+                cue_poke_starts_sorted=cue_poke_starts_sorted,
+                supply_port1_times=supply_port1_times, supply_port2_times=supply_port2_times,
+                port1_pokes=port1_pokes, port2_pokes=port2_pokes)
+            has_await_reward = bool(odourdisc_ctx['await_in_window'])
+        else:
+            has_await_reward = bool(trial_await_rewards)
+
+        # Every presented position counts on a completed trial: reaching AwaitReward means the
+        # rig advanced through all of them. On an aborted trial the trailing valve activation
+        # is the odor the animal walked away from, so the *sequence* stops at the last real
+        # poke -- but the position is still recorded in `position_poke_times` and
+        # `presentations`, marked `outside_grace`, so the record of what was presented stays
+        # complete and only what the trial is credited with shrinks.
+        presented_positions = sorted(position_poke_times.keys())
+        valid_positions = (presented_positions if has_await_reward
+                           else _trim_unsampled_tail(presented_positions, position_poke_times))
+
         presentations, last_event_index = _build_presentations(
-            valid_positions, position_valve_times, position_poke_times)
+            presented_positions, position_valve_times, position_poke_times,
+            sampled_count=len(valid_positions))
 
         pos1_info = position_valve_times.get(1, {}) or {}
         for attempt in pos1_info.get('prior_presentations', []) or []:
@@ -1429,8 +1595,6 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
                 'attempt_poke_time_ms': dur_ms,
                 'required_min_sampling_time_ms': attempt.get('required_min_sampling_time_ms', required_min_ms_for(attempt.get('odor_name'))),
             })
-
-        trial_await_rewards = [t for t in await_reward_times if trial_start <= t <= trial_end]
 
         final_odor_sequence = [
             (position_valve_times[pos] or {}).get('odor_name')
@@ -1487,34 +1651,19 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
         trial_dict['hidden_rule_success_position'] = hr_success_position
 
         if is_odour_discrimination:
-            last_valve_event = valve_activations[-1] if valve_activations else None
             trial_dict['odourdiscrimination_mode'] = True
-            trial_dict['last_valve_start'] = (last_valve_event or {}).get('start_time')
+            trial_dict['last_valve_start'] = odourdisc_ctx['last_valve_start']
 
-            current_init_ts = pd.to_datetime(trial.get('initiation_sequence_time'), errors='coerce') \
-                if trial.get('initiation_sequence_time') is not None else pd.NaT
-            await_window_start = current_init_ts if not pd.isna(current_init_ts) else \
-                (trial_start if trial_start is not None else trial_dict['last_valve_start'])
-
+            await_window_start = odourdisc_ctx['await_window_start']
             if await_window_start is None or pd.isna(await_window_start):
                 aborted_sequences.append(trial_dict.copy())
                 initiated_trials_list.append(trial_dict)
                 continue
 
-            next_init = None
-            if not initiation_starts_sorted.empty and not pd.isna(current_init_ts):
-                idx = initiation_starts_sorted.searchsorted(current_init_ts, side='right')
-                if idx < len(initiation_starts_sorted):
-                    next_init = initiation_starts_sorted.iloc[idx]
+            next_init = odourdisc_ctx['next_init']
+            recording_end = odourdisc_ctx['recording_end']
 
-            recording_end = _recording_end(initiation_starts_sorted, cue_poke_starts_sorted,
-                                           supply_port1_times, supply_port2_times,
-                                           port1_pokes, port2_pokes, trial_end)
-
-            # AwaitReward is searched from the initiation up to the next one -- the task fires
-            # it once the animal commits, which can be after the detected trial window ends.
-            await_upper_bound = next_init if next_init is not None else recording_end
-            await_in_window = [t for t in await_reward_times if await_window_start <= t <= await_upper_bound]
+            await_in_window = odourdisc_ctx['await_in_window']
             if not await_in_window:
                 trial_dict['abort_reason'] = 'no_await_reward'
                 aborted_sequences.append(trial_dict.copy())
@@ -1576,7 +1725,9 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
                 if v.get('odor_name'):
                     agg_odor_valve_times[v['odor_name']].append(v['valve_duration_ms'])
         for pos, p in (position_poke_times or {}).items():
-            if p and 'poke_time_ms' in p:
+            # Real pokes only: a grace entry's duration is synthesised and an `outside_grace`
+            # one is 0 ms, and averaging either into a measured sampling time understates it.
+            if p and 'poke_time_ms' in p and p.get('poke_source', 'poke') == 'poke':
                 agg_position_poke_times[pos].append(p['poke_time_ms'])
                 if p.get('odor_name'):
                     agg_odor_poke_times[p['odor_name']].append(p['poke_time_ms'])

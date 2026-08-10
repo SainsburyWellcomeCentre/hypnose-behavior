@@ -2,7 +2,7 @@
   "subjid": "046",
   "date": "20260306",
   "label": "standard_quintuples_no_hidden_rule",
-  "trial_data": "a5091dec4396087e006dcc91d8df12d5",
+  "trial_data": "2bc17ee2f6e8d5d673ad207e77420902",
   "trial_data_columns": {
     "abortion_time": "15e9ce63c331fb198d55a6acb5f1e3f9",
     "abortion_type": "eb7ff6b07d12bb2846d790ca52a0504b",
@@ -47,9 +47,9 @@
     "poke_window_end": "cea0b10d292ba03885e810e220e0f58e",
     "port1_pokes_count": "2d8fa0e1c8bea36d54dd540fe74df97f",
     "port2_pokes_count": "5083df8cbc593974287363e73a7395fc",
-    "position_poke_times": "5869c59b35e67e2735fa0d2cead264e5",
+    "position_poke_times": "6e6e9afa5fd18229059ded72dfa2a20e",
     "position_valve_times": "b8ec97fb70f176ab73c87efc0bb91a32",
-    "presentations": "f806eb6e4c302f0b2aa5632eac6f4ec1",
+    "presentations": "565e2d5a7854033bd814b38b18988482",
     "required_min_sampling_time_ms": "064871c2f2a37fa7609714a615111d82",
     "response_time_category": "bdbc6edbd12b6baed73fd962e427918a",
     "response_time_ms": "1f5d97a63ef7b1f29b596bf4c42cdb5b",
@@ -65,7 +65,7 @@
     "total_supply_count": "b1593d5e7549c1ab0dae0e61d54af483",
     "trial_id": "243ac04e93b390be1b469ce51b48bd17"
   },
-  "metrics": "6fdee16871b2198328b1b3404eb4e21c",
+  "metrics": "42101cbbb58d04f1540530e9d731de06",
   "metrics_keys": {
     "decision_accuracy": "5276ee3250b9a68dbb458e8b1d55baee",
     "decision_accuracy_by_odor": "726c05da72ea68a11dbc74a82f81a1cf",
@@ -76,7 +76,7 @@
     "FA_odor_bias": "cd565c83460409cf01693f507c674621",
     "FA_position_bias": "f312d36601ce721253b81aa672f3ac81",
     "sequence_completion_rate": "a2113558c7bffa5f2e8d9cf581b32c2a",
-    "odorx_abortion_rate": "f4fa42f9b232061d75602c557f04571d",
+    "odorx_abortion_rate": "1cdc08e33cf3b8f3758a62d1b90654e2",
     "hidden_rule_performance": "9983656188c665b4613405c752e100af",
     "hidden_rule_detection_rate": "9983656188c665b4613405c752e100af",
     "hidden_rule_by_odor": "83a3c1f878aa80e559bac3fca505d9e6",

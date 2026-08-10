@@ -205,11 +205,11 @@ def sampled_positions(trial, *, only_true_pokes: bool = False) -> Optional[list[
     two helpers rather than one with a flag.
 
     ``only_true_pokes=True`` keeps only entries marked ``poke_source == "poke"``,
-    excluding grace-synthesised and 0 ms entries. That field does not exist yet
-    and will never exist on already-saved sessions, so when it is **absent this
+    excluding grace-synthesised and ``outside_grace`` entries. That field will
+    never exist on sessions saved before Phase 6b, so when it is **absent this
     returns None** -- callers must omit the filtered variant rather than fall
     back to the unfiltered value, which would make old and new sessions look
-    comparable when they are not. Phase 7b adds the field.
+    comparable when they are not.
     """
     ppt = parse_json_column(trial.get("position_poke_times", {}))
     entries = ppt if isinstance(ppt, dict) else {}
@@ -243,10 +243,11 @@ def sampled_positions(trial, *, only_true_pokes: bool = False) -> Optional[list[
 # Fields carried by each blob. `presentations` is the only one with
 # index_in_trial / is_last_event; only `position_poke_times` has the poke
 # start/end timestamps; only `position_valve_times` has valve_end.
-_POKE_FIELDS = ("poke_time_ms", "poke_odor_start", "poke_odor_end", "poke_first_in")
+_POKE_FIELDS = ("poke_time_ms", "poke_odor_start", "poke_odor_end", "poke_first_in",
+                "poke_source")
 _VALVE_FIELDS = ("valve_start", "valve_end", "valve_duration_ms")
 _PRES_FIELDS = ("index_in_trial", "is_last_event", "poke_time_ms", "poke_first_in",
-                "valve_start", "valve_end", "valve_duration_ms")
+                "poke_source", "valve_start", "valve_end", "valve_duration_ms")
 
 _ID_COLUMNS = ("trial_id", "global_trial_id", "subjid", "date", "session_num")
 
@@ -292,21 +293,24 @@ def build_position_data(trials) -> pd.DataFrame:
     positions** and a metric that reads one must not silently pick up rows from
     another:
 
-    - on a *completed* trial ``position_valve_times`` holds every position with a
-      valve activation, including ones whose poke registered as ~0 ms -- which
-      ``position_poke_times``, ``presentations`` and ``num_odors`` all drop
-      (Q5 pattern 2, seen from the writer's side);
-    - on an *aborted* trial all three are restricted to positions with a poke.
+    - on a *completed* trial all three now hold every position with a valve
+      activation, including ones the animal never poked -- Phase 6b writes those
+      rather than dropping them, marking each ``poke_source == "outside_grace"``;
+    - on an *aborted* trial ``position_valve_times`` still holds one position more
+      than the other two whenever the trial ended on an unpoked odor, because the
+      trailing entry is trimmed back to the last real poke (``classification_utils
+      ._trim_unsampled_tail``).
 
     So each row records **which blobs it came from** (``in_poke_times`` /
     ``in_presentations`` / ``in_valve_times``) and every metric filters on the
     provenance matching the blob it reads today. Without that,
     ``manual_vs_auto_stop_preference`` -- which counts valve durations -- would
-    gain the 0 ms positions and change value.
+    gain the trimmed positions and change value.
 
-    ``poke_source`` is deliberately **not** synthesised: Phase 7b adds it, and an
-    absent column is how ``sampled_positions`` knows to omit the
-    ``only_true_pokes`` variants rather than return the unfiltered value.
+    ``poke_source`` is carried through but never **synthesised**: an absent column
+    is how ``sampled_positions`` knows to omit the ``only_true_pokes`` variants,
+    and how ``metrics.sampling._real_pokes`` knows to leave a pre-6b session's
+    sampling averages exactly as they were.
     """
     if trials is None or len(trials) == 0:
         return pd.DataFrame()
