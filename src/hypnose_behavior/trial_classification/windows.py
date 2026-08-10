@@ -318,6 +318,12 @@ def cue_poke_intervals(poke_series_full: pd.Series) -> list[tuple]:
     return intervals
 
 
+def state_at(series_bool: pd.Series, ts) -> bool:
+    """Whether the port was IN at ``ts``, read from the last sample at or before it."""
+    prev = series_bool.loc[:ts]
+    return bool(prev.iloc[-1]) if len(prev) else False
+
+
 def poke_intervals_in_window(series_bool: pd.Series, window_start, window_end) -> tuple[list[tuple], object]:
     """IN intervals within ``[window_start, window_end]``, clipped to the window.
 
@@ -407,6 +413,121 @@ def grace_poke_ms(series_bool: pd.Series, window_start, window_end) -> tuple[flo
     if overlap_end <= window_start:
         return 0.0, None
     return float((overlap_end - window_start).total_seconds() * 1000.0), overlap_end
+
+
+def abort_window_poke_summary(series_bool: pd.Series, window_start, window_end,
+                              sample_offset_time_ms: float) -> dict:
+    """Poke summary for one odor window, ``abortion_classification``'s rule.
+
+    Two things differ from the per-position measurement in ``classify_trials``, and both are
+    load-bearing:
+
+    * the pre-odor grace is **not** applied when the window contains no samples at all and the
+      port was OUT beforehand -- that case returns zero immediately;
+    * ``poke_odor_start`` is the merged block's own start, not the window start.
+
+    Returns ``poke_time_ms`` / ``poke_first_in`` / ``poke_odor_start``, plus ``poke_odor_end``
+    whenever a block or a grace overlap was found.
+    """
+    if window_start is None or window_end is None or window_start >= window_end:
+        return {'poke_time_ms': 0.0, 'poke_first_in': None, 'poke_odor_start': window_start}
+
+    s_bool = series_bool.sort_index()
+    in_at_start = state_at(s_bool, window_start)
+    if s_bool.loc[window_start:window_end].empty and not in_at_start:
+        return {'poke_time_ms': 0.0, 'poke_first_in': None, 'poke_odor_start': window_start}
+
+    intervals, first_in = poke_intervals_in_window(s_bool, window_start, window_end)
+    if not intervals:
+        grace_ms, grace_end = grace_poke_ms(s_bool, window_start, window_end)
+        if grace_ms > 0.0:
+            return {
+                'poke_time_ms': grace_ms,
+                'poke_first_in': window_start,
+                'poke_odor_start': window_start,
+                'poke_odor_end': grace_end,
+            }
+        return {'poke_time_ms': 0.0, 'poke_first_in': None, 'poke_odor_start': window_start}
+
+    first_block_start, first_block_end = merge_short_gaps(intervals, sample_offset_time_ms)[0]
+    return {
+        'poke_time_ms': float((first_block_end - first_block_start).total_seconds() * 1000.0),
+        'poke_first_in': first_in,
+        'poke_odor_start': first_block_start,
+        'poke_odor_end': first_block_end,
+    }
+
+
+def valve_windows_with_grid_fallback(odor_map) -> list[dict]:
+    """Valve open windows, ``abortion_classification``'s rule.
+
+    Resolves the odor name through four lookups -- ``(olf_id, index)`` tuple key, column key,
+    ``"{olf_id}{index}"`` string key, then the olfactometer grid -- rather than the single
+    string key the other two builders use, and carries ``olf_id``/``col_index`` instead of
+    ``valve_key``. Its edge pairing also advances the fall pointer after each match, so one
+    fall can never close two activations.
+    """
+    olfactometer_valves = odor_map.get('olfactometer_valves', {})
+    valve_to_odor = odor_map.get('valve_to_odor', {})
+
+    def resolve_odor_name(olf_id, idx, col=None):
+        name = valve_to_odor.get((olf_id, idx))
+        if name is None and col is not None:
+            name = valve_to_odor.get(col)
+        if name is None:
+            name = valve_to_odor.get(f"{olf_id}{idx}")
+        if not isinstance(name, str):
+            grid = odor_map.get('odour_to_olfactometer_map') or odor_map.get('odor_to_olfactometer_map')
+            if isinstance(grid, (list, tuple)) and len(grid) > olf_id:
+                row = grid[olf_id]
+                if isinstance(row, (list, tuple)) and 0 <= idx < len(row):
+                    name = row[idx]
+        return name if isinstance(name, str) else None
+
+    all_valve_activations: list[dict] = []
+    for olf_id, df in olfactometer_valves.items():
+        if df is None or getattr(df, 'empty', True):
+            continue
+        for i, col in enumerate(df.columns):
+            odor_name = resolve_odor_name(olf_id, i, col=col)
+            if not odor_name or odor_name.lower() == 'purge':
+                continue
+            s = df[col].astype(bool)
+            starts = rising_edges(s)
+            ends = falling_edges(s)
+            j = 0
+            for st in starts:
+                while j < len(ends) and ends[j] <= st:
+                    j += 1
+                if j >= len(ends):
+                    break
+                all_valve_activations.append({
+                    'start_time': st,
+                    'end_time': ends[j],
+                    'odor_name': odor_name,
+                    'olf_id': olf_id,
+                    'col_index': i,
+                })
+                j += 1
+    all_valve_activations.sort(key=lambda x: x['start_time'])
+    return all_valve_activations
+
+
+def valve_events_strictly_inside(all_valve_activations: list[dict], t_start, t_end) -> list[dict]:
+    """Activations overlapping ``(t_start, t_end)``, ``abortion_classification``'s rule.
+
+    Strict at both edges, so an activation that closed exactly at ``t_start`` or opened exactly
+    at ``t_end`` is excluded -- ``valve_events_overlapping`` includes both. Relies on the list
+    being sorted by start to stop early.
+    """
+    evs = []
+    for ev in all_valve_activations:
+        if ev['end_time'] <= t_start:
+            continue
+        if ev['start_time'] >= t_end:
+            break
+        evs.append(ev)
+    return evs
 
 
 def bout_around_anchor(intervals: list[tuple], anchor_ts, sample_offset_time_ms: float, cap_end=None):
