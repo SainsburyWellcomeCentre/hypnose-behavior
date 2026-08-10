@@ -736,13 +736,27 @@ chosen properly instead of by fallback". Measured after 6b landed, **the fallbac
 on all 20 trials**. Nothing regressed — the prediction was simply wrong about where the work
 lives.
 
-`analyze_response_times` does not read `position_poke_times`. It builds its **own** position map
-from valve events (`position_locations_rt`) and takes the last one as the target, so
-`poke_source` never reaches the decision. The marker makes the correct anchor *available*; it
-does not select it. Making the fallback stop firing means changing the target selection in
-`analyze_response_times` to the last position with `poke_source == 'poke'` — a change to this
-section's own logic, needing its own measurement and fixture regeneration. **Do not assume the
-fallback is dead because `poke_source` exists.**
+**The 20 trials are not broken — they were fixed in Phase 11 and remain fixed.** The rescue has
+nothing to do with `poke_source`: that code has never read it. It keys off the scan inside the
+target odor's window returning `None`, which it still does. Only completed trials reach here at
+all — `analyze_response_times` emits `rewarded`/`unrewarded`/`timeout`, so no false alarm and no
+aborted trial ever touches this path.
+
+What the brief actually wanted was tidiness: choose the target as the last position with
+`poke_source == 'poke'`, and the primary scan succeeds on its own, leaving the rescue branch dead.
+Same trials, same response times — reached by rule rather than by rescue — and the reported
+`target` would name an odor the animal actually sampled.
+
+**Recommendation: leave it.** The gain is cosmetic and the risk is not. Repointing the target
+changes `last_poke_out_time`, which feeds `search_start = max(last_poke_out_time,
+await_reward_time)`; the new scan window can run past AwaitReward and pick up a *later* cue exit
+if the animal returned to the port, moving `search_start`, the reward pokes found, and possibly
+an outcome. It would also require reconciling two deliberately different position rules —
+`first_occurrence_positions` here vs `_assign_positions_to_valve_events` in `classify_trials`,
+which disagree whenever an odor re-appears after a different one.
+
+**Do not assume the fallback is dead because `poke_source` exists** — and do not treat its firing
+as a defect.
 
 ### No bespoke marker for "ended on an unpoked odor"
 
