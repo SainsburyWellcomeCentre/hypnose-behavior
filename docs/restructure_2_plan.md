@@ -468,10 +468,11 @@ is Phase 10's split and was never reachable from here.*
 
 ### Naming debt to settle later — the (a)/(b) latency pair *(6c, 2026-08-10)*
 
-Every reward-port latency now exists twice: **(a)** measured from where the response window
-starts, which is what the label buckets, and **(b)** measured from the animal's last cue-port
-exit before the poke, which is how fast it actually moved. The base names are **not** consistent
-about which is which:
+Every reward-port latency now exists twice. Both **end at the reward-port poke**; they differ
+only in where they start — **(a)** at the window start (what the labels bucket), **(b)** at the
+animal's last cue-port exit before that poke (how fast it moved). `DECISIONS.md` §16.
+
+The base names are not yet consistent about which is which:
 
 | family | (a) window-relative | (b) movement |
 |---|---|---|
@@ -479,11 +480,25 @@ about which is which:
 | aborted (FA) | **`fa_latency_ms`** | `fa_movement_latency_ms` |
 | no-go (FR) | **`fr_latency_ms`** | `fr_movement_latency_ms` |
 
-`response_time_ms` is (b) while `fa_latency_ms` / `fr_latency_ms` are (a). That was a deliberate
-trade: making `response_time_ms` mean (a) would have been consistent but repointed ~1063 values
-and moved `avg_response_time` by about a second, where keeping it as (b) moved 39. **Unify the
-naming in a later phase**, as one intended output change with its own fixture regeneration —
-and note that the metric `avg_response_time` reads (b) today.
+**The agreed target (2026-08-10) is a pure rename — no value moves:**
+
+| family | (a) → | (b) → |
+|---|---|---|
+| completed | `completed_window_latency_ms` *(already correct)* | `response_time_ms` *(already correct)* |
+| aborted | `fa_latency_ms` → `fa_window_latency_ms` | `fa_movement_latency_ms` → `fa_response_time_ms` |
+| no-go | `fr_latency_ms` → `fr_window_latency_ms` | `fr_movement_latency_ms` → `fr_response_time_ms` |
+
+Every (a) ends `_window_latency_ms`; every (b) is a `response_time`. This works **because
+`response_time_ms` is already (b) and `completed_window_latency_ms` is already (a)** — so the
+completed pair needs nothing, and the FA/FR pairs need only new names. `trial_data` values are
+untouched; the fixture md5s move only because column *names* are part of the canonical CSV.
+
+Do **not** instead repoint `response_time_ms` to (a) for symmetry: that was measured and costs
+~1063 changed values and about a second on `avg_response_time`, where the rename costs none.
+
+Sweep with it: `metric_analysis/metrics/false_alarm.fa_latency_from_pokeout` is a third,
+worse attempt at (b) — it anchors on `poke_odor_end`, so it carries the 25 ms grace bias of §15
+*and* does not exclude resampling. Repoint it at the (b) column.
 
 ## Phase 6 — Trial classification  *(highest risk; split into 6a and 6b)*
 
