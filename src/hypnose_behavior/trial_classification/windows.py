@@ -14,6 +14,8 @@ does differently, rather than being folded into one function behind a flag.
 """
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
+
 import pandas as pd
 
 
@@ -168,6 +170,22 @@ def last_poke_out_before(poke_data: pd.Series, window_start, window_end):
     return last_poke_out_time
 
 
+def collapse_consecutive_odors(valve_events: list[dict]) -> list[dict]:
+    """Collapse consecutive repeats of the same odor, keeping the **last** of each block.
+
+    A non-consecutive re-entry of an odor survives as a separate event, so A, A, B, A yields
+    three events. Repeats of the opening odor are the animal sniffing and leaving before it
+    commits; only the last one starts the trial.
+    """
+    collapsed: list[dict] = []
+    for ev in valve_events:
+        if collapsed and collapsed[-1]['odor_name'] == ev['odor_name']:
+            collapsed[-1] = ev
+        else:
+            collapsed.append(ev)
+    return collapsed
+
+
 def first_occurrence_positions(trial_valve_events: list[dict]) -> tuple[dict, list]:
     """Assign positions by **first occurrence of each odor**, ``analyze_response_times``' rule.
 
@@ -262,6 +280,192 @@ def poke_segments_in_valve_window(poke_periods, cue_pokes, event_start, event_en
     if inferred_end > event_start:
         overlapping_segments.append((event_start, inferred_end))
     return overlapping_segments
+
+
+def paired_intervals(series_bool: pd.Series) -> list[tuple]:
+    """Pair rise/fall edges into ``(start, end)`` intervals with one advancing pointer.
+
+    Falls before the first rise are skipped; a rise with no later fall is dropped.
+    """
+    starts = rising_edges(series_bool)
+    ends = falling_edges(series_bool)
+    intervals = []
+    i = j = 0
+    while i < len(starts) and j < len(ends):
+        if ends[j] <= starts[i]:
+            j += 1
+            continue
+        intervals.append((starts[i], ends[j]))
+        i += 1
+        j += 1
+    return intervals
+
+
+def cue_poke_intervals(poke_series_full: pd.Series) -> list[tuple]:
+    """``paired_intervals`` plus the leading-poke repair used by ``classify_trials``.
+
+    If the series begins already IN with no rising edge to mark it, prepend an interval from
+    the first sample to the first fall after it -- otherwise a poke in progress when recording
+    started would be invisible. ``abortion_classification`` deliberately omits this repair, so
+    it calls ``paired_intervals`` directly.
+    """
+    intervals = paired_intervals(poke_series_full)
+    starts = rising_edges(poke_series_full)
+    if poke_series_full.size and poke_series_full.iloc[0] and (not starts or poke_series_full.index[0] < starts[0]):
+        first_fall = next((t for t in falling_edges(poke_series_full) if t > poke_series_full.index[0]), None)
+        if first_fall is not None:
+            intervals.insert(0, (poke_series_full.index[0], first_fall))
+    return intervals
+
+
+def poke_intervals_in_window(series_bool: pd.Series, window_start, window_end) -> tuple[list[tuple], object]:
+    """IN intervals within ``[window_start, window_end]``, clipped to the window.
+
+    Returns ``(intervals, first_in)``. A poke already in progress at ``window_start`` opens an
+    interval there and sets ``first_in`` to ``window_start``; one still open at ``window_end``
+    is closed there. An empty slice with the port OUT beforehand yields ``([], None)``.
+    """
+    prev = series_bool.loc[:window_start]
+    in_at_start = bool(prev.iloc[-1]) if len(prev) else False
+    w = series_bool.loc[window_start:window_end]
+    if w.empty and not in_at_start:
+        return [], None
+
+    rises = w & ~w.shift(1, fill_value=in_at_start)
+    falls = ~w & w.shift(1, fill_value=in_at_start)
+    intervals = []
+    cur = window_start if in_at_start else None
+    first_in = window_start if in_at_start else None
+    for ts in w.index:
+        if rises.get(ts, False) and cur is None:
+            cur = ts
+            if first_in is None:
+                first_in = ts
+        if falls.get(ts, False) and cur is not None:
+            intervals.append((cur, ts))
+            cur = None
+    if cur is not None:
+        intervals.append((cur, window_end))
+    return intervals, first_in
+
+
+def merge_short_gaps(intervals: list[tuple], sample_offset_time_ms: float, cap_end=None) -> list[tuple]:
+    """Merge consecutive intervals separated by a gap <= ``sample_offset_time_ms``.
+
+    Pokes closer together than ``sampleOffsetTime`` are one sample -- the animal did not
+    disengage. ``cap_end`` clips each merged end to the window; passing ``None`` leaves the
+    merge uncapped, which is what the per-position poke measurement does.
+    """
+    if not intervals:
+        return []
+    merged = [intervals[0]]
+    for start, end in intervals[1:]:
+        ls, le = merged[-1]
+        gap_ms = (start - le).total_seconds() * 1000.0
+        if gap_ms <= sample_offset_time_ms:
+            extended = max(le, end)
+            merged[-1] = (ls, min(extended, cap_end) if cap_end is not None else extended)
+        else:
+            merged.append((start, end))
+    return merged
+
+
+PRE_ODOR_GRACE_MS = 25.0
+
+
+def last_poke_end_before(series_bool: pd.Series, ts):
+    """Timestamp of the last poke-out at or before ``ts``, or ``None``."""
+    if ts is None or series_bool is None or series_bool.empty:
+        return None
+    before = series_bool.loc[:ts]
+    if before.empty:
+        return None
+    falls = ~before & before.shift(1, fill_value=False)
+    if not falls.any():
+        return None
+    return falls[falls].index[-1]
+
+
+def grace_poke_ms(series_bool: pd.Series, window_start, window_end) -> tuple[float, object]:
+    """Sampling credit for a poke that ended just *before* the window opened.
+
+    The valve and the animal do not switch at the same instant. A poke that ended within
+    ``PRE_ODOR_GRACE_MS`` of the window start is treated as overlapping it, so a position is
+    not scored as unsampled purely because the poke-out landed a few milliseconds early.
+
+    Returns ``(overlap_ms, overlap_end)``; ``(0.0, None)`` when the grace does not apply.
+    """
+    last_poke_end = last_poke_end_before(series_bool, window_start)
+    if last_poke_end is None or window_start is None or window_end is None:
+        return 0.0, None
+    if last_poke_end > window_start:
+        return 0.0, None
+    grace_end = last_poke_end + pd.Timedelta(milliseconds=PRE_ODOR_GRACE_MS)
+    if grace_end <= window_start:
+        return 0.0, None
+    overlap_end = min(window_end, grace_end)
+    if overlap_end <= window_start:
+        return 0.0, None
+    return float((overlap_end - window_start).total_seconds() * 1000.0), overlap_end
+
+
+def bout_around_anchor(intervals: list[tuple], anchor_ts, sample_offset_time_ms: float, cap_end=None):
+    """Merged poke bout covering ``anchor_ts``, extended both backwards and forwards.
+
+    Used for the failed Position-1 attempts, where the poke that belongs to an attempt may have
+    started before that attempt's valve opened. Starts from the interval containing
+    ``anchor_ts`` (or the first one after it), merges backwards while OUT gaps are within
+    ``sample_offset_time_ms`` and the previous interval does not start before ``cap_end``, then
+    forwards under the same gap rule while staying before ``cap_end``.
+
+    Returns ``(first_in, bout_end_capped, duration_ms)``.
+    """
+    if anchor_ts is None or not intervals:
+        return None, None, 0.0
+
+    starts_only = [s for s, _ in intervals]
+
+    idx = bisect_right(starts_only, anchor_ts) - 1
+    if 0 <= idx < len(intervals) and intervals[idx][0] <= anchor_ts < intervals[idx][1]:
+        k = idx
+    else:
+        k = bisect_left(starts_only, anchor_ts)
+        if k >= len(intervals):
+            return None, None, 0.0
+
+    bout_start, bout_end = intervals[k]
+
+    m = k
+    while m - 1 >= 0:
+        prev_start, prev_end = intervals[m - 1]
+        if cap_end is not None and prev_start < cap_end:
+            break
+        gap_ms = (bout_start - prev_end).total_seconds() * 1000.0
+        if gap_ms <= sample_offset_time_ms:
+            bout_start = prev_start
+            m -= 1
+        else:
+            break
+
+    n = k
+    cur_end = bout_end
+    while n + 1 < len(intervals):
+        next_start, next_end = intervals[n + 1]
+        if cap_end is not None and next_start >= cap_end:
+            break
+        gap_ms = (next_start - cur_end).total_seconds() * 1000.0
+        if gap_ms <= sample_offset_time_ms:
+            cur_end = max(cur_end, min(next_end, cap_end))
+            n += 1
+        else:
+            break
+
+    bout_end_capped = cur_end
+    if cap_end is not None and bout_end_capped is not None and bout_end_capped > cap_end:
+        bout_end_capped = cap_end
+
+    dur_ms = max(0.0, (bout_end_capped - bout_start).total_seconds() * 1000.0)
+    return bout_start, bout_end_capped, float(dur_ms)
 
 
 def accumulate_sampling_time(segments, sample_offset_time_ms, required_minimum_ms, on_segment=None):
