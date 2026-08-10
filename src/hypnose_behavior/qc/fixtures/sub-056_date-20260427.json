@@ -2,7 +2,7 @@
   "subjid": "056",
   "date": "20260427",
   "label": "odourdiscrimination_stage2_schema_path",
-  "trial_data": "e7db3fae936bbccf2fb4774412e34ad3",
+  "trial_data": "8f4f536ee004b9c61edf01863aba36ba",
   "trial_data_columns": {
     "abortion_time": "df101f363bd9522ed3335979bb698630",
     "abortion_type": "df101f363bd9522ed3335979bb698630",
@@ -49,7 +49,7 @@
     "presentations": "7c3035b62bcd243dfcdc209d7973dd2f",
     "required_min_sampling_time_ms": "eda6666e72ba125ad14380d1976e6e04",
     "response_time_category": "f1aba42519e0be973a356fca390504c3",
-    "response_time_ms": "92e35130a1fc093b389f58ca212df1fa",
+    "response_time_ms": "e6be1b23f9212088eeb66a664e34b3cf",
     "reward_window_end": "54f7f60598e0adad808de6ce6f3701d9",
     "run_id": "45add551bbd4547105ea52313f745ab8",
     "sequence_end": "0a957a57774524282223065e4f60a217",
@@ -62,7 +62,7 @@
     "total_supply_count": "45add551bbd4547105ea52313f745ab8",
     "trial_id": "b8bef84f7909bda69bb983ba14afd922"
   },
-  "metrics": "adafd210e4554fdbd6c402a5668ad45c",
+  "metrics": "f5a19daa5108484438cbdc5f00b2500e",
   "metrics_keys": {
     "decision_accuracy": "eabcccb525e6c269a6ba254cc40c51d8",
     "decision_accuracy_by_odor": "bd54a58fd1c5f738babfefbfe1f27e26",
@@ -82,7 +82,7 @@
     "avg_sampling_time_completed_sequence": "2a7c1ef3a071a55aabb8686d2d6dc2e3",
     "avg_sampling_time_aborted_sequence": "7ecfb3bf076a6a9635f975fe96ac97fd",
     "abortion_rate_positionX": "f58a060fbf59de0f4e71e8d7c68f985b",
-    "avg_response_time": "da5353a1d7d99d0a3d0a527f6f3a83b8",
+    "avg_response_time": "5304b3dbed16d833500560317bee119a",
     "FA_avg_response_times": "71887bd5ac6b89422efc097ba8daef7b",
     "response_rate": "eabcccb525e6c269a6ba254cc40c51d8",
     "manual_vs_auto_stop_preference": "6d4dd42572b40d03a40f3083dc4413f4",

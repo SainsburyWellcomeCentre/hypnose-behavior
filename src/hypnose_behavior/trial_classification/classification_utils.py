@@ -2031,12 +2031,21 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
 
         # The response is timed from the last exit of the cue port around the final odor,
         # searched up to AwaitReward or one second past the valve closing, whichever is later.
+        odor_start = target_valve_event['start_time']
         odor_end = target_valve_event['end_time']
         last_poke_out_time = windows.last_poke_out_before(
-            poke_data,
-            target_valve_event['start_time'],
-            max(await_reward_time, odor_end + pd.Timedelta(seconds=1)),
-        )
+            poke_data, odor_start, max(await_reward_time, odor_end + pd.Timedelta(seconds=1)))
+
+        if last_poke_out_time is None:
+            # The animal had already left the cue port before this odor's valve opened, so there
+            # is no exit to find inside the window -- the target here is an odor it never
+            # sampled, because positions are assigned from every valve event regardless of poke.
+            # Its last exit *before* the odor is the moment it was free to move, and that is
+            # what the response should be timed from. Without this the trial is dropped
+            # entirely: 20 of 1243 completed trials on the fixture sessions, every one of them
+            # scored rewarded or unrewarded. DECISIONS section 15.
+            last_poke_out_time = windows.last_poke_end_before(poke_data.astype(bool), odor_start)
+
         if last_poke_out_time is None:
             failed_calculations += 1
             per_trial_rows.append(_rt_row(trial_id, np.nan, None, target=target))

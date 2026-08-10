@@ -2,7 +2,7 @@
   "subjid": "057",
   "date": "20260709",
   "label": "single_reward_singrew_task_stage7",
-  "trial_data": "80e654beb2511bb74c0a73bdc574ff43",
+  "trial_data": "3ec7a9f4520e807e670a57a1275dc0ea",
   "trial_data_columns": {
     "abortion_time": "ae19c18eec3738b0fcf4770c77a52bae",
     "abortion_type": "76a2654e576b19f6cf3dce870fb930ed",
@@ -59,7 +59,7 @@
     "presentations": "dc9d038142d2b614795116b7c6808a1a",
     "required_min_sampling_time_ms": "6ac144d92516775d9a8c37c6c4cd9193",
     "response_time_category": "93e671d40dcb8544b5906a779454fa76",
-    "response_time_ms": "ff57044b97885a4a7408f197b5680190",
+    "response_time_ms": "446d1c710020d2f10a7509c3ef71738b",
     "reward_determinacy": "69b11cf9e130b9a393541436a8b1a843",
     "run_id": "c2aebdfcf3b20f6ae9018065d0846948",
     "sequence_end": "a656f6ebd8c96b06529f1f06d213121f",
@@ -74,7 +74,7 @@
     "total_supply_count": "143f76bbc806917b749cb041a2514ef2",
     "trial_id": "c69f7f3a0318db12d2f8e05ae27da853"
   },
-  "metrics": "6b6042ccd4bc1c22021fb40803b804a4",
+  "metrics": "a042379bc77efc27685f3abce31116aa",
   "metrics_keys": {
     "decision_accuracy": "b1ec3a043b83147644b5fa8a29ae6f2c",
     "decision_accuracy_by_odor": "c7db293e5858e29d5b4f62527b670838",
@@ -94,7 +94,7 @@
     "avg_sampling_time_completed_sequence": "c8038400166bb7433b91c000cb65cd58",
     "avg_sampling_time_aborted_sequence": "3555d1ea94b772882e1ab84b4c0766f7",
     "abortion_rate_positionX": "c5bcac71587a40c02c0df5c435c16069",
-    "avg_response_time": "cedbf2b246be68a14e5dbfdfac434219",
+    "avg_response_time": "02f42e88c573704a4068d55a8325025d",
     "FA_avg_response_times": "11a17614e307dd2aa55af4f39f38cea0",
     "response_rate": "884ef700a74b6147fccefcb24dd384fb",
     "manual_vs_auto_stop_preference": "c19a303cf68c6e3a41c0bd13dd9fcd54",

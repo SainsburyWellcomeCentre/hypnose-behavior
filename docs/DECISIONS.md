@@ -618,3 +618,74 @@ in / out / late arithmetic in `_score_false_response`, `_false_alarm` and
 > `sequence_rewarded` is an input, fixing the 0 ms positions fixes trial 277 at its source and
 > all three sites follow. Re-run `qc/outcome_agreement.py` after 6b: the expected result is
 > **zero conflicts**, and anything else means 6b changed a rule it should not have.
+
+---
+
+## 15. The response-time anchor falls back to the last poke *before* the odor *(Phase 6a, 2026-08-10)*
+
+**Intended output change, 20 trial cells, fixtures regenerated 2026-08-10.**
+
+`analyze_response_times` produced no response time for **20 of 1243** completed trials on the 9
+regression sessions — 17 scored `rewarded`, 3 `unrewarded`. All 20 failed at the same guard, and
+the cause is the 0 ms positions again (§10), pulling the opposite way from §14:
+
+- `classify_trials` **drops** 0 ms positions → truncated sequence → trial 277 mis-scored (§14);
+- `analyze_response_times` **keeps** them → it anchors the response on the last *valve event*,
+  which on these 20 trials is an odor the animal never poked.
+
+`last_poke_out_before` scans inside that valve window for an IN→OUT transition. On all 20 the cue
+port was already OUT when the valve opened (`port_in_at_odor_start=False`), and on 17 there were
+no DIPort0 samples in the window at all — so there is no exit to find, and the trial was dropped
+before any window logic ran.
+
+**The fix:** when the scan finds nothing, fall back to `windows.last_poke_end_before(...)` — the
+animal's last cue-port exit *before* the odor opened, which is the moment it was actually free to
+move. It is the same primitive the pre-odor grace path uses. It fires only where the scan returns
+`None`, so the other 1040 response times are byte-identical.
+
+| outcome | before | after |
+|---|---|---|
+| rewarded | 953 / 970 (98.2%) | **970 / 970 (100%)** |
+| unrewarded | 86 / 89 (96.6%) | **89 / 89 (100%)** |
+| timeout | 10 / 20 | 10 / 20 (unchanged) |
+| false_response | 1 / 164 | 1 / 164 (unchanged) |
+
+Regression moved on exactly 5 sessions, one column (`response_time_ms`) and one metric
+(`avg_response_time`). **`response_time_category` did not move** — `_derive_outcome` was already
+filling those categories, and the response-time pass now independently arrives at the same label,
+which is §14's zero-conflict result observed live.
+
+### Do not use `poke_odor_end` as the anchor
+
+The obvious-looking `max(poke_odor_end)` over the sampled positions is **wrong**. On a
+grace-derived entry `poke_odor_end` is synthetic — `last_poke_end + PRE_ODOR_GRACE_MS` — so it
+sits up to 25 ms *after* the animal actually left. Measured on `sub-048 20260306` trial 14, where
+the real exit was 5.2 ms before OdorB opened and the grace entry reported 19.8 ms of poke:
+
+```
+anchor = max(poke_odor_end)      -> response time 2230.8 ms
+anchor = real last poke-out      -> response time 2255.8 ms      (+25.0 ms, the grace padding)
+```
+
+A flat 25 ms bias on every trial where the fallback fires.
+
+### The remaining 173 nulls are correct, not gaps
+
+- **163 `false_response`** — `analyze_response_times` deliberately skips single-reward no-go
+  completions so they stay out of the rewarded/unrewarded/timeout denominators. Their latency is
+  recorded as `fr_latency_ms`, off a **different anchor** (`await_reward_time`, not the last
+  poke-out), so the two are not interchangeable.
+- **10 `timeout`** — no reward-port poke anywhere, so there is no response to time.
+
+And measured for completeness: `fr_latency_ms` is present on **101/101** trials where a false
+response occurred and absent on all 63 `nFR`, exactly 1:1 with the `false_response` flag. The
+abort side is identical (`fa_latency_ms` 69/69 on FA, 0/44 on nFA). **Absence there means the
+animal correctly withheld, not that a measurement failed.**
+
+### No bespoke marker for "ended on an unpoked odor"
+
+Tempting, and rejected. It is `poke_source[target] != "poke"` once §10 lands, so storing it
+creates two things that must agree forever (§13). It would also have to freeze one definition of
+"the odor that ended the trial", and `max_position` is the wrong one — a hidden-rule early-leave
+ends before the last position, and the response-time target is the last *valve event*, which can
+be neither. Consumers derive it at the point of use with the definition they need.
