@@ -1967,56 +1967,18 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
 
     return result
 
-def analyze_response_times(data, trial_counts, events, odor_map, stage, root, verbose=True, single_reward_info=None):
+def _hidden_rule_indices_from_stage_or_schema(stage, root):
+    """Hidden-rule indices from the stage name, falling back to the schema's inferred set.
+
+    Returns ``(indices, sequence_name, schema_settings, schema_err)`` with the indices sorted
+    and de-duplicated but the **final-position index still present**. Dropping it is left to
+    the caller because the two callers do it at different moments: ``analyze_response_times``
+    drops before printing its header, ``classify_trials`` after. Their headers therefore differ
+    on a session whose final position is a hidden-rule candidate -- existing behaviour, not
+    something to tidy here.
     """
-    Analyze response times for all completed trials (clean version).
-    Behavior and prints match analyze_response_times_all_trials_fixed.
-
-    Returns a dict with:
-      - rewarded_response_times
-      - unrewarded_response_times
-      - timeout_delayed_response_times
-      - timeout_response_delay_times
-      - all_response_times
-      - failed_calculations
-    """
-
-    # Get per-odor thresholds from schema
-    sample_offset_time, minimum_sampling_time_by_odor, response_time = get_experiment_parameters(root)
-    sample_offset_time_ms = sample_offset_time * 1000
-    minimum_sampling_time_ms_by_odor = {
-        str(odor): float(threshold) * 1000.0
-        for odor, threshold in (minimum_sampling_time_by_odor or {}).items()
-        if threshold is not None
-    }
-    if not minimum_sampling_time_ms_by_odor:
-        raise ValueError("minimumSamplingTime_by_odor missing or empty in schema; cannot analyze response times without per-odor thresholds")
-    default_minimum_sampling_time_ms = max(minimum_sampling_time_ms_by_odor.values())
-
-    def resolve_min_sampling_time_ms(odor_name):
-        """Return minimum sampling time in ms for a given odor, fallback to default if unknown"""
-        if odor_name is None:
-            return default_minimum_sampling_time_ms
-        return minimum_sampling_time_ms_by_odor.get(str(odor_name), default_minimum_sampling_time_ms)
-
-    response_time_sec = response_time
-    if response_time_sec is None:
-        raise ValueError("Response time parameter cannot be extracted from Schema file. Check detect_settings function.")
-
-    # Single-reward (new) protocol: keep response_time_category meaningful for rewarded-type
-    # sequences only. Non-rewarded ("no-go") completions are handled as false_response in
-    # classify_trials; here we simply leave their response_time_category empty so existing
-    # decision/choice-accuracy metrics are not polluted. Disabled for the default protocol.
-    if single_reward_info is None:
-        single_reward_info = _get_single_reward_info(root)
-    is_single_reward, rewarded_sequences, _all_sequences = single_reward_info
-
-    if verbose:
-        print("=" * 80)
-        print("RESPONSE TIME ANALYSIS - ALL COMPLETED TRIALS")
-        print("=" * 80)
-
     hidden_rule_indices, sequence_name = _resolve_hidden_rule_from_stage(stage)
+
     schema_settings = {}
     schema_err: Exception | None = None
     try:
@@ -2032,12 +1994,250 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
         hidden_rule_indices = _ensure_int_list(inferred_indices)
 
     hidden_rule_indices = sorted({idx for idx in hidden_rule_indices if isinstance(idx, int)})
+    return hidden_rule_indices, sequence_name, schema_settings, schema_err
+
+
+def _hidden_rule_odor_set(hidden_rule_indices, schema_settings, schema_err, verbose):
+    """The odors that count as a hidden-rule hit, or ``None`` when there is no hidden rule.
+
+    Raises rather than degrading: a session with a hidden-rule position but no inferable odor
+    identities would silently score every trial as a miss, so it is stopped instead.
+    """
+    if not hidden_rule_indices:
+        return None
+    try:
+        if schema_err is not None and 'hiddenRuleOdorsInferred' not in schema_settings:
+            raise ValueError(str(schema_err))
+        odors = (schema_settings.get('hiddenRuleOdorsInferred') or [])
+        if len(odors) < 2:
+            raise ValueError("found fewer than two rewarded odors at inferred hidden rule position.")
+        hr_odor_set = set(map(str, odors))
+        if verbose:
+            print(f"Hidden Rule Odors inferred: {sorted(hr_odor_set)}")
+        return hr_odor_set
+    except Exception as e:
+        raise ValueError(f"Hidden Rule Odor Identities could not be inferred from Schema: {e}")
+
+
+def _check_hidden_rule(odor_sequence, candidate_indices, odor_set):
+    """``(enough_odors, hit, matching_indices)`` for one presented sequence.
+
+    ``enough_odors`` is False when the sequence is too short to reach any candidate position,
+    which is what separates "did not hit the hidden rule" from "never got the chance".
+    """
+    if not candidate_indices or odor_set is None:
+        return False, False, []
+
+    valid_indices = [idx for idx in candidate_indices if 0 <= idx < len(odor_sequence)]
+    if not valid_indices:
+        return False, False, []
+
+    matching_indices = sorted({idx for idx in valid_indices if odor_sequence[idx] in odor_set})
+    return True, bool(matching_indices), matching_indices
+
+
+def _hidden_rule_positions(hidden_rule_indices):
+    """``(positions, first_index, first_position, multiple)`` -- positions are 1-based indices."""
+    positions = [idx + 1 for idx in hidden_rule_indices]
+    location = hidden_rule_indices[0] if hidden_rule_indices else None
+    position = positions[0] if positions else None
+    return positions, location, position, len(positions) > 1
+
+
+def _print_hidden_rule_header(hidden_rule_indices, hidden_rule_positions, sequence_name, stage,
+                              *, label_prefix):
+    """The 'Hidden rule location(s) extracted' header shared by the two classifiers.
+
+    ``label_prefix`` differs by one space between the two call sites ("Location{n}" vs
+    "Location {n}"), so it is passed rather than assumed.
+    """
+    seq_label = sequence_name or str(stage)
+    if not hidden_rule_indices:
+        print(f"No Hidden Rule Location found in sequence name: {seq_label}. Proceeding without Hidden Rule analysis.")
+        return
+    if len(hidden_rule_positions) > 1:
+        pos_str = ", ".join(str(p) for p in hidden_rule_positions)
+        idx_str = ", ".join(str(idx) for idx in hidden_rule_indices)
+        print(f"Hidden rule locations extracted: Positions {pos_str} (indices {idx_str})")
+    else:
+        location = hidden_rule_indices[0]
+        position = hidden_rule_positions[0]
+        print(f"Hidden rule location extracted: {label_prefix}{location} (index {location}, position {position})")
+
+
+def _next_after(sorted_series, ts):
+    """First entry of a sorted series strictly after ``ts``, or ``None``."""
+    if sorted_series is None or sorted_series.empty:
+        return None
+    later = sorted_series[sorted_series > ts]
+    return later.iloc[0] if not later.empty else None
+
+
+def _recording_end(initiation_starts_sorted, cue_poke_starts_sorted, supply_port1_times,
+                   supply_port2_times, port1_pokes, port2_pokes, trial_end):
+    """Latest timestamp any stream reaches, used to bound a reward window with no next trial.
+
+    Falls back to ``trial_end`` when every stream is empty.
+    """
+    candidates = [
+        initiation_starts_sorted.iloc[-1] if not initiation_starts_sorted.empty else None,
+        cue_poke_starts_sorted.iloc[-1] if not cue_poke_starts_sorted.empty else None,
+        supply_port1_times[-1] if supply_port1_times else None,
+        supply_port2_times[-1] if supply_port2_times else None,
+        port1_pokes.index.max() if not port1_pokes.empty else None,
+        port2_pokes.index.max() if not port2_pokes.empty else None,
+        trial_end,
+    ]
+    candidates = [c for c in candidates if c is not None and not pd.isna(c)]
+    return max(candidates) if candidates else trial_end
+
+
+def _odourdisc_reward_window_end(next_init, next_cue_after_next_init, await_time,
+                                 cue_poke_starts_sorted, recording_end):
+    """End of the reward window on odour-discrimination protocols.
+
+    These sessions have no fixed response window: the animal may collect at any point before it
+    re-engages, so the window runs to the later of the next initiation and the first cue poke
+    after it. With no next initiation it runs to the next cue poke, or to the end of the
+    recording. Never earlier than ``await_time``.
+
+    Returns ``(reward_window_end, next_cue_poke)``.
+    """
+    if next_init is not None:
+        candidates = [c for c in (next_init, next_cue_after_next_init) if c is not None]
+        reward_window_end = max(candidates) if candidates else next_init
+        next_cue_poke = next_cue_after_next_init
+    else:
+        next_cue_poke = _next_after(cue_poke_starts_sorted, await_time)
+        reward_window_end = next_cue_poke if next_cue_poke is not None else recording_end
+
+    if reward_window_end < await_time:
+        reward_window_end = await_time
+    return reward_window_end, next_cue_poke
+
+
+def _next_completed_trial_start(current_trial_end, all_trials):
+    """Start of the earliest completed trial beginning after ``current_trial_end``."""
+    next_starts = [t['sequence_start'] for t in all_trials if t['sequence_start'] > current_trial_end]
+    return min(next_starts) if next_starts else None
+
+
+def _rt_row(trial_id, response_time_ms, category, target=None):
+    """One ``per_trial`` row for the response-time table.
+
+    ``target`` is omitted on the early failures that give up before a target odor is known.
+    That is deliberate: an absent key becomes NaN in the assembled DataFrame, whereas writing
+    ``None`` explicitly would keep None in the object column and change the saved output.
+    """
+    row = {
+        'trial_id': trial_id,
+        'response_time_ms': response_time_ms,
+        'response_time_category': category,
+    }
+    if target is not None:
+        row['target_odor_name'] = target[0]
+        row['target_required_min_sampling_time_ms'] = target[1]
+    return row
+
+
+def _print_response_time_summary(completed_count, failed_calculations, rewarded, hr_rewarded,
+                                 unrewarded, timeout_delayed, timeout_delay):
+    def _spread(times, indent):
+        print(f"{indent}Range: {min(times):.1f} - {max(times):.1f}ms")
+        print(f"{indent}Average: {sum(times) / len(times):.1f}ms")
+        print(f"{indent}Median: {sorted(times)[len(times)//2]:.1f}ms")
+
+    def _stats(times, indent="  "):
+        print(f"{indent}Count: {len(times)}")
+        _spread(times, indent)
+
+    print(f"RESPONSE TIME ANALYSIS RESULTS:")
+    print(f"Total completed trials analyzed: {completed_count}")
+    print(f"Failed response time calculations: {failed_calculations}")
+    print(f"Successful response time calculations: {len(rewarded) + len(unrewarded) + len(timeout_delayed)}")
+    print()
+
+    print(f"REWARDED TRIALS:")
+    if rewarded:
+        _stats(rewarded)
+    else:
+        print(f"  No rewarded trials with response times")
+
+    if hr_rewarded:
+        print(f"\nHR REWARDED TRIALS (response times):")
+        print(f"  Count: {len(hr_rewarded)}")
+        print(f"  Range: {min(hr_rewarded):.1f} - {max(hr_rewarded):.1f}ms")
+        print(f"  Average: {sum(hr_rewarded)/len(hr_rewarded):.1f}ms")
+    else:
+        print(f"\nHR REWARDED TRIALS (response times): none")
+
+    print(f"\nUNREWARDED TRIALS:")
+    if unrewarded:
+        _stats(unrewarded)
+    else:
+        print(f"  No unrewarded trials with response times")
+
+    print(f"\nTIMEOUT TRIALS WITH DELAYED RESPONSES:")
+    if timeout_delayed:
+        print(f"  Count: {len(timeout_delayed)}")
+        print(f"  Response time (poke out to delayed poke):")
+        _spread(timeout_delayed, "    ")
+        print(f"  Response delay time (window end to delayed poke):")
+        _spread(timeout_delay, "    ")
+    else:
+        print(f"  No timeout trials with delayed responses")
+
+    print(f"\nALL TRIALS WITH RESPONSE TIMES:")
+    all_response_times = rewarded + unrewarded + timeout_delayed
+    if all_response_times:
+        _stats(all_response_times)
+
+
+def analyze_response_times(data, trial_counts, events, odor_map, stage, root, verbose=True, single_reward_info=None):
+    """Response time from last cue-port poke-out to first reward-port poke, per completed trial.
+
+    A completed trial is one with an AwaitReward event inside its window. The response is timed
+    from the animal's **last** exit of the cue port around the final odor -- not from
+    AwaitReward -- because that is when it was free to move.
+
+    Each trial lands in one of four buckets. ``rewarded`` and ``unrewarded`` are decided by
+    whether a supply pulse followed AwaitReward; a trial with no poke inside the response
+    window but one before the next trial is ``timeout_delayed``; anything whose response time
+    could not be computed is counted in ``failed_calculations`` with a null category.
+
+    Returns the four latency lists, the per-trial table, and the schema parameters used.
+    """
+    (sample_offset_time_ms, minimum_sampling_time_ms_by_odor,
+     default_minimum_sampling_time_ms, response_time) = _sampling_parameters_ms(
+        root, task="analyze response times")
+
+    def resolve_min_sampling_time_ms(odor_name):
+        if odor_name is None:
+            return default_minimum_sampling_time_ms
+        return minimum_sampling_time_ms_by_odor.get(str(odor_name), default_minimum_sampling_time_ms)
+
+    response_time_sec = response_time
+    if response_time_sec is None:
+        raise ValueError("Response time parameter cannot be extracted from Schema file. Check detect_settings function.")
+
+    # Single-reward protocol: keep response_time_category meaningful for rewarded-type
+    # sequences only. Non-rewarded ("no-go") completions are handled as false_response in
+    # classify_trials; here we simply leave their response_time_category empty so existing
+    # decision/choice-accuracy metrics are not polluted. Disabled for the default protocol.
+    if single_reward_info is None:
+        single_reward_info = _get_single_reward_info(root)
+    is_single_reward, rewarded_sequences, _all_sequences = single_reward_info
+
+    if verbose:
+        print("=" * 80)
+        print("RESPONSE TIME ANALYSIS - ALL COMPLETED TRIALS")
+        print("=" * 80)
+
+    hidden_rule_indices, sequence_name, schema_settings, schema_err = \
+        _hidden_rule_indices_from_stage_or_schema(stage, root)
     # Final position is always rewarded -> never a hidden-rule position (single-reward untouched).
     hidden_rule_indices = _drop_final_hidden_rule_index(hidden_rule_indices, schema_settings, is_single_reward)
-    hidden_rule_positions = [idx + 1 for idx in hidden_rule_indices]
-    hidden_rule_location = hidden_rule_indices[0] if hidden_rule_indices else None
-    hidden_rule_position = hidden_rule_positions[0] if hidden_rule_positions else None
-    multiple_hidden_rule_locations = len(hidden_rule_positions) > 1
+    hidden_rule_positions, _location, _position, _multiple = _hidden_rule_positions(hidden_rule_indices)
 
     if verbose:
         print(f"Sample offset time: {sample_offset_time_ms} ms")
@@ -2045,26 +2245,15 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
         for odor_name, threshold in sorted(minimum_sampling_time_ms_by_odor.items()):
             print(f"  - {odor_name}: {threshold:.1f}")
         print(f"Response time window: {response_time_sec} s")
-        seq_label = sequence_name or str(stage)
-        if hidden_rule_positions:
-            if multiple_hidden_rule_locations:
-                pos_str = ", ".join(str(pos) for pos in hidden_rule_positions)
-                idx_str = ", ".join(str(idx) for idx in hidden_rule_indices)
-                print(f"Hidden rule locations extracted: Positions {pos_str} (indices {idx_str})")
-            else:
-                print(f"Hidden rule location extracted: Location {hidden_rule_location} (index {hidden_rule_location}, position {hidden_rule_position})")
-        else:
-            print(f"No Hidden Rule Location found in sequence name: {seq_label}. Proceeding without Hidden Rule analysis.")
+        _print_hidden_rule_header(hidden_rule_indices, hidden_rule_positions, sequence_name, stage,
+                                  label_prefix="Location ")
 
-    # Get initiated trials and events (same as main function)
     initiated_trials = trial_counts['initiated_sequences']
     await_reward_times = events['combined_await_reward_df']['Time'].tolist() if 'combined_await_reward_df' in events else []
 
-    # Odour-discrimination flag (use same detection as classify_trials)
     protocol_name = (sequence_name or str(stage) or "").lower()
     is_odour_discrimination = "odourdiscrimination" in protocol_name
 
-    # Canonical initiation starts and cue-poke starts (Port0 rising edges), used for odourdiscrimination reward windows
     init_series_raw = initiated_trials.get('initiation_sequence_time')
     initiation_starts_sorted = pd.to_datetime(init_series_raw, errors='coerce').dropna().sort_values().reset_index(drop=True)
 
@@ -2072,21 +2261,16 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
     poke_series_full = poke_series_full.sort_index()
     cue_poke_starts_sorted = pd.Series(dtype='datetime64[ns]')
     if not poke_series_full.empty:
-        rises = poke_series_full & ~poke_series_full.shift(1, fill_value=False)
-        starts = list(rises[rises == True].index)
+        starts = windows.rising_edges(poke_series_full)
         cue_poke_starts_sorted = pd.Series(starts, dtype='datetime64[ns]').sort_values().reset_index(drop=True)
 
-    # Get supply port activities for reward classification
     supply_port1_times = data['pulse_supply_1'].index.tolist() if not data['pulse_supply_1'].empty else []
     supply_port2_times = data['pulse_supply_2'].index.tolist() if not data['pulse_supply_2'].empty else []
 
-    # Filter for completed trials
     completed_trials_all = []
     for _, trial in initiated_trials.iterrows():
-        trial_start = trial['sequence_start']
-        trial_end = trial['sequence_end']
-
-        trial_await_rewards = [t for t in await_reward_times if trial_start <= t <= trial_end]
+        trial_await_rewards = [t for t in await_reward_times
+                               if trial['sequence_start'] <= t <= trial['sequence_end']]
         if trial_await_rewards:
             trial_dict = trial.to_dict()
             trial_dict['await_reward_time'] = min(trial_await_rewards)
@@ -2095,88 +2279,15 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
     if verbose:
         print(f"Total completed trials: {len(completed_trials_all)}\n")
 
-    # Get poke and port data
     poke_data = data['digital_input_data']['DIPort0'].copy() if 'DIPort0' in data['digital_input_data'] else pd.Series(dtype=bool)
     port1_pokes = data['digital_input_data']['DIPort1'] if 'DIPort1' in data['digital_input_data'] else pd.Series(dtype=bool)
     port2_pokes = data['digital_input_data']['DIPort2'] if 'DIPort2' in data['digital_input_data'] else pd.Series(dtype=bool)
 
-    # Build valve activation list
-    olfactometer_valves = odor_map['olfactometer_valves']
-    valve_to_odor = odor_map['valve_to_odor']
+    all_valve_activations = windows.valve_windows_closing_at_series_end(
+        odor_map['olfactometer_valves'], odor_map['valve_to_odor'])
 
-    all_valve_activations = []
-    for olf_id, valve_data in olfactometer_valves.items():
-        if valve_data.empty:
-            continue
-        for i, valve_col in enumerate(valve_data.columns):
-            valve_key = f"{olf_id}{i}"
-            if valve_key in valve_to_odor:
-                odor_name = valve_to_odor[valve_key]
-                if odor_name.lower() == 'purge':
-                    continue
+    hr_odor_set = _hidden_rule_odor_set(hidden_rule_indices, schema_settings, schema_err, verbose)
 
-                valve_series = valve_data[valve_col]
-                valve_activations = valve_series & ~valve_series.shift(1, fill_value=False)
-                activation_times = valve_activations[valve_activations == True].index.tolist()
-                valve_deactivations = ~valve_series & valve_series.shift(1, fill_value=False)
-                deactivation_times = valve_deactivations[valve_deactivations == True].index.tolist()
-
-                for activation_time in activation_times:
-                    next_deactivations = [t for t in deactivation_times if t > activation_time]
-                    deactivation_time = min(next_deactivations) if next_deactivations else valve_series.index[-1]
-
-                    all_valve_activations.append({
-                        'start_time': activation_time,
-                        'end_time': deactivation_time,
-                        'odor_name': odor_name,
-                        'valve_key': valve_key
-                    })
-
-    all_valve_activations.sort(key=lambda x: x['start_time'])
-
-    # Helpers
-    def get_trial_valve_sequence(trial_start, trial_end):
-        trial_valve_activations = []
-        for valve_activation in all_valve_activations:
-            valve_start = valve_activation['start_time']
-            valve_end = valve_activation['end_time']
-            if valve_start <= trial_end and valve_end >= trial_start:
-                trial_valve_activations.append(valve_activation)
-        trial_valve_activations.sort(key=lambda x: x['start_time'])
-        odor_sequence = [activation['odor_name'] for activation in trial_valve_activations]
-        return odor_sequence, trial_valve_activations
-
-    hr_odor_set = None
-    if hidden_rule_indices:
-        try:
-            if schema_err is not None and 'hiddenRuleOdorsInferred' not in schema_settings:
-                raise ValueError(str(schema_err))
-            odors = (schema_settings.get('hiddenRuleOdorsInferred') or [])
-            if len(odors) < 2:
-                raise ValueError("found fewer than two rewarded odors at inferred hidden rule position.")
-            hr_odor_set = set(map(str, odors))
-            if verbose:
-                print(f"Hidden Rule Odors inferred: {sorted(hr_odor_set)}")
-        except Exception as e:
-            raise ValueError(f"Hidden Rule Odor Identities could not be inferred from Schema: {e}")
-
-
-    def check_hidden_rule(odor_sequence, candidate_indices, odor_set):
-        if not candidate_indices or odor_set is None:
-            return False, False, []
-
-        valid_indices = [idx for idx in candidate_indices if 0 <= idx < len(odor_sequence)]
-        if not valid_indices:
-            return False, False, []
-
-        matching_indices = sorted({idx for idx in valid_indices if odor_sequence[idx] in odor_set})
-        return True, bool(matching_indices), matching_indices
-
-    def find_next_trial_start(current_trial_end, all_trials):
-        next_starts = [t['sequence_start'] for t in all_trials if t['sequence_start'] > current_trial_end]
-        return min(next_starts) if next_starts else None
-
-    # Analyze all completed trials
     rewarded_response_times = []
     unrewarded_response_times = []
     timeout_delayed_response_times = []
@@ -2190,32 +2301,14 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
         trial_start = trial_dict['sequence_start']
         trial_end = trial_dict['sequence_end']
         await_reward_time = trial_dict['await_reward_time']
-        target_odor_name = None
-        target_required_min_ms = float('nan')
 
-        # Get valve sequence
-        odor_sequence_raw, trial_valve_events = get_trial_valve_sequence(trial_start, trial_end)
+        trial_valve_events = windows.valve_events_overlapping(all_valve_activations, trial_start, trial_end)
         if not trial_valve_events:
             failed_calculations += 1
-            per_trial_rows.append({
-                'trial_id': trial_id,
-                'response_time_ms': np.nan,
-                'response_time_category': None,
-            })
+            per_trial_rows.append(_rt_row(trial_id, np.nan, None))
             continue
 
-        position_locations_rt = {}
-        odor_to_pos_rt = {}
-        next_pos_rt = 1
-        for event in trial_valve_events:
-            odor = event['odor_name']
-            if odor not in odor_to_pos_rt:
-                odor_to_pos_rt[odor] = next_pos_rt
-                next_pos_rt += 1
-            pos_idx = odor_to_pos_rt[odor]
-            position_locations_rt[pos_idx] = event
-
-        ordered_positions_rt = sorted(position_locations_rt.keys())
+        position_locations_rt, ordered_positions_rt = windows.first_occurrence_positions(trial_valve_events)
         effective_odor_sequence = [
             position_locations_rt[pos]['odor_name']
             for pos in ordered_positions_rt
@@ -2226,14 +2319,10 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
         # in classify_trials, not here. Leave their response_time_category empty so existing
         # rewarded/unrewarded/timeout-based metrics stay clean. No-op for the default protocol.
         if is_single_reward and tuple(effective_odor_sequence) not in rewarded_sequences:
-            per_trial_rows.append({
-                'trial_id': trial_id,
-                'response_time_ms': np.nan,
-                'response_time_category': None,
-            })
+            per_trial_rows.append(_rt_row(trial_id, np.nan, None))
             continue
 
-        _, hit_hidden_rule, hr_hit_indices = check_hidden_rule(
+        _, _hit_hidden_rule, hr_hit_indices = _check_hidden_rule(
             effective_odor_sequence, hidden_rule_indices, hr_odor_set
         )
         hr_hit_positions = [idx + 1 for idx in hr_hit_indices]
@@ -2241,297 +2330,117 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
 
         if not ordered_positions_rt:
             failed_calculations += 1
-            per_trial_rows.append({
-                'trial_id': trial_id,
-                'response_time_ms': np.nan,
-                'response_time_category': None,
-            })
+            per_trial_rows.append(_rt_row(trial_id, np.nan, None))
             continue
 
-        target_pos_idx = ordered_positions_rt[-1]
-        target_valve_event = position_locations_rt.get(target_pos_idx)
-
+        target_valve_event = position_locations_rt.get(ordered_positions_rt[-1])
         if target_valve_event is None:
             failed_calculations += 1
-            per_trial_rows.append({
-                'trial_id': trial_id,
-                'response_time_ms': np.nan,
-                'response_time_category': None,
-                'target_odor_name': target_odor_name,
-                'target_required_min_sampling_time_ms': target_required_min_ms,
-            })
+            per_trial_rows.append(_rt_row(trial_id, np.nan, None, target=(None, float('nan'))))
             continue
+
         target_odor_name = target_valve_event.get('odor_name')
-        target_required_min_ms = resolve_min_sampling_time_ms(target_odor_name)
+        target = (target_odor_name, resolve_min_sampling_time_ms(target_odor_name))
 
-        # Find last poke out in extended window around target odor
-        odor_start = target_valve_event['start_time']
+        # The response is timed from the last exit of the cue port around the final odor,
+        # searched up to AwaitReward or one second past the valve closing, whichever is later.
         odor_end = target_valve_event['end_time']
-        search_end = max(await_reward_time, odor_end + pd.Timedelta(seconds=1))
-
-        extended_poke_data = poke_data.loc[odor_start:search_end]
-        if extended_poke_data.empty:
-            failed_calculations += 1
-            per_trial_rows.append({
-                'trial_id': trial_id,
-                'response_time_ms': np.nan,
-                'response_time_category': None,
-                'target_odor_name': target_odor_name,
-                'target_required_min_sampling_time_ms': target_required_min_ms,
-            })
-            continue
-
-        last_poke_out_time = None
-        prev_state = poke_data.loc[:odor_start].iloc[-1] if len(poke_data.loc[:odor_start]) > 0 else False
-        for timestamp, current_state in extended_poke_data.items():
-            if prev_state and not current_state:
-                last_poke_out_time = timestamp
-            prev_state = current_state
-
+        last_poke_out_time = windows.last_poke_out_before(
+            poke_data,
+            target_valve_event['start_time'],
+            max(await_reward_time, odor_end + pd.Timedelta(seconds=1)),
+        )
         if last_poke_out_time is None:
             failed_calculations += 1
-            per_trial_rows.append({
-                'trial_id': trial_id,
-                'response_time_ms': np.nan,
-                'response_time_category': None,
-                'target_odor_name': target_odor_name,
-                'target_required_min_sampling_time_ms': target_required_min_ms,
-            })
+            per_trial_rows.append(_rt_row(trial_id, np.nan, None, target=target))
             continue
 
-        # Reward window and search for reward pokes
         if is_odour_discrimination:
-            current_init_ts = pd.to_datetime(trial_dict.get('initiation_sequence_time'), errors='coerce') if trial_dict.get('initiation_sequence_time') is not None else pd.NaT
+            current_init_ts = pd.to_datetime(trial_dict.get('initiation_sequence_time'), errors='coerce') \
+                if trial_dict.get('initiation_sequence_time') is not None else pd.NaT
             next_init = None
             if not initiation_starts_sorted.empty and not pd.isna(current_init_ts):
                 idx = initiation_starts_sorted.searchsorted(current_init_ts, side='right')
                 if idx < len(initiation_starts_sorted):
                     next_init = initiation_starts_sorted.iloc[idx]
 
-            next_cue_after_next_init = None
-            if next_init is not None and not cue_poke_starts_sorted.empty:
-                cues_after_next_init = cue_poke_starts_sorted[cue_poke_starts_sorted > next_init]
-                if not cues_after_next_init.empty:
-                    next_cue_after_next_init = cues_after_next_init.iloc[0]
-
-            recording_end_candidates = [
-                initiation_starts_sorted.iloc[-1] if not initiation_starts_sorted.empty else None,
-                cue_poke_starts_sorted.iloc[-1] if not cue_poke_starts_sorted.empty else None,
-                supply_port1_times[-1] if supply_port1_times else None,
-                supply_port2_times[-1] if supply_port2_times else None,
-                port1_pokes.index.max() if not port1_pokes.empty else None,
-                port2_pokes.index.max() if not port2_pokes.empty else None,
-                trial_end
-            ]
-            recording_end_candidates = [c for c in recording_end_candidates if c is not None and not pd.isna(c)]
-            recording_end = max(recording_end_candidates) if recording_end_candidates else trial_end
-
-            if next_init is not None:
-                rw_candidates = [next_init, next_cue_after_next_init]
-                rw_candidates = [c for c in rw_candidates if c is not None]
-                reward_window_end = max(rw_candidates) if rw_candidates else next_init
-            else:
-                next_cue_after_await = None
-                if not cue_poke_starts_sorted.empty:
-                    future_cues = cue_poke_starts_sorted[cue_poke_starts_sorted > await_reward_time]
-                    if not future_cues.empty:
-                        next_cue_after_await = future_cues.iloc[0]
-                reward_window_end = next_cue_after_await if next_cue_after_await is not None else recording_end
-
-            if reward_window_end < await_reward_time:
-                reward_window_end = await_reward_time
-
+            next_cue_after_next_init = _next_after(cue_poke_starts_sorted, next_init) if next_init is not None else None
+            recording_end = _recording_end(initiation_starts_sorted, cue_poke_starts_sorted,
+                                           supply_port1_times, supply_port2_times,
+                                           port1_pokes, port2_pokes, trial_end)
+            reward_window_end, _next_cue = _odourdisc_reward_window_end(
+                next_init, next_cue_after_next_init, await_reward_time,
+                cue_poke_starts_sorted, recording_end)
             poke_window_end = reward_window_end
-            search_start = max(last_poke_out_time, await_reward_time)
             reward_window_cap = reward_window_end
         else:
             poke_window_end = await_reward_time + pd.Timedelta(seconds=response_time_sec)
-            search_start = max(last_poke_out_time, await_reward_time)
             reward_window_cap = trial_end
 
-        port1_pokes_in_window = []
-        port2_pokes_in_window = []
-
-        if not port1_pokes.empty:
-            port1_window = port1_pokes[search_start:poke_window_end]
-            port1_starts = port1_window & ~port1_window.shift(1, fill_value=False)
-            port1_pokes_in_window = port1_starts[port1_starts == True].index.tolist()
-
-        if not port2_pokes.empty:
-            port2_window = port2_pokes[search_start:poke_window_end]
-            port2_starts = port2_window & ~port2_window.shift(1, fill_value=False)
-            port2_pokes_in_window = port2_starts[port2_starts == True].index.tolist()
-
-        all_reward_pokes = port1_pokes_in_window + port2_pokes_in_window
+        search_start = max(last_poke_out_time, await_reward_time)
+        all_reward_pokes = (windows.rising_edges_between(port1_pokes, search_start, poke_window_end)
+                            + windows.rising_edges_between(port2_pokes, search_start, poke_window_end))
 
         response_time_ms = None
         if all_reward_pokes:
-            first_reward_poke = min(all_reward_pokes)
-            response_time_ms = (first_reward_poke - last_poke_out_time).total_seconds() * 1000
+            response_time_ms = (min(all_reward_pokes) - last_poke_out_time).total_seconds() * 1000
 
-        # Determine reward status (same as main classification)
         supply1_after_await = [t for t in supply_port1_times if await_reward_time <= t <= reward_window_cap]
         supply2_after_await = [t for t in supply_port2_times if await_reward_time <= t <= reward_window_cap]
 
-        # NEW: authoritative per-trial categorization + row capture
-        is_rewarded = bool(supply1_after_await or supply2_after_await)
-        if is_rewarded:
-            if response_time_ms is not None:
-                rewarded_response_times.append(response_time_ms)
-                # optional: HR subset if you track it
-                if hr_success:
-                    hr_rewarded_response_times.append(response_time_ms)
-                per_trial_rows.append({
-                    'trial_id': trial_id,
-                    'response_time_ms': float(response_time_ms),
-                    'response_time_category': 'rewarded',
-                    'target_odor_name': target_odor_name,
-                    'target_required_min_sampling_time_ms': target_required_min_ms,
-                })
-            else:
+        if supply1_after_await or supply2_after_await:
+            if response_time_ms is None:
                 failed_calculations += 1
-                per_trial_rows.append({
-                    'trial_id': trial_id,
-                    'response_time_ms': np.nan,
-                    'response_time_category': None,
-                    'target_odor_name': target_odor_name,
-                    'target_required_min_sampling_time_ms': target_required_min_ms,
-                })
-        else:
-            # Check full window from await_reward for unrewarded vs timeout
-            port1_full_window = []
-            port2_full_window = []
-            if not port1_pokes.empty:
-                port1_window_full = port1_pokes[await_reward_time:poke_window_end]
-                port1_starts_full = port1_window_full & ~port1_window_full.shift(1, fill_value=False)
-                port1_full_window = port1_starts_full[port1_starts_full == True].index.tolist()
-            if not port2_pokes.empty:
-                port2_window_full = port2_pokes[await_reward_time:poke_window_end]
-                port2_starts_full = port2_window_full & ~port2_window_full.shift(1, fill_value=False)
-                port2_full_window = port2_starts_full[port2_starts_full == True].index.tolist()
+                per_trial_rows.append(_rt_row(trial_id, np.nan, None, target=target))
+                continue
+            rewarded_response_times.append(response_time_ms)
+            if hr_success:
+                hr_rewarded_response_times.append(response_time_ms)
+            per_trial_rows.append(_rt_row(trial_id, float(response_time_ms), 'rewarded', target=target))
+            continue
 
-            is_unrewarded = bool(port1_full_window or port2_full_window)
-            if is_unrewarded:
-                if response_time_ms is not None:
-                    unrewarded_response_times.append(response_time_ms)
-                    per_trial_rows.append({
-                        'trial_id': trial_id,
-                        'response_time_ms': float(response_time_ms),
-                        'response_time_category': 'unrewarded',
-                        'target_odor_name': target_odor_name,
-                        'target_required_min_sampling_time_ms': target_required_min_ms,
-                    })
-                else:
-                    failed_calculations += 1
-                    per_trial_rows.append({
-                        'trial_id': trial_id,
-                        'response_time_ms': np.nan,
-                        'response_time_category': None,
-                        'target_odor_name': target_odor_name,
-                        'target_required_min_sampling_time_ms': target_required_min_ms,
-                    })
-            else:
-                # Timeout: look for delayed responses until next completed trial start
-                next_trial_start = find_next_trial_start(trial_end, completed_trials_all)
-                extended_search_end = next_trial_start if next_trial_start else (poke_data.index[-1] if not poke_data.empty else poke_window_end)
+        # Not rewarded: a poke anywhere in the response window makes it an error rather than a
+        # timeout, even if it landed before the animal left the cue port.
+        full_window_pokes = (windows.rising_edges_between(port1_pokes, await_reward_time, poke_window_end)
+                             + windows.rising_edges_between(port2_pokes, await_reward_time, poke_window_end))
 
-                delayed_search_start = poke_window_end
+        if full_window_pokes:
+            if response_time_ms is None:
+                failed_calculations += 1
+                per_trial_rows.append(_rt_row(trial_id, np.nan, None, target=target))
+                continue
+            unrewarded_response_times.append(response_time_ms)
+            per_trial_rows.append(_rt_row(trial_id, float(response_time_ms), 'unrewarded', target=target))
+            continue
 
-                delayed_port1_pokes = []
-                delayed_port2_pokes = []
-                if not port1_pokes.empty and delayed_search_start < extended_search_end:
-                    w = port1_pokes[delayed_search_start:extended_search_end]
-                    s = w & ~w.shift(1, fill_value=False)
-                    delayed_port1_pokes = s[s == True].index.tolist()
-                if not port2_pokes.empty and delayed_search_start < extended_search_end:
-                    w = port2_pokes[delayed_search_start:extended_search_end]
-                    s = w & ~w.shift(1, fill_value=False)
-                    delayed_port2_pokes = s[s == True].index.tolist()
+        # Timeout: look for a delayed response up to the next completed trial.
+        next_trial_start = _next_completed_trial_start(trial_end, completed_trials_all)
+        extended_search_end = next_trial_start if next_trial_start else (poke_data.index[-1] if not poke_data.empty else poke_window_end)
 
-                delayed_reward_pokes = delayed_port1_pokes + delayed_port2_pokes
-                if delayed_reward_pokes:
-                    first_delayed = min(delayed_reward_pokes)
-                    response_time_ms = (first_delayed - last_poke_out_time).total_seconds() * 1000
-                    timeout_delayed_response_times.append(response_time_ms)
-                    # also store delay beyond window if desired
-                    timeout_response_delay_times.append((first_delayed - poke_window_end).total_seconds() * 1000.0)
-                    per_trial_rows.append({
-                        'trial_id': trial_id,
-                        'response_time_ms': float(response_time_ms),
-                        'response_time_category': 'timeout_delayed',
-                        'target_odor_name': target_odor_name,
-                        'target_required_min_sampling_time_ms': target_required_min_ms,
-                    })
-                else:
-                    failed_calculations += 1
-                    per_trial_rows.append({
-                        'trial_id': trial_id,
-                        'response_time_ms': np.nan,
-                        'response_time_category': None,
-                        'target_odor_name': target_odor_name,
-                        'target_required_min_sampling_time_ms': target_required_min_ms,
-                    })
+        delayed_reward_pokes = []
+        if poke_window_end < extended_search_end:
+            delayed_reward_pokes = (windows.rising_edges_between(port1_pokes, poke_window_end, extended_search_end)
+                                    + windows.rising_edges_between(port2_pokes, poke_window_end, extended_search_end))
 
-    # Print results
+        if not delayed_reward_pokes:
+            failed_calculations += 1
+            per_trial_rows.append(_rt_row(trial_id, np.nan, None, target=target))
+            continue
+
+        first_delayed = min(delayed_reward_pokes)
+        response_time_ms = (first_delayed - last_poke_out_time).total_seconds() * 1000
+        timeout_delayed_response_times.append(response_time_ms)
+        timeout_response_delay_times.append((first_delayed - poke_window_end).total_seconds() * 1000.0)
+        per_trial_rows.append(_rt_row(trial_id, float(response_time_ms), 'timeout_delayed', target=target))
+
     if verbose:
-        print(f"RESPONSE TIME ANALYSIS RESULTS:")
-        print(f"Total completed trials analyzed: {len(completed_trials_all)}")
-        print(f"Failed response time calculations: {failed_calculations}")
-        print(f"Successful response time calculations: {len(rewarded_response_times) + len(unrewarded_response_times) + len(timeout_delayed_response_times)}")
-        print()
-
-        print(f"REWARDED TRIALS:")
-        if rewarded_response_times:
-            print(f"  Count: {len(rewarded_response_times)}")
-            print(f"  Range: {min(rewarded_response_times):.1f} - {max(rewarded_response_times):.1f}ms")
-            print(f"  Average: {sum(rewarded_response_times) / len(rewarded_response_times):.1f}ms")
-            print(f"  Median: {sorted(rewarded_response_times)[len(rewarded_response_times)//2]:.1f}ms")
-        else:
-            print(f"  No rewarded trials with response times")
-
-        if hr_rewarded_response_times:
-            print(f"\nHR REWARDED TRIALS (response times):")
-            print(f"  Count: {len(hr_rewarded_response_times)}")
-            print(f"  Range: {min(hr_rewarded_response_times):.1f} - {max(hr_rewarded_response_times):.1f}ms")
-            print(f"  Average: {sum(hr_rewarded_response_times)/len(hr_rewarded_response_times):.1f}ms")
-        else:
-            print(f"\nHR REWARDED TRIALS (response times): none")
-
-        print(f"\nUNREWARDED TRIALS:")
-        if unrewarded_response_times:
-            print(f"  Count: {len(unrewarded_response_times)}")
-            print(f"  Range: {min(unrewarded_response_times):.1f} - {max(unrewarded_response_times):.1f}ms")
-            print(f"  Average: {sum(unrewarded_response_times) / len(unrewarded_response_times):.1f}ms")
-            print(f"  Median: {sorted(unrewarded_response_times)[len(unrewarded_response_times)//2]:.1f}ms")
-        else:
-            print(f"  No unrewarded trials with response times")
-
-        print(f"\nTIMEOUT TRIALS WITH DELAYED RESPONSES:")
-        if timeout_delayed_response_times:
-            print(f"  Count: {len(timeout_delayed_response_times)}")
-            print(f"  Response time (poke out to delayed poke):")
-            print(f"    Range: {min(timeout_delayed_response_times):.1f} - {max(timeout_delayed_response_times):.1f}ms")
-            print(f"    Average: {sum(timeout_delayed_response_times) / len(timeout_delayed_response_times):.1f}ms")
-            print(f"    Median: {sorted(timeout_delayed_response_times)[len(timeout_delayed_response_times)//2]:.1f}ms")
-            print(f"  Response delay time (window end to delayed poke):")
-            print(f"    Range: {min(timeout_response_delay_times):.1f} - {max(timeout_response_delay_times):.1f}ms")
-            print(f"    Average: {sum(timeout_response_delay_times) / len(timeout_response_delay_times):.1f}ms")
-            print(f"    Median: {sorted(timeout_response_delay_times)[len(timeout_response_delay_times)//2]:.1f}ms")
-        else:
-            print(f"  No timeout trials with delayed responses")
-
-        print(f"\nALL TRIALS WITH RESPONSE TIMES:")
-        all_response_times = rewarded_response_times + unrewarded_response_times + timeout_delayed_response_times
-        if all_response_times:
-            print(f"  Count: {len(all_response_times)}")
-            print(f"  Range: {min(all_response_times):.1f} - {max(all_response_times):.1f}ms")
-            print(f"  Average: {sum(all_response_times) / len(all_response_times):.1f}ms")
-            print(f"  Median: {sorted(all_response_times)[len(all_response_times)//2]:.1f}ms")
+        _print_response_time_summary(
+            len(completed_trials_all), failed_calculations, rewarded_response_times,
+            hr_rewarded_response_times, unrewarded_response_times,
+            timeout_delayed_response_times, timeout_response_delay_times,
+        )
 
     all_response_times = rewarded_response_times + unrewarded_response_times + timeout_delayed_response_times
-
-    # NEW: build per-trial DataFrame
-    per_trial_df = pd.DataFrame(per_trial_rows)
 
     return {
         'rewarded_response_times': rewarded_response_times,
@@ -2540,7 +2449,7 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
         'timeout_response_delay_times': timeout_response_delay_times,
         'all_response_times': all_response_times,
         'failed_calculations': failed_calculations,
-        'per_trial': per_trial_df,  # NEW
+        'per_trial': pd.DataFrame(per_trial_rows),
         'sample_offset_time_ms': sample_offset_time_ms,
         'minimum_sampling_time_ms_by_odor': minimum_sampling_time_ms_by_odor,
         'default_minimum_sampling_time_ms': default_minimum_sampling_time_ms,

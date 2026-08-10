@@ -33,6 +33,23 @@ def falling_edges(series_bool: pd.Series) -> list:
     return list(series_bool.index[falls])
 
 
+def rising_edges_between(series, window_start, window_end) -> list:
+    """Rising edges inside ``[window_start, window_end]``, resolved *within the slice*.
+
+    Not the same as filtering ``rising_edges(series)`` to the window: the shift is taken after
+    slicing, with ``fill_value=False``, so a port already IN at ``window_start`` counts as a
+    rise at the first in-window sample rather than being skipped. Every reward-port count in
+    ``classification_utils`` depends on that, which is why the slice happens first.
+
+    Returns ``[]`` for an empty series, matching the ``if not port.empty`` guard at each site.
+    """
+    if series is None or series.empty:
+        return []
+    window = series[window_start:window_end]
+    starts = window & ~window.shift(1, fill_value=False)
+    return starts[starts == True].index.tolist()  # noqa: E712 -- preserves original semantics
+
+
 # --------------------------------------------------------------------------------------
 # Valve activations
 # --------------------------------------------------------------------------------------
@@ -73,6 +90,107 @@ def valve_windows_dropping_unclosed(olfactometer_valves, valve_to_odor) -> list[
                 })
     valve_events.sort(key=lambda ev: ev['start_time'])
     return valve_events
+
+
+def valve_windows_closing_at_series_end(olfactometer_valves, valve_to_odor) -> list[dict]:
+    """Valve open windows, the rule shared by ``classify_trials`` and ``analyze_response_times``.
+
+    Differs from ``valve_windows_dropping_unclosed`` in three ways: it does not cast the column
+    to bool, it takes the earliest deactivation after each activation rather than advancing a
+    pointer, and an activation with no later deactivation is closed at the **last timestamp of
+    the series** instead of being dropped. Carries ``valve_key``, which position assignment
+    needs to tell repeat activations of one valve from a genuine re-entry.
+    """
+    all_valve_activations: list[dict] = []
+    for olf_id, valve_data in olfactometer_valves.items():
+        if valve_data.empty:
+            continue
+        for i, valve_col in enumerate(valve_data.columns):
+            valve_key = f"{olf_id}{i}"
+            if valve_key not in valve_to_odor:
+                continue
+            odor_name = valve_to_odor[valve_key]
+            if odor_name.lower() == 'purge':
+                continue
+
+            valve_series = valve_data[valve_col]
+            valve_activations = valve_series & ~valve_series.shift(1, fill_value=False)
+            activation_times = valve_activations[valve_activations == True].index.tolist()  # noqa: E712
+            valve_deactivations = ~valve_series & valve_series.shift(1, fill_value=False)
+            deactivation_times = valve_deactivations[valve_deactivations == True].index.tolist()  # noqa: E712
+
+            for activation_time in activation_times:
+                next_deactivations = [t for t in deactivation_times if t > activation_time]
+                deactivation_time = min(next_deactivations) if next_deactivations else valve_series.index[-1]
+                all_valve_activations.append({
+                    'start_time': activation_time,
+                    'end_time': deactivation_time,
+                    'odor_name': odor_name,
+                    'valve_key': valve_key,
+                })
+    all_valve_activations.sort(key=lambda x: x['start_time'])
+    return all_valve_activations
+
+
+def valve_events_overlapping(all_valve_activations: list[dict], trial_start, trial_end) -> list[dict]:
+    """Activations overlapping ``[trial_start, trial_end]``, inclusive at both edges.
+
+    An activation counts if it starts at or before ``trial_end`` and ends at or after
+    ``trial_start``. ``abortion_classification`` uses strict comparisons instead, so an
+    activation that closed exactly at the trial start is excluded there but included here.
+    """
+    events = [
+        activation for activation in all_valve_activations
+        if activation['start_time'] <= trial_end and activation['end_time'] >= trial_start
+    ]
+    events.sort(key=lambda x: x['start_time'])
+    return events
+
+
+def last_poke_out_before(poke_data: pd.Series, window_start, window_end):
+    """Timestamp of the last cue-port poke-out in ``[window_start, window_end]``.
+
+    Walks the samples carrying the state from before ``window_start``, so a poke that opened
+    before the window and closed inside it is found. Returns ``None`` when the port never went
+    from IN to OUT in the window -- the caller treats that as a failed response-time
+    calculation rather than as a zero.
+    """
+    extended = poke_data.loc[window_start:window_end]
+    if extended.empty:
+        return None
+    before = poke_data.loc[:window_start]
+    prev_state = before.iloc[-1] if len(before) > 0 else False
+    last_poke_out_time = None
+    for timestamp, current_state in extended.items():
+        if prev_state and not current_state:
+            last_poke_out_time = timestamp
+        prev_state = current_state
+    return last_poke_out_time
+
+
+def first_occurrence_positions(trial_valve_events: list[dict]) -> tuple[dict, list]:
+    """Assign positions by **first occurrence of each odor**, ``analyze_response_times``' rule.
+
+    Each new odor name takes the next position number; a repeat of an odor already seen keeps
+    its original position and *overwrites* that position's event with the later activation.
+    So a trial presenting A, B, A yields two positions, with position 1 holding the second A.
+
+    This is not how ``classify_trials`` assigns positions -- that collapses only *consecutive*
+    repeats and keeps a non-consecutive re-entry as a new position. The two therefore disagree
+    on any trial where an odor re-appears after a different one, and are kept apart.
+
+    Returns ``(position_locations, ordered_positions)``.
+    """
+    position_locations: dict[int, dict] = {}
+    odor_to_pos: dict[str, int] = {}
+    next_pos = 1
+    for event in trial_valve_events:
+        odor = event['odor_name']
+        if odor not in odor_to_pos:
+            odor_to_pos[odor] = next_pos
+            next_pos += 1
+        position_locations[odor_to_pos[odor]] = event
+    return position_locations, sorted(position_locations.keys())
 
 
 # --------------------------------------------------------------------------------------
