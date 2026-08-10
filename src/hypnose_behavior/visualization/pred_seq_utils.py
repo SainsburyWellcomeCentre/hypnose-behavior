@@ -937,7 +937,7 @@ def fa_analysis(
 			aborted = df[df.get("is_aborted") == True]
 			fa_df = aborted[aborted.get("fa_label").isin(fa_labels)]
 			# Raw latencies; the 10x-group-mean rule below is a display filter.
-			fa_latencies = fa_latency_from_pokeout(df, build_position_data(df))
+			fa_latencies = fa_latency_from_pokeout(df)
 			port_labels = fa_port_label(fa_df)
 
 			session_poke = {}

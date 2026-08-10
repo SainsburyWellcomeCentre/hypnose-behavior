@@ -740,7 +740,27 @@ intended change rather than smuggled in here. **`avg_response_time` reads (b).**
 
 (b) is computed with `windows.last_poke_end_before(cue_series, reward_poke)`, never from
 `poke_odor_end` — see §15 for why that is 25 ms late on a grace-derived entry. The existing
-metric `metric_analysis/metrics/false_alarm.fa_latency_from_pokeout` is an attempt at (b) that
-anchors on `poke_odor_end`, so it carries exactly that bias **and** it does not exclude
-resampling. It should be repointed at `fa_movement_latency_ms`; not done here because it lives
-outside `trial_classification/`.
+metric `metric_analysis/metrics/false_alarm.fa_latency_from_pokeout` was an attempt at (b) that
+anchored on `poke_odor_end`, so it carried exactly that bias **and** did not exclude resampling.
+
+**Repointed 2026-08-10** — it now reads `fa_movement_latency_ms` and its frame drops from
+`trials+position_data` to `trials`. Measured on the two `fa_analysis` gate sessions the row
+*membership is identical* (90/90 and 15/15), so this is purely a value change, and a large one:
+
+| | median, sub-040 20251124 |
+|---|---|
+| old, from `poke_odor_end` | 11216.0 ms |
+| `fa_latency_ms` — (a), from the abortion | 7821.7 ms |
+| new — (b) | **1822.3 ms** |
+
+The old value exceeded even the abortion-anchored latency, because the last odor's poke-out
+precedes the abortion: it was charging every later cue-port visit to the false alarm.
+
+`regression.py` stays GREEN — the metric is registered but **not in `REPORT`**, so it is not in
+the metrics fingerprint. The gate that sees it is `plot_regression.py`, whose `fa_analysis` case
+goes RED by design. **A metric outside `REPORT` is invisible to the golden master; check whether
+it is in `REPORT` before assuming a metric change is gated.**
+
+Consumers with no `fa_movement_latency_ms` column get an empty Series rather than a fallback to
+the old computation, by the §2 rule: a session saved before 6c cannot be made to look
+comparable to one saved after it.

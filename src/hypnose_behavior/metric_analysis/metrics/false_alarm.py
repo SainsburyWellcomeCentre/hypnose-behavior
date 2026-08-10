@@ -38,9 +38,6 @@ from hypnose_behavior.metric_analysis.metrics.common import (
     _initiated,
     _latency_ms,
     _reduce_rate,
-    _trial_position_frame,
-    _trial_timestamp,
-    _tz_naive,
 )
 from hypnose_behavior.utils.helpers import _filter_session_dirs, _iter_subject_dirs
 from hypnose_behavior.metric_analysis.registry import (
@@ -689,32 +686,33 @@ def fa_rate_by_position(trials, *, fa_types=None):
     return pd.Series(rates, dtype=float).sort_index()
 
 
-@metric(frame="trials+position_data")
-def fa_latency_from_pokeout(trials, position_data, *, fa_types=None):
-    """`fa_time` minus the poke-out of the trial's last odor, in ms. Checklist 19.
+@metric(frame="trials")
+def fa_latency_from_pokeout(trials, *, fa_types=None):
+    """`fa_time` minus the animal's last cue-port exit before it, in ms. Checklist 19.
 
-    **Not** `trial_data.fa_latency_ms`, which is measured from the abortion
-    timestamp (finding 11). The reference is the *first* position whose
-    `odor_name` matches the trial's `last_odor`, not the deepest one -- they
-    differ when an odor repeats within a sequence, and the plotter uses the first.
+    **Not** `trial_data.fa_latency_ms`, which is measured from the abortion timestamp and is
+    what `fa_label` buckets (`DECISIONS.md` section 16 -- (a) vs (b)).
+
+    Reads `fa_movement_latency_ms` rather than re-deriving the anchor. It used to compute it
+    from `position_data.poke_odor_end`, which is wrong twice over: that timestamp is synthetic
+    and 25 ms late whenever the pre-odor grace produced the entry (section 15), and it does not
+    exclude the animal returning to the cue port between giving up and false-alarming, which
+    happens on 44% of false alarms (section 16). Two independent derivations of one quantity is
+    exactly what section 14 is about, so there is now one.
+
+    Returns empty when the column is absent. Sessions saved before 6c never carry it, and
+    silently falling back to the old computation would make old and new sessions look
+    comparable when they measure different things -- the section 2 rule for absent provenance.
     """
-    rows = _trial_position_frame(position_data, "in_poke_times")
-    if rows is None or "last_odor" not in trials.columns:
+    if "fa_movement_latency_ms" not in trials.columns or "global_trial_id" not in trials.columns:
         return pd.Series(dtype=float)
     selected = trials[_fa_filter_mask(trials, fa_types)] if fa_types is not None else trials
-    if selected.empty or "global_trial_id" not in selected.columns:
+    if selected.empty:
         return pd.Series(dtype=float)
-
-    last_odor = pd.Series(selected["last_odor"].map(odor_letter).to_numpy(),
-                          index=selected["global_trial_id"].to_numpy())
-    wanted = rows["global_trial_id"].map(last_odor)
-    at_last_odor = rows[rows["odor_name"].map(odor_letter) == wanted]
-    if at_last_odor.empty:
-        return pd.Series(dtype=float)
-    first = at_last_odor.groupby("global_trial_id", sort=True).head(1)
-    poke_end = pd.Series(_tz_naive(first["poke_odor_end"]).to_numpy(),
-                         index=first["global_trial_id"].to_numpy())
-    return _latency_ms(_trial_timestamp(selected, "fa_time"), poke_end)
+    latencies = pd.to_numeric(selected["fa_movement_latency_ms"], errors="coerce")
+    return pd.Series(latencies.to_numpy(),
+                     index=selected["global_trial_id"].to_numpy(),
+                     dtype=float).dropna()
 
 
 def false_response_ratio_contributions(trials, *, fr_types=None):
