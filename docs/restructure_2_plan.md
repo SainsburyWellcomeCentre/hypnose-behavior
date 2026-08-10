@@ -615,6 +615,28 @@ landing in the same window makes that diff unreadable. Same reasoning that put 6
 precisely so this split can end with the file *gone*, rather than turned into an index of
 imports pointing at the new modules — which would be the same problem spread across more files.
 
+**Named do-not-merge for this split: the two position-assignment rules.** `classify.py` will
+carry `_assign_positions_to_valve_events` and `response_times.py` will carry
+`windows.first_occurrence_positions`. They look like the same helper and are not:
+
+| | rule | trial presenting A, B, A |
+|---|---|---|
+| `classify_trials` | collapses only *consecutive* repeats; a non-consecutive re-entry is a **new** position | 3 positions |
+| `analyze_response_times` | each odor keeps its first position; a later repeat **overwrites** that position's event | 2 positions, position 1 holding the *second* A |
+
+Once they sit in two files this is the §13 setup exactly — and `hidden_rule.py` in the table
+above already establishes the precedent of pulling shared logic out of these two. **6c is a pure
+move: do not merge them.**
+
+**The measurement that would settle it has not been done.** They diverge only when an odor
+re-appears after a different odor, so if no trial's valve-event list ever contains a
+non-consecutive odor repeat, the two rules are provably interchangeable on this data. Count
+trials with such a repeat across the 9 regression sessions. **Zero** ⇒ a later phase may merge
+them cheaply, and §15's response-time follow-up becomes tractable too; **non-zero** ⇒ that count
+is the number of trials a merge would silently move, and which rule is right becomes a
+scientific question, not a refactoring one. Either way this is a *separate* decision from 6c —
+do the count, record it here, do not act on it during the split.
+
 ### The gate for Phase 6 is `regression.py`, not `plot_regression.py`
 
 The inverse of Phase 5. `trial_classification/` writes `trial_data`, so **`regression.py` (~15
