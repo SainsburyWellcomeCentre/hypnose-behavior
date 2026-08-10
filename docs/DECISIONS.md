@@ -395,6 +395,20 @@ flip int64→float64 from a single new null — only 10 cells differ numerically
 outcome moves. One trial (`sub-057` 332) trims to an *empty* sequence: both its positions were
 grace entries rescued by 0.36 ms and 0.104 ms of credit. Its positions are still recorded.
 
+### `presentations` now means "presented", and one denominator moved with it
+
+`presentation_counts_by_odor` — the denominator of `odorx_abortion_rate` — counts
+`in_presentations` rows, which now include a trailing position the animal never poked. That is
+deliberate and it is why the metric moved on 5 sessions: the odor **was** presented, so it
+belongs in a count of presentations, while the numerator is `last_odor_name` (the last odor
+actually *sampled*), so such a position contributes a presentation and no abortion. It is not
+filtered on `poke_source`.
+
+The general rule this establishes: **`presentations` answers "what did the rig deliver",
+`poke_source` answers "what did the animal sample".** A metric that means the first counts rows;
+a metric that means the second filters (`metrics.sampling._real_pokes`). Read a per-position
+metric and decide which of the two it is before changing it.
+
 ### The two position helpers still must stay separate
 
 `sequence_depth` ("how far the sequence got") is **never** filtered; `sampled_positions` ("was
@@ -714,6 +728,21 @@ And measured for completeness: `fr_latency_ms` is present on **101/101** trials 
 response occurred and absent on all 63 `nFR`, exactly 1:1 with the `false_response` flag. The
 abort side is identical (`fa_latency_ms` 69/69 on FA, 0/44 on nFA). **Absence there means the
 animal correctly withheld, not that a measurement failed.**
+
+### 6b did NOT retire this fallback *(measured 2026-08-10)*
+
+The Phase 6b brief predicted that once positions carried `poke_source` the anchor "can be
+chosen properly instead of by fallback". Measured after 6b landed, **the fallback still fires
+on all 20 trials**. Nothing regressed — the prediction was simply wrong about where the work
+lives.
+
+`analyze_response_times` does not read `position_poke_times`. It builds its **own** position map
+from valve events (`position_locations_rt`) and takes the last one as the target, so
+`poke_source` never reaches the decision. The marker makes the correct anchor *available*; it
+does not select it. Making the fallback stop firing means changing the target selection in
+`analyze_response_times` to the last position with `poke_source == 'poke'` — a change to this
+section's own logic, needing its own measurement and fixture regeneration. **Do not assume the
+fallback is dead because `poke_source` exists.**
 
 ### No bespoke marker for "ended on an unpoked odor"
 
