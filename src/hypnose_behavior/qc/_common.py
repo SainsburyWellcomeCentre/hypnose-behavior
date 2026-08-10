@@ -36,7 +36,7 @@ import pandas as pd
 # Update ONLY these lines as modules move during the restructuring. The md5
 # fingerprints they produce must remain identical at every step.
 import hypnose_behavior.io.paths as _paths
-from hypnose_behavior.trial_classification.classification_utils import analyze_session_multi_run_by_id_date
+from hypnose_behavior.trial_classification.run import analyze_session_multi_run_by_id_date
 from hypnose_behavior.io.load_results import load_session_results
 from hypnose_behavior.metric_analysis.run import run_all_metrics
 # ---------------------------------------------------------------------------

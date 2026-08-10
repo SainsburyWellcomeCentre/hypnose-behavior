@@ -621,7 +621,7 @@ in / out / late arithmetic in `_score_false_response`, `_false_alarm` and
 
 ---
 
-## 15. The response-time anchor falls back to the last poke *before* the odor *(Phase 6a, 2026-08-10)*
+## 15. The response-time anchor falls back to the last poke *before* the odor *(Phase 11, 2026-08-10)*
 
 **Intended output change, 20 trial cells, fixtures regenerated 2026-08-10.**
 
@@ -692,7 +692,7 @@ be neither. Consumers derive it at the point of use with the definition they nee
 
 ---
 
-## 16. Every reward latency exists twice: window-relative and movement *(6c, 2026-08-10)*
+## 16. Every reward latency exists twice: window-relative and movement *(Phase 11, 2026-08-10)*
 
 **Intended output change, fixtures regenerated 2026-08-10.**
 
@@ -762,5 +762,5 @@ goes RED by design. **A metric outside `REPORT` is invisible to the golden maste
 it is in `REPORT` before assuming a metric change is gated.**
 
 Consumers with no `fa_movement_latency_ms` column get an empty Series rather than a fallback to
-the old computation, by the §2 rule: a session saved before 6c cannot be made to look
+the old computation, by the §2 rule: a session saved before Phase 11 cannot be made to look
 comparable to one saved after it.

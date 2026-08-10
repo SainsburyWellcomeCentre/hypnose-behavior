@@ -60,9 +60,7 @@ def _normalise(text: str) -> list[str]:
 
 def capture(subjid, date) -> str:
     """Run one session's classification with verbose=True and return everything it printed."""
-    from hypnose_behavior.trial_classification.classification_utils import (
-        analyze_session_multi_run_by_id_date,
-    )
+    from hypnose_behavior.trial_classification.run import analyze_session_multi_run_by_id_date
 
     with tempfile.TemporaryDirectory(prefix="hyp_verbose_") as tmp_str:
         _common._redirect_derivatives(Path(tmp_str))

@@ -51,16 +51,6 @@ from IPython import get_ipython
 
 
 # ============== General Utility Functions and Class Definitions =======================================
-# Reader classes and loaders moved to hypnose_behavior.io.loaders during the restructuring; re-exported
-# here so existing callers (the runner/plotting below, notebooks) keep importing them from
-# classification_utils.
-from hypnose_behavior.io.loaders import (  # noqa: F401
-    SessionData, Video, TimestampedCsvReader,
-    load, load_json, load_video, load_csv, concat_digi_events,
-    load_experiment, exp_data, load_all_streams, load_experiment_events, load_odor_mapping,
-)
-
-
 def vprint(verbose: bool, *args, **kwargs):
     if verbose:
         print(*args, **kwargs)
@@ -2989,43 +2979,9 @@ def classify_and_analyze_with_response_times(data, events, trial_counts, odor_ma
     }
 
 
-# ========================== Functions for saving results ==========================
-# Moved to hypnose_behavior.io.save_results during the restructuring; re-exported here so existing
-# callers (the multi-run runner below, notebooks) keep importing from classification_utils.
-from hypnose_behavior.io.save_results import (  # noqa: F401
-    save_session_analysis_results,
-    resolve_derivatives_output_dir,
-    _normalize_df_for_io,
-    _json_safe,
-    _json_default,
-    _find_rawdata_root,
-    _find_parent_named,
-)
-
-
-# ========================== Functions for multiple session analysis ========================== 
-
-# Merge utilities moved to hypnose_behavior.trial_classification.merge during the restructuring; re-exported
-# here so the runner below and notebooks keep importing them from classification_utils.
-from hypnose_behavior.trial_classification.merge import (  # noqa: F401
-    merge_classifications, _concat_align, _assign_global_trial_ids, _with_run_id, _coerce_int_like,
-)
-
-
-# Summary report moved to hypnose_behavior.trial_classification.summary during the restructuring;
-# re-exported here so the runner below and notebooks keep importing it from classification_utils.
-from hypnose_behavior.trial_classification.summary import print_merged_session_summary  # noqa: F401
-
-
-# Runner moved to hypnose_behavior.trial_classification.run during the restructuring; re-exported here so
-# the harness, notebooks, and batch entry points keep importing it from classification_utils.
-from hypnose_behavior.trial_classification.run import (  # noqa: F401
-    analyze_session_multi_run_by_id_date, batch_analyze_sessions,
-    build_position_pokes_table, _parse_date_input,
-)
-
-
-# ========================= Further functions / miscillaneous =========================
-# plot_valve_and_poke_events moved to hypnose_behavior.visualization.valve_poke_plots during the
-# restructuring; re-exported here so notebooks keep importing it from classification_utils.
-from hypnose_behavior.visualization.valve_poke_plots import plot_valve_and_poke_events  # noqa: F401
+# Saving, merging, the summary report, the multi-run runner and plot_valve_and_poke_events all
+# live in their own modules (io/save_results, merge, summary, run, visualization/valve_poke_plots).
+# They are NOT re-exported here: import them from where they are defined. The re-exports were the
+# last back-compat shims from v1.0.0, and keeping them forced run.py and merge.py to import this
+# module lazily to dodge the cycle they created -- and made trial_classification depend on
+# visualization, which is backwards.

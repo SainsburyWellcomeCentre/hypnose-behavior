@@ -23,6 +23,10 @@ from hypnose_behavior.io.loaders import (
 )
 from hypnose_behavior.io.save_results import save_session_analysis_results
 from hypnose_behavior.io.layout import rawdata
+from hypnose_behavior.trial_classification.classification_utils import (
+    detect_trials, classify_and_analyze_with_response_times, classify_noninitiated_FA,
+    _get_single_reward_info,
+)
 from hypnose_behavior.trial_classification.merge import merge_classifications
 from hypnose_behavior.trial_classification.summary import print_merged_session_summary
 from hypnose_behavior.utils.helpers import vprint
@@ -33,13 +37,6 @@ def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verb
     Now passes full per-run stage/parameter info to save_session_analysis_results.
     """
     
-    # Core classifiers imported lazily to avoid an import cycle with classification_utils
-    # (which re-exports this runner); at call time that module is fully loaded.
-    from hypnose_behavior.trial_classification.classification_utils import (
-        detect_trials, classify_and_analyze_with_response_times, classify_noninitiated_FA,
-        _get_single_reward_info,
-    )
-
     subject_id = str(subject_id)
     date_str = str(date_str)
 

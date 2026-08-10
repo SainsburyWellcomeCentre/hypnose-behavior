@@ -700,7 +700,7 @@ def fa_latency_from_pokeout(trials, *, fa_types=None):
     happens on 44% of false alarms (section 16). Two independent derivations of one quantity is
     exactly what section 14 is about, so there is now one.
 
-    Returns empty when the column is absent. Sessions saved before 6c never carry it, and
+    Returns empty when the column is absent. Sessions saved before Phase 11 never carry it, and
     silently falling back to the old computation would make old and new sessions look
     comparable when they measure different things -- the section 2 rule for absent provenance.
     """

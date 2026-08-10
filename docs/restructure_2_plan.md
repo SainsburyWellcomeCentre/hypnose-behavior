@@ -105,6 +105,15 @@ documentation and three shared leaves, and it was never a de-bloat (see Phase 10
   - `-u` matters when the output is redirected (backgrounded runs, tee to a log). Without
     it Python block-buffers stdout, so a 5-minute run shows nothing at all until it exits
     and there is no way to tell progress from a stall.
+  - **`-u` is not enough if you pipe through `grep`** — grep block-buffers too, and
+    `regression.py` emits only ~20 short lines, well under grep's 4 KB buffer, so the whole
+    run looks silent until it exits. Use `grep --line-buffered`. (Cost 2026-08-10: a green
+    run that was indistinguishable from a hang for 12 minutes.)
+  - **Runtime varies a lot** and is dominated by mount latency, not by the code. Measured on
+    the same 9 sessions: ~2-3 min on a warm local-feeling mount, **~12 min** on 2026-08-10
+    after a long session of repeated reads. Treat a slow run as normal until `ps` says
+    otherwise: `ps -eo pid,etime,stat,command | grep regression.py` shows elapsed time, and
+    state `U` just means it is waiting on mount I/O.
 
 - **Gate on reachability, not on how large the change looks.** Run `regression.py` for any edit
   inside a function `run_all_metrics` reaches, or anything touching `load_session_results`. Skip
@@ -163,13 +172,15 @@ Update this table at the end of each phase, in the same commit as the work.
 | 4b modularise metric_analysis | **done** 2026-08-07 | `604355f`..`cbc7059` | **`metrics_utils.py` (2,639 lines) is gone.** Plumbing to `io/load_results.py` + `run`/`merge`/`summary`; definitions to 7 modules under `metrics/`. Registry: 43 registered / 25 reported. Every carve verified by an ast pass requiring all 112 pre-4b function bodies byte-identical. One intended output change (`fa_abortion_stats` numeric). **Registry contract, `frames.py`-as-leaf and the legacy-reader trap — `DECISIONS.md` §3-5** |
 | 5 visualization primitives | **done** 2026-08-07 | `e532ab7`..`2ce3dcc` | **Both 4a defects fixed.** **No plotter reads `metrics_*.json`** — trap discharged, and it exposed a duplicate-rows bug the JSON path was hiding. `position_data` lazy; `load_results_dir` split out. Three shared leaves: `primitives.py` (`mean_sem` 18 sites, `sem_band`, `rolling_windows`), `prep.py`, `panels.py`. **All 44 session-selecting functions take the six selectors.** **Zero plotter-to-plotter imports.** Two briefs were measurably wrong and were not followed: finding 10's "duplicates" disagree on up to **63.8%** of trials, and section 2's helpers were never duplicated — `DECISIONS.md` §13. `style_axis` dropped as unearned (§12). **Gate grew 32 → 35 cases**; "no plot function over ~100 lines" is explicitly left to Phase 10 |
 | 6a split the 4 long functions + unify the outcome rule | **done** 2026-08-10 | `97a01ad`..`5f25e4a` | **The four monoliths are gone**: 3,005 → 977 lines (`classify_trials` 1226→419, `abortion_classification` 736→162, `analyze_response_times` 580→263, `detect_trials` 462→133); the file 3,703 → 3,023. **`regression.py` GREEN on every commit, including the unification** — nothing in this phase moved a value. Two new leaves: `windows.py` (poke/valve primitives) and `outcome.py` (`classify_completed_trial` + `latency_label`), both importing nothing from the package, so `io/save_results.py` reaches the shared rule without a cycle (§3). **3 outcome sites → 1, 3 latency-bucket copies → 1.** The three valve-edge builders and the two poke summaries were measured and **kept apart** under names saying how they differ. 106 lines of dead nested defs dropped. **Measured before merging (§13): 1,731 trials, the rule never conflicts — `DECISIONS.md` §14.** New guard `qc/verbose_diff.py` (stdout, which `regression.py` never sees) and `qc/outcome_agreement.py` |
-| 6c latency semantics *(unplanned, arose from 6a)* | **done** 2026-08-10 | `934c868`..`HEAD` | Three measured output changes, fixtures regenerated. §15: the response-time anchor falls back to the last poke *before* the odor — 20 trials that had no response time now have one, rewarded/unrewarded reach 100% coverage. §16: every reward latency now exists as **(a) window-relative** (sets the label, unchanged) and **(b) movement** (`response_time_ms` re-anchored; three new columns). `fa_latency_from_pokeout` repointed at (b). **Labels, outcomes and `decision_accuracy` did not move.** Naming debt recorded above |
+
 | 6b `poke_source` + the 0 ms positions | not started | | `DECISIONS.md` §10. **Intended output change**, fixtures regenerated in the same commit. 6a is done, so this is unblocked. Two acceptance tests waiting for it: re-run `qc/outcome_agreement.py` and the one remaining conflict should be **gone** (§14), and the response-time fallback of §15 should stop firing once positions carry `poke_source` |
+| 6c split `classification_utils.py` | not started | | ~3,000 lines, four clean seams after 6a. **Flat modules, no subpackage.** Verify with the 4b AST byte-identity pass, not just regression. Needs 6b first — see below |
 | 7a manifest provenance | not started | | ~40% done in advance by 2c |
 | 7b schema & formats | not started | | intended output change |
 | 8 profile, then vectorise | not started | | |
 | 9 validation | not started | | |
 | 10 modularise `visualization_utils.py` | **proposed**, after the restructure | | not scheduled |
+| 11 latency semantics *(unplanned, arose from 6a)* | **done** 2026-08-10 | `934c868`..`HEAD` | Three measured output changes, fixtures regenerated. §15: the response-time anchor falls back to the last poke *before* the odor — 20 trials that had no response time now have one, rewarded/unrewarded reach 100% coverage. §16: every reward latency now exists as **(a) window-relative** (sets the label, unchanged) and **(b) movement** (`response_time_ms` re-anchored; three new columns). `fa_latency_from_pokeout` repointed at (b). **Labels, outcomes and `decision_accuracy` did not move.** Naming debt recorded above |
 | ∥ time-base audit | not started, deferred | | parallelisable |
 
 ### Model and reasoning effort
@@ -467,7 +478,7 @@ is Phase 10's split and was never reachable from here.*
 
 ---
 
-### Naming debt to settle later — the (a)/(b) latency pair *(6c, 2026-08-10)*
+### Naming debt to settle later — the (a)/(b) latency pair *(11, 2026-08-10)*
 
 Every reward-port latency now exists twice. Both **end at the reward-port poke**; they differ
 only in where they start — **(a)** at the window start (what the labels bucket), **(b)** at the
@@ -568,6 +579,40 @@ It unblocks `only_true_pokes` on the sampling metrics and collapses `sequence_de
 aborted/completed branch to a one-liner.
 
 **Do not attempt 6b before 6a is committed and GREEN.**
+
+### Phase 6c — split `classification_utils.py`  *(separate chat, after 6b)*
+
+6a removed the re-export shims and took the four monoliths apart, so the seams are now visible
+in the file itself. What remains is ~3,000 lines that belong in separate modules:
+
+| module | contents |
+|---|---|
+| `detect.py` | `detect_trials` + its attempt/fallback helpers |
+| `classify.py` | `classify_trials` + position assignment, outcome scoring, its summary printer |
+| `response_times.py` | `analyze_response_times` + its helpers and printer |
+| `abortion.py` | `abortion_classification`, `classify_noninitiated_FA` + their printer |
+| `hidden_rule.py` | the hidden-rule resolution shared by `classify` and `response_times` |
+| `schema.py` | `get_experiment_parameters`, `_sampling_parameters_ms`, `_get_single_reward_info` |
+| `index.py` | `build_classification_index` |
+| existing leaves | `windows.py`, `outcome.py` — unchanged |
+
+**Flat modules, not a subpackage.** `trial_classification/` has ~9 modules today and would reach
+~15 — still one screen of `ls`, and it keeps the §3 leaf discipline checkable at a glance. A
+subdirectory earns its place only when an area grows its own cluster with a registry, the way
+`metric_analysis/metrics/` did. Nothing here has that shape.
+
+**Verify with the Phase 4b technique, not just the gate.** 4b split a 2,639-line module and
+proved it with an AST pass requiring all 112 pre-split function bodies to be byte-identical.
+That turns a 3,000-line carve from "regression is green, probably fine" into "provably a move",
+and catches the one thing the fingerprint cannot: a body that drifted while the output happened
+not to move on nine sessions. Write that pass first.
+
+**After 6b, not before.** 6b rewrites how `classify_trials` writes positions; a file split
+landing in the same window makes that diff unreadable. Same reasoning that put 6a before 6b.
+
+**`classification_utils.py` should not survive as a facade.** The re-exports were deleted in 6a
+precisely so this split can end with the file *gone*, rather than turned into an index of
+imports pointing at the new modules — which would be the same problem spread across more files.
 
 ### The gate for Phase 6 is `regression.py`, not `plot_regression.py`
 

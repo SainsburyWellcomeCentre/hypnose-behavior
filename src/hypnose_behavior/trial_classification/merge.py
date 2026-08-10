@@ -12,6 +12,9 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
+from hypnose_behavior.trial_classification.classification_utils import build_classification_index
+
+
 def _concat_align(dfs: Iterable[pd.DataFrame]) -> pd.DataFrame:
     dfs = [d for d in dfs if isinstance(d, pd.DataFrame) and not d.empty]
     if not dfs:
@@ -294,9 +297,6 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
         })
     merged['runs'] = runs_meta
 
-    # Rebuild index. Imported lazily to avoid an import cycle with classification_utils
-    # (which re-exports merge_classifications); at call time that module is fully loaded.
-    from hypnose_behavior.trial_classification.classification_utils import build_classification_index
     try:
         merged['index'] = build_classification_index(merged)
     except Exception:

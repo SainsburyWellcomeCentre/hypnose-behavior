@@ -58,7 +58,7 @@ from hypnose_behavior.metric_analysis.run import (
     run_all_metrics,
 )
 from datetime import timedelta, datetime
-from hypnose_behavior.trial_classification.classification_utils import load_all_streams, load_experiment
+from hypnose_behavior.io.loaders import load_all_streams, load_experiment
 from hypnose_behavior.utils.helpers import (
     CACHE,
     _filter_session_dirs,
