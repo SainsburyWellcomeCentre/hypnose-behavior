@@ -12,7 +12,6 @@ accidentally changing analysis output**.
 |---|---|
 | `docs/restructure_2_plan.md` (this) | the spine: remaining phases and the operating rules |
 | `docs/DECISIONS.md` | settled rules and standing traps — **read at the start of every phase** |
-| `docs/phase5_brief.md` | Phase 5's work list, extracted from the closed Phase 4 audit |
 
 `docs/archive/` holds closed working documents. **Nothing live points into it**, and no phase
 needs to read it.
@@ -35,18 +34,20 @@ terminal entry points in `scripts/`; no back-compat shims, all imports canonical
 | neuropixel analysis | `hypnose_ephys` | ephys (planned) |
 | **hypnose-helpers** | `hypnose_helpers` | shared, modality-agnostic utilities (exists, local only) |
 
-**Current scale** — measured 2026-08-07, after Phase 4b:
+**Current scale** — measured 2026-08-07, after Phase 5. The total *rose*: Phase 5 added
+documentation and three shared leaves, and it was never a de-bloat (see Phase 10).
 
 | area | lines |
 |---|---|
-| `visualization/` **total** | **15,124** |
-| ├ `visualization_utils.py` | 6,690 |
-| ├ `movement_analysis_utils.py` | 3,583 |
-| ├ `pred_seq_utils.py` | 1,849 |
-| ├ `sing_rew.py` | 1,287 |
-| ├ `modelling/switchpoint/plots.py` | 638 |
+| `visualization/` **total** | **16,015** |
+| ├ `visualization_utils.py` | 6,777 |
+| ├ `movement_analysis_utils.py` | 3,606 |
+| ├ `pred_seq_utils.py` | 1,658 |
+| ├ `sing_rew.py` | 1,364 |
+| ├ `modelling/switchpoint/plots.py` | 648 |
 | ├ `valve_poke_plots.py` | 635 |
-| └ `movement_analysis/sing_rew_movement.py` | 433 |
+| ├ `prep.py` / `panels.py` / `primitives.py` (the shared leaves) | 501 / 264 / 125 |
+| └ `movement_analysis/sing_rew_movement.py` | 428 |
 | `trial_classification/classification_utils.py` | 3,703 |
 | `metric_analysis/` | `run` / `merge` / `summary` / `registry` / `frames` / `resolvers` / `movement` / `stats/` + 7 modules under `metrics/`, none over 710 lines |
 
@@ -66,7 +67,7 @@ terminal entry points in `scripts/`; no back-compat shims, all imports canonical
   **added/removed/changed columns and metric keys**, so an intended change is easy to confirm.
   `--generate` writes baselines; optional `subjid:date` args limit scope. ~15 min.
 - **`plot_regression.py`** — old-vs-new diff of what the **plotters draw**. `regression.py`
-  never sees a figure, so everything in `visualization/` is invisible to it. Runs 32 plotter
+  never sees a figure, so everything in `visualization/` is invisible to it. Runs 35 plotter
   cases under Agg against a git revision and the working tree and diffs every line's xy data,
   collection offsets, patch geometry, axis decoration and stdout. Deliberately a two-tree diff,
   not a golden master: figures are meant to change, and the question is always whether *this*
@@ -161,7 +162,8 @@ Update this table at the end of each phase, in the same commit as the work.
 | 4a strip metrics from visualization | **done** 2026-08-06 | audit `58387ce`..`6aac5de`; moves `9672f1e`..`aa0355f` | **`visualization/` fetches and plots, and computes no metrics.** 32 sites of metric math resolved: 24 metrics added to `metric_analysis`, 8 exact dedups, 9 variants collapsed onto `by_group`/`over_windows`. D0 complete for every tier. `compute_speed_analysis` (711 lines, 7 movement metrics) moved wholesale to `metric_analysis/movement.py`. Two deliberate output changes landed (non-initiated trials left the metric set; `ambiguous_rate`/`correct_rejection_rate` added). `qc/plot_regression.py` written and grown to 32 cases. **Deviation that outranks the audit: `_load_tracking_and_behavior` → `io/tracking.py`, not `visualization/io/`** |
 | 4b modularise metric_analysis | **done** 2026-08-07 | `604355f`..`cbc7059` | **`metrics_utils.py` (2,639 lines) is gone.** Plumbing to `io/load_results.py` + `run`/`merge`/`summary`; definitions to 7 modules under `metrics/`. Registry: 43 registered / 25 reported. Every carve verified by an ast pass requiring all 112 pre-4b function bodies byte-identical. One intended output change (`fa_abortion_stats` numeric). **Registry contract, `frames.py`-as-leaf and the legacy-reader trap — `DECISIONS.md` §3-5** |
 | 5 visualization primitives | **done** 2026-08-07 | `e532ab7`..`2ce3dcc` | **Both 4a defects fixed.** **No plotter reads `metrics_*.json`** — trap discharged, and it exposed a duplicate-rows bug the JSON path was hiding. `position_data` lazy; `load_results_dir` split out. Three shared leaves: `primitives.py` (`mean_sem` 18 sites, `sem_band`, `rolling_windows`), `prep.py`, `panels.py`. **All 44 session-selecting functions take the six selectors.** **Zero plotter-to-plotter imports.** Two briefs were measurably wrong and were not followed: finding 10's "duplicates" disagree on up to **63.8%** of trials, and section 2's helpers were never duplicated — `DECISIONS.md` §13. `style_axis` dropped as unearned (§12). **Gate grew 32 → 35 cases**; "no plot function over ~100 lines" is explicitly left to Phase 10 |
-| 6 trial classification dedup | not started | | unit tests first |
+| 6a split the 4 long functions + unify the outcome rule | not started | | `classify_trials` 1226, `abortion_classification` 736, `analyze_response_times` 580, `detect_trials` 462 = 84% of the file. **Pure refactor: `regression.py` GREEN is the invariant.** Measure the 3 outcome derivations against each other before merging — §13 |
+| 6b `poke_source` + the 0 ms positions | not started | | `DECISIONS.md` §10. **Intended output change**, fixtures regenerated in the same commit. Needs 6a first |
 | 7a manifest provenance | not started | | ~40% done in advance by 2c |
 | 7b schema & formats | not started | | intended output change |
 | 8 profile, then vectorise | not started | | |
@@ -273,8 +275,9 @@ after the folder rename (`hypnose`, `hypnose-analysis`, `hypnose-somnotate`, `sl
 
 ## Phase 5 — Visualization: primitives, then thin plotters
 
-**Work list: `docs/phase5_brief.md`** — the `FETCH`, `PREP` and `DISPLAY-AGG` inventory
-extracted from the Phase 4 audit and re-measured against `cbc7059`.
+*Closed. The work list is archived at `docs/archive/phase5_brief.md`; everything still
+load-bearing from it is in `DECISIONS.md` §12-13 and in Phase 10 below. Do not read the
+archived brief — two of its sections were measurably wrong about the code.*
 
 `visualization/` is 15,124 lines across 7 files. 4a took the metric math out; what is left is
 data prep, axis construction and styling.
@@ -463,27 +466,50 @@ is Phase 10's split and was never reachable from here.*
 
 ---
 
-## Phase 6 — Trial classification: dedup + modularise  *(highest risk)*
+## Phase 6 — Trial classification  *(highest risk; split into 6a and 6b)*
 
-**Problem:** rewarded/unrewarded/timeout is derived **three times independently** —
-`classify_trials` (the `completed_sequence_*` frames), `analyze_response_times` (the
-`response_time_category` column), and `save_results._derive_outcome` (re-derived from
-supply/poke counts). They share no code and can drift. The false-response/false-alarm
-latency-bucket logic is duplicated too. The trial loop in `classify_trials` is ~1000 lines
-with deeply nested helpers.
+**Split into two chats 2026-08-07**, because they are different *kinds* of change and mixing
+them makes a RED undiagnosable: **6a must keep `regression.py` GREEN throughout**, while 6b
+deliberately alters `trial_data` and regenerates fixtures. One chat doing both cannot tell a
+broken refactor from the intended schema change.
 
-**Approach:**
+### The shape of the problem, measured *(2026-08-07)*
 
-1. **Write the unit tests first** (see cross-cutting) so the refactor is guarded at fine grain.
-2. Extract a **pure** `classify_completed_trial(record) -> outcome` (and the FR/FA
-   latency-bucket helper) taking a small per-trial record (await_reward_time, supply pulses,
-   port-poke windows, response window, sequence_rewarded). No `data`/`events` dicts inside.
-3. Point all three sites at it; delete the duplicated branches.
-4. Clean the trial loop: one pass builds the per-trial record, classification is pure on it.
-5. **Modularise the whole `trial_classification/` package.** Break long multi-purpose functions
-   into single-responsibility ones — detect the cue poke, resolve the odor sequence, compute
-   poke/valve windows, classify the outcome — rather than several at once. Apply to
-   `detect_trials`, `merge`, `run` as well.
+`classification_utils.py` is 3,703 lines / 16 top-level functions, but **four of them are 84%
+of the file's function body**. The other twelve are 13–147 lines and need nothing.
+
+| lines | function | nested defs |
+|---|---|---|
+| 1,226 | `classify_trials` | 9 |
+| 736 | `abortion_classification` | 14 |
+| 580 | `analyze_response_times` | 4 |
+| 462 | `detect_trials` | 1 |
+
+---
+
+### Phase 6a — split the four long functions, and unify the outcome rule
+
+**Two jobs, deliberately in this order.**
+
+1. **Split.** Take the four functions above and break each into small single-purpose functions
+   — detect the cue poke, resolve the odor sequence, compute poke/valve windows, classify the
+   outcome — rather than several at once. Pure refactor: **`regression.py` GREEN is a hard
+   invariant on every commit.**
+2. **Then unify.** rewarded/unrewarded/timeout is derived **three times independently** —
+   `classify_trials` (the `completed_sequence_*` frames), `analyze_response_times` (the
+   `response_time_category` column) and `save_results._derive_outcome` (re-derived from
+   supply/poke counts). The FR/FA latency-bucket logic is duplicated too. Extract a **pure**
+   `classify_completed_trial(record) -> outcome` taking a small per-trial record
+   (await_reward_time, supply pulses, port-poke windows, response window, sequence_rewarded) —
+   no `data`/`events` dicts inside — and point all three at it.
+
+> **Measure the three against each other before merging them** (`DECISIONS.md` §13). "They
+> share no code and can drift" is a hypothesis about drift, not a finding. If they agree on all
+> 9 fixture sessions the merge is cheap and safe; if they disagree, **which one is right is a
+> scientific decision, not a refactoring one** — bring the numbers and ask.
+
+Doing the split first means any RED during it is unambiguously the refactor. The unification is
+the only step that can legitimately move a value, and it arrives alone.
 
 `plot_choice_history` in `visualization/` re-derives the same *display* category rule from
 `response_time_category` + `hidden_rule_success` + `fa_label`. It computes no rate, so 4a left
@@ -493,9 +519,37 @@ it alone — it belongs to this consolidation.
 **pure and independently testable**; shortness follows. Splitting purely to reduce line count
 produces functions taking twelve arguments, which is worse than what you started with.
 
-**Risk:** high (core logic) — guarded by regression + new unit tests. **Done:** regression
-GREEN, 3 sites → 1, no giant multi-purpose blocks left in `trial_classification/`, unit tests
-pass.
+**Done:** the four functions are gone as monoliths, 3 outcome sites → 1, `regression.py` GREEN
+(or one deliberate, measured, agreed change from the unification), `verify_scripts.py` GREEN.
+
+### Phase 6b — write `poke_source` and the 0 ms positions  *(separate chat)*
+
+`DECISIONS.md` §10 in full: the two data-writing bugs that make the position record incomplete
+and ambiguous. Writing happens in `classify_trials`, which is why it follows 6a rather than
+preceding it — it lands in a trial loop that has already been made legible.
+
+**This is an intended output change.** It alters `trial_data`, so fixtures are regenerated
+deliberately in the same commit with the +/−/~ diff confirming only the intended columns moved.
+It unblocks `only_true_pokes` on the sampling metrics and collapses `sequence_depth`'s
+aborted/completed branch to a one-liner.
+
+**Do not attempt 6b before 6a is committed and GREEN.**
+
+### The gate for Phase 6 is `regression.py`, not `plot_regression.py`
+
+The inverse of Phase 5. `trial_classification/` writes `trial_data`, so **`regression.py` (~15
+min) sees everything** and is the gate that matters; run `verify_scripts.py` too, since this is
+where the CLI wiring lives. `plot_regression.py` is a useful extra because a changed
+`response_time_category` moves what the plotters draw, but it is not the primary guard.
+
+**Phase 5's standing warning for this phase:** before consolidating any two things that "look
+like duplicates", *measure whether they actually agree* — `DECISIONS.md` §13. Phase 5 was sent
+to merge seven helpers described as twins and found five of them were different rules sharing a
+name, one pair disagreeing on **63.8%** of trials. Phase 6's premise is that three outcome
+derivations "share no code and can drift". That is a hypothesis about *drift*; the first
+deliverable is the measurement of how often the three currently disagree, on real sessions.
+If they agree everywhere, the consolidation is safe and cheap. If they do not, **which one is
+right is a scientific decision, not a refactoring one** — bring the numbers and ask.
 
 ---
 
@@ -610,7 +664,23 @@ a move is invisible to the diff.
 read as "not found"; and moving a plotter between modules changes `file`/`chain` in saved-figure
 provenance (`DECISIONS.md` §9).
 
-**Not scheduled.** If Phase 5 makes it unavoidable, say so and stop rather than starting it.
+**Phase 5 left two things here, deliberately.**
+
+1. **The nested loader plumbing.** `valve_poke_plots.plot_valve_and_poke_events` is one 620-line
+   function with six loaders nested inside it (`parse_exp_ts_to_uk`, `_safe_concat`,
+   `_apply_offset_and_localize`, `_slice`, `_load_register_files`, `_try_load` — `:74`-`:284`),
+   and `visualization_utils._session_hr_odors` (`:5189`) is nested in one plotter. They are pure
+   loader plumbing and belong in `io/loaders.py`. Phase 5 moved only the loaders that were
+   imported *across* modules, because those were the ones breaking layering; these break none.
+   **`valve_poke_plots` has no `plot_regression` case**, so anyone extracting them must add one
+   first or the move is unverifiable.
+2. **The invariant to preserve: zero plotter-to-plotter imports.** Phase 5 moved 15 shared names
+   into `prep.py` and `panels.py` so no plotter module imports from a sibling
+   (`DECISIONS.md` §13). A split that reintroduces one puts the tangle straight back.
+   `grep -n "^from hypnose_behavior.visualization" src/hypnose_behavior/visualization/**/*.py |
+   grep -vE "primitives|prep|panels"` should stay empty.
+
+**Not scheduled.**
 
 ---
 
@@ -667,8 +737,9 @@ Phase 1   rename                                          DONE
 Phase 2   extract hypnose-helpers, session API, provenance DONE
 Phase 3   re-baseline QC                                  DONE (superseded by 0)
 Phase 4   metrics single source of truth (4a then 4b)     DONE
-Phase 5   visualization primitives + thin plotters        <- next
-Phase 6   trial classification dedup + modularise         highest risk, tests first
+Phase 5   visualization primitives + thin plotters        DONE
+Phase 6a  split the 4 long functions + unify outcome      <- next; regression GREEN
+Phase 6b  poke_source + 0 ms positions                    intended output change
 Phase 7   manifest provenance, schema & formats           couples with Phase 6
 Phase 8   profile, then vectorise                         evidence-led, optional
 Phase 9   validation                                      woven throughout, optional

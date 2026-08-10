@@ -17,7 +17,7 @@ Read with `docs/DECISIONS.md`. This file says *what to move*; that file says *wh
 > | section | state |
 > |---|---|
 > | 1 — FETCH, the metrics-JSON readers | ✅ **done**. `_ensure_metrics_json` deleted, all 6 call sites compute, trap discharged |
-> | 1 — FETCH that genuinely relocates | ✅ **done** as part of the layering fix — the shared loaders now sit in `visualization/prep.py` |
+> | 1 — FETCH that genuinely relocates | ⚠️ **partly.** The *cross-module* loaders moved to `visualization/prep.py`. The seven nested in a single function each — `valve_poke_plots`'s six and `_session_hr_odors` — did **not**: they break no layering, and `valve_poke_plots` has no gate case. Carried into the plan under Phase 10 |
 > | 2 — PREP, the shared prep module | ⚠️ **premise false.** Every helper in the table had exactly **one** definition; nothing was duplicated. The real defect was 15 names imported *between sibling plotter modules*, fixed by `prep.py` + `panels.py` |
 > | 2 — finding 10 (trajectory prep) | ⚠️ **premise false.** "Every row has a twin" is wrong for 5 of 7 rows: `_infer_port` variants disagree on **63.8%** of trials, `_last_poke_out` on 1.4%, and `_port_letter` has no twin. Two were genuinely shared; the rest were **renamed, not merged** |
 > | 2 — finding 14 | ✅ **respected.** The `OdorG-C`/`OdorG-F` relabelling stayed a display relabelling, and `movement_analysis_utils._odor_letter` now wraps `frames.odor_letter` with only its `"Unknown"` label kept local |
