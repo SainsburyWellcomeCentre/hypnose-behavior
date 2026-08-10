@@ -1178,7 +1178,7 @@ def _false_response_window_end(trial_end, await_reward_time, initiation_starts_s
 
 
 def _score_false_response(trial_dict, *, await_reward_time, fr_window_end, port1_pokes,
-                          port2_pokes, response_time_ms_window):
+                          port2_pokes, response_time_ms_window, cue_series):
     """Score a completed **non-rewarded** ("no-go") sequence, single-reward protocol only.
 
     There is nothing to collect, so going to a reward port anyway is a false response. Mirrors
@@ -1201,6 +1201,7 @@ def _score_false_response(trial_dict, *, await_reward_time, fr_window_end, port1
         trial_dict['fr_port'] = None
         trial_dict['fr_odor_identity'] = None
         trial_dict['fr_latency_ms'] = np.nan
+        trial_dict['fr_movement_latency_ms'] = np.nan
         return
 
     fr_time, fr_port, fr_odor = tagged_pokes[0]
@@ -1210,6 +1211,11 @@ def _score_false_response(trial_dict, *, await_reward_time, fr_window_end, port1
     trial_dict['fr_port'] = fr_port
     trial_dict['fr_odor_identity'] = fr_odor
     trial_dict['fr_latency_ms'] = float(fr_latency_ms)
+    # (b) how fast it travelled once it finally left the cue port. fr_latency_ms above is (a),
+    # time since the sequence completed, and it is what fr_label buckets. DECISIONS section 16.
+    _fr_anchor = windows.last_poke_end_before(cue_series, fr_time)
+    trial_dict['fr_movement_latency_ms'] = (
+        float((fr_time - _fr_anchor).total_seconds() * 1000.0) if _fr_anchor is not None else np.nan)
     # Parity with unrewarded rows so downstream poke-based logic stays consistent.
     trial_dict['first_reward_poke_time'] = fr_time
     trial_dict['first_reward_poke_port'] = fr_port
@@ -1605,7 +1611,7 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
             _score_false_response(
                 trial_dict, await_reward_time=await_reward_time, fr_window_end=fr_window_end,
                 port1_pokes=port1_pokes, port2_pokes=port2_pokes,
-                response_time_ms_window=response_time_ms_window)
+                response_time_ms_window=response_time_ms_window, cue_series=poke_series_full)
             completed_false_response.append(trial_dict.copy())
         else:
             outcome = _score_standard_outcome(
@@ -1809,7 +1815,7 @@ def _next_completed_trial_start(current_trial_end, all_trials):
     return min(next_starts) if next_starts else None
 
 
-def _rt_row(trial_id, response_time_ms, category, target=None):
+def _rt_row(trial_id, response_time_ms, category, target=None, window_latency_ms=None):
     """One ``per_trial`` row for the response-time table.
 
     ``target`` is omitted on the early failures that give up before a target odor is known.
@@ -1824,6 +1830,8 @@ def _rt_row(trial_id, response_time_ms, category, target=None):
     if target is not None:
         row['target_odor_name'] = target[0]
         row['target_required_min_sampling_time_ms'] = target[1]
+    if window_latency_ms is not None:
+        row['completed_window_latency_ms'] = window_latency_ms
     return row
 
 
@@ -2078,8 +2086,21 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
                             + windows.rising_edges_between(port2_pokes, search_start, poke_window_end))
 
         response_time_ms = None
+        window_latency_ms = None
         if all_reward_pokes:
-            response_time_ms = (min(all_reward_pokes) - last_poke_out_time).total_seconds() * 1000
+            # Timed from the animal's LAST cue-port exit before the reward poke, not from the
+            # exit around the final odor. If it went back to the cue port after AwaitReward --
+            # resampling the odor, or checking whether another one was coming -- that is not it
+            # travelling to collect, and charging the travel time with it inflates the response.
+            # The window that sets the outcome still starts at AwaitReward; only the measurement
+            # anchor moves. DECISIONS section 16.
+            first_reward_poke = min(all_reward_pokes)
+            anchor = windows.last_poke_end_before(poke_series_full, first_reward_poke) or last_poke_out_time
+            response_time_ms = (first_reward_poke - anchor).total_seconds() * 1000
+            # (a) the same poke measured from where the rig starts its counter. This is what the
+            # outcome window is built on, and the two answer different questions -- see the
+            # naming note in DECISIONS section 16.
+            window_latency_ms = float((first_reward_poke - await_reward_time).total_seconds() * 1000)
 
         supply1_after_await = [t for t in supply_port1_times if await_reward_time <= t <= reward_window_cap]
         supply2_after_await = [t for t in supply_port2_times if await_reward_time <= t <= reward_window_cap]
@@ -2109,7 +2130,8 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
                     hr_rewarded_response_times.append(response_time_ms)
             else:
                 unrewarded_response_times.append(response_time_ms)
-            per_trial_rows.append(_rt_row(trial_id, float(response_time_ms), outcome, target=target))
+            per_trial_rows.append(_rt_row(trial_id, float(response_time_ms), outcome, target=target,
+                                          window_latency_ms=window_latency_ms))
             continue
 
         # Timeout: look for a delayed response up to the next completed trial.
@@ -2127,10 +2149,12 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
             continue
 
         first_delayed = min(delayed_reward_pokes)
-        response_time_ms = (first_delayed - last_poke_out_time).total_seconds() * 1000
+        _delayed_anchor = windows.last_poke_end_before(poke_series_full, first_delayed) or last_poke_out_time
+        response_time_ms = (first_delayed - _delayed_anchor).total_seconds() * 1000
         timeout_delayed_response_times.append(response_time_ms)
         timeout_response_delay_times.append((first_delayed - poke_window_end).total_seconds() * 1000.0)
-        per_trial_rows.append(_rt_row(trial_id, float(response_time_ms), 'timeout_delayed', target=target))
+        per_trial_rows.append(_rt_row(trial_id, float(response_time_ms), 'timeout_delayed', target=target,
+                                      window_latency_ms=float((first_delayed - await_reward_time).total_seconds() * 1000)))
 
     if verbose:
         _print_response_time_summary(
@@ -2251,17 +2275,19 @@ def _abortion_time(cue_intervals, t_start, t_end):
 
 
 def _false_alarm(abortion_time, t_end, *, init_times, cue_rises, reward_rises, dip1_rises,
-                 dip2_rises, response_time_ms, port_series):
+                 dip2_rises, response_time_ms, port_series, cue_series):
     """Did the animal go to a reward port after aborting? Returns ``(label, time, latency_ms, port)``.
 
     The window runs from the abortion to the first cue poke after the **next** initiation --
     i.e. until the animal has visibly started the next trial. With no next initiation it runs
     to the last sample in any port stream.
 
-    Returns ``('nFA', NaT, nan, None)`` when no reward-port poke falls in the window.
+    Returns ``(label, time, latency_ms, port, movement_latency_ms)``. ``latency_ms`` is (a),
+    the time since the animal gave up, and is what the label buckets; ``movement_latency_ms``
+    is (b), measured from its last cue-port exit before the poke. DECISIONS section 16.
     """
     if abortion_time is None:
-        return 'nFA', pd.NaT, np.nan, None
+        return 'nFA', pd.NaT, np.nan, None, np.nan
 
     next_init = None
     if init_times:
@@ -2279,17 +2305,20 @@ def _false_alarm(abortion_time, t_end, *, init_times, cue_rises, reward_rises, d
         fa_window_end = max(candidates) if candidates else abortion_time
 
     if not reward_rises:
-        return 'nFA', pd.NaT, np.nan, None
+        return 'nFA', pd.NaT, np.nan, None, np.nan
 
     lo = bisect_right(reward_rises, abortion_time)
     hi = bisect_right(reward_rises, fa_window_end)
     if lo >= hi:
-        return 'nFA', pd.NaT, np.nan, None
+        return 'nFA', pd.NaT, np.nan, None, np.nan
 
     fa_time = reward_rises[lo]
     fa_latency_ms = (fa_time - abortion_time).total_seconds() * 1000.0
     fa_port = 1 if fa_time in dip1_rises else (2 if fa_time in dip2_rises else None)
-    return latency_label(fa_latency_ms, response_time_ms, 'FA'), fa_time, fa_latency_ms, fa_port
+    anchor = windows.last_poke_end_before(cue_series, fa_time)
+    movement_ms = float((fa_time - anchor).total_seconds() * 1000.0) if anchor is not None else np.nan
+    return (latency_label(fa_latency_ms, response_time_ms, 'FA'), fa_time, fa_latency_ms,
+            fa_port, movement_ms)
 
 
 def _build_abortion_index(df: pd.DataFrame):
@@ -2612,10 +2641,10 @@ def abortion_classification(data, events, classification, odor_map, root, verbos
         )
 
         abortion_time = _abortion_time(cue_intervals, t_start, t_end)
-        fa_label, fa_time, fa_latency_ms, fa_port = _false_alarm(
+        fa_label, fa_time, fa_latency_ms, fa_port, fa_movement_ms = _false_alarm(
             abortion_time, t_end, init_times=init_times, cue_rises=cue_rises,
             reward_rises=reward_rises, dip1_rises=dip1_rises, dip2_rises=dip2_rises,
-            response_time_ms=response_time_ms, port_series=[DIP0, DIP1, DIP2])
+            response_time_ms=response_time_ms, port_series=[DIP0, DIP1, DIP2], cue_series=DIP0)
 
         rows.append({
             'trial_id': tr.get('trial_id', tr.name),
@@ -2637,6 +2666,7 @@ def abortion_classification(data, events, classification, odor_map, root, verbos
             'fa_time': fa_time,
             'fa_latency_ms': float(fa_latency_ms) if pd.notna(fa_latency_ms) else np.nan,
             'fa_port': fa_port,
+            'fa_movement_latency_ms': fa_movement_ms,
         })
 
     aborted_detailed = pd.DataFrame(rows)
@@ -2685,8 +2715,9 @@ def classify_noninitiated_FA(noninit_df, DIP0, DIP1, DIP2, response_time, hr_odo
         fa_label = 'nFA'
         fa_time = pd.NaT
         fa_latency_ms = np.nan
-        fa_port = None  # ← NEW
-        
+        fa_port = None
+        fa_movement_ms = np.nan
+
         reward_after = [t for t in reward_rises if attempt_end < t <= next_cue_in]
         if reward_after:
             fa_time = reward_after[0]
@@ -2711,7 +2742,8 @@ def classify_noninitiated_FA(noninit_df, DIP0, DIP1, DIP2, response_time, hr_odo
             'fa_label': fa_label,
             'fa_time': fa_time,
             'fa_latency_ms': fa_latency_ms,
-            'fa_port': fa_port,  # ← NEW
+            'fa_port': fa_port,
+            'fa_movement_latency_ms': fa_movement_ms,
             'is_hr': is_hr
         })
         
@@ -2924,7 +2956,9 @@ def classify_and_analyze_with_response_times(data, events, trial_counts, odor_ma
     if isinstance(completed_df, pd.DataFrame) and not completed_df.empty and isinstance(per_trial_df, pd.DataFrame) and not per_trial_df.empty:
         if 'trial_id' in completed_df.columns and 'trial_id' in per_trial_df.columns:
             completed_with_rt = completed_df.merge(
-                per_trial_df[['trial_id', 'response_time_ms', 'response_time_category']],
+                per_trial_df[[c for c in ('trial_id', 'response_time_ms', 'response_time_category',
+                                          'completed_window_latency_ms')
+                              if c in per_trial_df.columns]],
                 on='trial_id',
                 how='left',
                 validate='one_to_one'

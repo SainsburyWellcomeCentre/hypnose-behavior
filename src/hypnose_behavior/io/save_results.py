@@ -129,10 +129,12 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
         "fa_time",
         "fa_latency_ms",
         "fa_port",
+        "fa_movement_latency_ms",
     ]
     extra_rt_cols = [
         "response_time_ms",
         "response_time_category",
+        "completed_window_latency_ms",
     ]
 
     base_trials = classification.get("initiated_sequences") if isinstance(classification, dict) else None
@@ -178,7 +180,8 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
             "sequence_rewarded", "reward_determinacy", "determinacy_position",
             "determined_final_odor",
             "false_response", "fr_label",
-            "fr_latency_ms", "fr_time", "fr_port", "fr_odor_identity", "fr_window_end",
+            "fr_latency_ms", "fr_movement_latency_ms",
+            "fr_time", "fr_port", "fr_odor_identity", "fr_window_end",
         ]
         if any(col in trial_df.columns for col in fr_cols):
             for col in fr_cols:

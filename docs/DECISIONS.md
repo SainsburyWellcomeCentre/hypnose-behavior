@@ -689,3 +689,58 @@ creates two things that must agree forever (§13). It would also have to freeze 
 "the odor that ended the trial", and `max_position` is the wrong one — a hidden-rule early-leave
 ends before the last position, and the response-time target is the last *valve event*, which can
 be neither. Consumers derive it at the point of use with the definition they need.
+
+---
+
+## 16. Every reward latency exists twice: window-relative and movement *(6c, 2026-08-10)*
+
+**Intended output change, fixtures regenerated 2026-08-10.**
+
+A reward-port latency answers one of two different questions, and the codebase was answering
+them inconsistently — sometimes one, sometimes the other, sometimes neither:
+
+- **(a) window-relative** — from where the response window starts, i.e. from where the rig
+  starts its counter. *Did the animal respond in time?* This is what the labels bucket.
+- **(b) movement** — from the animal's **last cue-port exit before the reward poke**.
+  *How fast did it move, once it left?*
+
+They differ whenever the animal returns to the cue port after the window opens — resampling the
+odor, or checking whether another one is coming. Measured on the 9 regression sessions, that is
+**57% of false responses, 43.9% of false alarms and 3.7% of completed trials**. Charging that
+resampling time to the response inflates it; on one abort by 284 seconds.
+
+| family | (a) window-relative | (b) movement |
+|---|---|---|
+| completed | `completed_window_latency_ms` *(new)* | **`response_time_ms`** *(re-anchored)* |
+| aborted | **`fa_latency_ms`** *(unchanged)* | `fa_movement_latency_ms` *(new)* |
+| no-go | **`fr_latency_ms`** *(unchanged)* | `fr_movement_latency_ms` *(new)* |
+
+### Labels stay on (a), and therefore do not move
+
+`fa_label` / `fr_label` keep bucketing the **window-relative** time, so they are byte-identical
+to before. That is deliberate. Bucketing the movement latency instead was measured and rejected:
+it relabels **95 of 401 false alarms (23.7%)**, all toward `_time_in` (`FA_time_in` 263→350,
+`FA_time_out` 58→29, `FA_late` 80→22), and it destroys what `FA_late` means — an animal that
+aborted, resampled for four minutes, then poked 500 ms after finally leaving would become a
+*fast* false alarm. "How promptly did it respond after giving up" is the question `FA_late`
+answers, and only (a) can answer it.
+
+The same reasoning keeps `unrewarded` / `timeout` on (a): the outcome window still opens at
+AwaitReward, so **no outcome flips and `decision_accuracy` does not move**.
+
+### The naming is knowingly inconsistent
+
+`response_time_ms` is (b) while `fa_latency_ms` / `fr_latency_ms` are (a). Making
+`response_time_ms` mean (a) would have been consistent, but it repoints ~1063 values and shifts
+`avg_response_time` by about a second, against 39 values for keeping it as (b). The trade was
+taken deliberately; the debt is recorded in the plan under Phase 6, to be settled as one
+intended change rather than smuggled in here. **`avg_response_time` reads (b).**
+
+### Consequence for the anchor primitive
+
+(b) is computed with `windows.last_poke_end_before(cue_series, reward_poke)`, never from
+`poke_odor_end` — see §15 for why that is 25 ms late on a grace-derived entry. The existing
+metric `metric_analysis/metrics/false_alarm.fa_latency_from_pokeout` is an attempt at (b) that
+anchors on `poke_odor_end`, so it carries exactly that bias **and** it does not exclude
+resampling. It should be repointed at `fa_movement_latency_ms`; not done here because it lives
+outside `trial_classification/`.

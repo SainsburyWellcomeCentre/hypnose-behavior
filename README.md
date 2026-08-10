@@ -189,7 +189,8 @@ Reward Information
     - supply2_count (int): In rewarded trials, 1 or 0 indicating whether first poke happened at supply port 2
     - total_supply_count (int): In rewarded trials, 1 or NaN indicating whether a supply port poke happened
     - poke_window_end (timestamp ISO 8601): Time when the reward window ended, indicating timeout or unrewarded trial
-    - response_time_ms (float): In rewarded, unrewarded, or timeout trials, time between odor cue port poke out and first supply port poke
+    - response_time_ms (float): In rewarded, unrewarded, or timeout trials, time between the animal's LAST odor cue port poke out before the reward poke, and that reward poke. This is the movement latency -- if the animal returns to the cue port after the sequence completes (resampling, or checking for another odor), that resampling time is not charged to the response.
+    - completed_window_latency_ms (float): The same reward poke measured from AwaitReward, i.e. from where the experiment PC starts its response-time counter. This is what the response window is built on and what decides unrewarded vs timeout; response_time_ms answers how fast the animal moved, this one answers whether it responded in time. The two differ whenever the animal was still at the cue port when the counter started.
     - response_time_category (string): Categorical label for completed sequences: "rewarded", "unrewarded", or "timeout_delayed"
 
 Non-Rewarded Trial Information
@@ -216,7 +217,8 @@ False Alarm Information
 
     - fa_label (string): In aborted trials, false alarm classification: "fa_time_in" (within response time window), "fa_time_out" (up to 3x the response time window), "fa_late" (later than that), or "nFA" (no false alarm)
     - fa_time (timestamp ISO 8601): In false alarm trials, when the false alarm happened (supply port poke)
-    - fa_latency_ms (float): Time between leaving odor cue port and poking either supply port in aborted trials
+    - fa_latency_ms (float): Time between the abortion (last cue port poke out inside the trial) and poking either supply port. This is the window-relative time and it is what fa_label buckets.
+    - fa_movement_latency_ms (float): The same false alarm measured from the animal's last cue port poke out before the poke. Excludes any resampling between giving up and false-alarming, which the two differ by on ~44% of false alarms.
     - fa_port (int): In false alarm trials, port ID (1 for A, 2 for B) of first supply port poke
 
 Single-Reward Protocol / False Response Information
@@ -237,7 +239,8 @@ Single-Reward Protocol / False Response Information
     - false_response (boolean): For COMPLETED non-rewarded sequences only. True if the animal went to a reward port before the next trial initiation (analogous to a false alarm, but for a completed no-go sequence); False if it correctly withheld.
     - fr_label (string): False-response classification, mirroring fa_label: "FR_time_in" (reward poke within the response time window), "FR_time_out" (up to 3x the response time window), "FR_late" (later than that, before the next trial), or "nFR" (no reward poke, i.e. correct withholding). NOTE: when the schema's responseTime is effectively unlimited (e.g. 99999 s) every reward poke falls into FR_time_in; the timing buckets are only informative with a finite responseTime.
     - fr_time (timestamp ISO 8601): In false_response trials, when the false response happened (first reward port poke).
-    - fr_latency_ms (float): In false_response trials, time between sequence completion (await_reward) and the first reward port poke.
+    - fr_latency_ms (float): In false_response trials, time between sequence completion (await_reward) and the first reward port poke. Window-relative, and what fr_label buckets.
+    - fr_movement_latency_ms (float): The same poke measured from the animal's last cue port poke out before it. Excludes resampling after the sequence completed, which happens on ~57% of false responses.
     - fr_port (int): In false_response trials, port ID (1 for A, 2 for B) of the first reward port poke.
     - fr_odor_identity (string): In false_response trials, identity of the first reward port poked (A or B).
     - fr_window_end (timestamp ISO 8601): End of the search window for a false response (first cue-port poke after the next trial initiation).

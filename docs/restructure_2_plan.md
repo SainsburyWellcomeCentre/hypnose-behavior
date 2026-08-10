@@ -466,6 +466,25 @@ is Phase 10's split and was never reachable from here.*
 
 ---
 
+### Naming debt to settle later — the (a)/(b) latency pair *(6c, 2026-08-10)*
+
+Every reward-port latency now exists twice: **(a)** measured from where the response window
+starts, which is what the label buckets, and **(b)** measured from the animal's last cue-port
+exit before the poke, which is how fast it actually moved. The base names are **not** consistent
+about which is which:
+
+| family | (a) window-relative | (b) movement |
+|---|---|---|
+| completed | `completed_window_latency_ms` | **`response_time_ms`** |
+| aborted (FA) | **`fa_latency_ms`** | `fa_movement_latency_ms` |
+| no-go (FR) | **`fr_latency_ms`** | `fr_movement_latency_ms` |
+
+`response_time_ms` is (b) while `fa_latency_ms` / `fr_latency_ms` are (a). That was a deliberate
+trade: making `response_time_ms` mean (a) would have been consistent but repointed ~1063 values
+and moved `avg_response_time` by about a second, where keeping it as (b) moved 39. **Unify the
+naming in a later phase**, as one intended output change with its own fixture regeneration —
+and note that the metric `avg_response_time` reads (b) today.
+
 ## Phase 6 — Trial classification  *(highest risk; split into 6a and 6b)*
 
 **Split into two chats 2026-08-07**, because they are different *kinds* of change and mixing
