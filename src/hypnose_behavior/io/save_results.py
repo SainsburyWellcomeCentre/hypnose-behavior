@@ -16,6 +16,9 @@ import pandas as pd
 
 from hypnose_behavior.io.paths import get_rawdata_root, get_derivatives_root
 from hypnose_behavior.utils.helpers import vprint
+# One rule for rewarded/unrewarded/timeout, shared with trial_classification. That module is a
+# leaf importing nothing from the package, so this is not a cycle -- DECISIONS section 3.
+from hypnose_behavior.trial_classification.outcome import classify_completed_trial, TIMEOUT
 # Generic serialisation moved to hypnose-helpers (restructure_2 Phase 2a); re-exported
 # here because callers import these names from this module.
 from hypnose_helpers.io.serialize import (  # noqa: F401
@@ -38,28 +41,26 @@ def _derive_outcome(row):
     """Outcome of one trial re-derived from the saved supply/poke counts.
 
     Deliberately independent of the response-time analysis: this runs over the merged trial
-    table and fills in a category for trials the response-time pass could not compute one for.
-    Module-level rather than nested so `qc/outcome_agreement.py` can measure it directly.
+    table and fills in a category for the trials that pass could not compute one for. The rule
+    itself is `trial_classification.outcome.classify_completed_trial`; what belongs here is only
+    the reading of it off saved columns, and the fact that this table's timeout is spelled
+    ``timeout_delayed``.
     """
-    # Single-reward protocol: a completed NON-rewarded ("no-go") sequence is neither
-    # rewarded/unrewarded/timeout in the reward sense — its outcome is carried by
-    # false_response / fr_label. Leave response_time_category empty for these so existing
-    # metrics stay clean. (Bool-safe: pandas may store sequence_rewarded as numpy.bool_.)
+    # Bool-safe: pandas may store sequence_rewarded as numpy.bool_, and NaN means "not a
+    # single-reward session" rather than "not a rewarded sequence".
     seq_rew = row.get("sequence_rewarded")
-    if pd.notna(seq_rew) and not bool(seq_rew):
-        return None
+    sequence_rewarded = bool(seq_rew) if pd.notna(seq_rew) else None
 
     supply = pd.to_numeric(row.get("total_supply_count"), errors="coerce")
     reward_pokes = pd.to_numeric(row.get("total_reward_pokes"), errors="coerce")
-    await_ts = row.get("await_reward_time")
 
-    if pd.notna(supply) and supply >= 1:
-        return "rewarded"
-    if _has_value(await_ts):
-        if pd.notna(reward_pokes) and reward_pokes >= 1:
-            return "unrewarded"
-        return "timeout_delayed"
-    return None
+    outcome = classify_completed_trial(
+        supply_count=0 if pd.isna(supply) else supply,
+        reward_poke_count=0 if pd.isna(reward_pokes) else reward_pokes,
+        has_await_reward=_has_value(row.get("await_reward_time")),
+        sequence_rewarded=sequence_rewarded,
+    )
+    return "timeout_delayed" if outcome == TIMEOUT else outcome
 
 
 def _find_parent_named(start: Path, prefix: str) -> Path | None:

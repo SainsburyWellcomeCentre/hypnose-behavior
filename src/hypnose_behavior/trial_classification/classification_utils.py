@@ -31,6 +31,7 @@ import zoneinfo
 import hypnose_behavior.trial_classification.detect_settings as detect_settings
 import hypnose_behavior.trial_classification.detect_stage as detect_stage_module
 import hypnose_behavior.trial_classification.windows as windows
+from hypnose_behavior.trial_classification.outcome import classify_completed_trial, latency_label
 from datetime import datetime, timezone, date
 from collections import defaultdict
 from bisect import bisect_left, bisect_right
@@ -1086,19 +1087,6 @@ def _record_first_reward_poke(trial_dict, tagged_pokes):
      trial_dict['first_reward_poke_odor_identity']) = tagged_pokes[0]
 
 
-def _latency_label(latency_ms, response_time_ms_window, prefix):
-    """Bucket a reward-port latency into ``<prefix>_time_in`` / ``_time_out`` / ``_late``.
-
-    One response window is "in", up to three is "out", beyond that is "late". Shared by the
-    false-response labels on completed no-go trials and the false-alarm labels on aborts.
-    """
-    if response_time_ms_window is not None and latency_ms <= response_time_ms_window:
-        return f"{prefix}_time_in"
-    if response_time_ms_window is not None and latency_ms <= 3.0 * response_time_ms_window:
-        return f"{prefix}_time_out"
-    return f"{prefix}_late"
-
-
 def _score_odourdisc_outcome(trial_dict, *, await_time, reward_window_end, supply_port1_times,
                              supply_port2_times, port1_pokes, port2_pokes):
     """Outcome of one odour-discrimination trial. Returns ``'rewarded' | 'unrewarded' | 'timeout'``.
@@ -1110,20 +1098,21 @@ def _score_odourdisc_outcome(trial_dict, *, await_time, reward_window_end, suppl
     """
     supply1, supply2, tagged_supply = _supply_pulses_between(
         supply_port1_times, supply_port2_times, await_time, reward_window_end)
-    if tagged_supply:
-        _record_supply_outcome(trial_dict, supply1, supply2, tagged_supply)
-        return 'rewarded'
-
     pokes1, pokes2, tagged_pokes = _reward_pokes_between(
         port1_pokes, port2_pokes, await_time, reward_window_end)
-    if not (pokes1 or pokes2):
-        return 'timeout'
 
-    _record_first_reward_poke(trial_dict, tagged_pokes)
-    trial_dict['port1_pokes_count'] = len(pokes1)
-    trial_dict['port2_pokes_count'] = len(pokes2)
-    trial_dict['total_reward_pokes'] = len(tagged_pokes)
-    return 'unrewarded'
+    outcome = classify_completed_trial(
+        supply_count=len(tagged_supply), reward_poke_count=len(tagged_pokes),
+        has_await_reward=True)
+
+    if outcome == 'rewarded':
+        _record_supply_outcome(trial_dict, supply1, supply2, tagged_supply)
+    elif outcome == 'unrewarded':
+        _record_first_reward_poke(trial_dict, tagged_pokes)
+        trial_dict['port1_pokes_count'] = len(pokes1)
+        trial_dict['port2_pokes_count'] = len(pokes2)
+        trial_dict['total_reward_pokes'] = len(tagged_pokes)
+    return outcome
 
 
 def _score_standard_outcome(trial_dict, *, await_reward_time, trial_end, supply_port1_times,
@@ -1137,8 +1126,12 @@ def _score_standard_outcome(trial_dict, *, await_reward_time, trial_end, supply_
     supply1, supply2, tagged_supply = _supply_pulses_between(
         supply_port1_times, supply_port2_times, await_reward_time, trial_end)
     if tagged_supply:
+        # The reward-poke columns are deliberately not written on a rewarded trial here, unlike
+        # the odour-discrimination path -- that difference in what gets recorded is why the two
+        # scorers stayed separate.
         _record_supply_outcome(trial_dict, supply1, supply2, tagged_supply)
-        return 'rewarded'
+        return classify_completed_trial(
+            supply_count=len(tagged_supply), reward_poke_count=0, has_await_reward=True)
 
     poke_window_end = await_reward_time + pd.Timedelta(seconds=response_time_sec)
     pokes1, pokes2, tagged_pokes = _reward_pokes_between(
@@ -1149,10 +1142,11 @@ def _score_standard_outcome(trial_dict, *, await_reward_time, trial_end, supply_
     trial_dict['port2_pokes_count'] = len(pokes2)
     trial_dict['total_reward_pokes'] = len(tagged_pokes)
 
-    if not tagged_pokes:
-        return 'timeout'
-    _record_first_reward_poke(trial_dict, tagged_pokes)
-    return 'unrewarded'
+    outcome = classify_completed_trial(
+        supply_count=0, reward_poke_count=len(tagged_pokes), has_await_reward=True)
+    if outcome == 'unrewarded':
+        _record_first_reward_poke(trial_dict, tagged_pokes)
+    return outcome
 
 
 def _false_response_window_end(trial_end, await_reward_time, initiation_starts_sorted,
@@ -1220,7 +1214,7 @@ def _score_false_response(trial_dict, *, await_reward_time, fr_window_end, port1
     trial_dict['first_reward_poke_time'] = fr_time
     trial_dict['first_reward_poke_port'] = fr_port
     trial_dict['first_reward_poke_odor_identity'] = fr_odor
-    trial_dict['fr_label'] = _latency_label(fr_latency_ms, response_time_ms_window, 'FR')
+    trial_dict['fr_label'] = latency_label(fr_latency_ms, response_time_ms_window, 'FR')
 
 
 def _label_non_initiated_odors(non_initiated_trials, odor_map):
@@ -2081,29 +2075,32 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
         supply1_after_await = [t for t in supply_port1_times if await_reward_time <= t <= reward_window_cap]
         supply2_after_await = [t for t in supply_port2_times if await_reward_time <= t <= reward_window_cap]
 
-        if supply1_after_await or supply2_after_await:
-            if response_time_ms is None:
-                failed_calculations += 1
-                per_trial_rows.append(_rt_row(trial_id, np.nan, None, target=target))
-                continue
-            rewarded_response_times.append(response_time_ms)
-            if hr_success:
-                hr_rewarded_response_times.append(response_time_ms)
-            per_trial_rows.append(_rt_row(trial_id, float(response_time_ms), 'rewarded', target=target))
-            continue
-
-        # Not rewarded: a poke anywhere in the response window makes it an error rather than a
-        # timeout, even if it landed before the animal left the cue port.
+        # A poke anywhere in the response window makes an unrewarded trial an error rather than
+        # a timeout, even if it landed before the animal left the cue port -- so this window
+        # starts at AwaitReward, not at the poke-out that the response time is measured from.
         full_window_pokes = (windows.rising_edges_between(port1_pokes, await_reward_time, poke_window_end)
                              + windows.rising_edges_between(port2_pokes, await_reward_time, poke_window_end))
 
-        if full_window_pokes:
+        outcome = classify_completed_trial(
+            supply_count=len(supply1_after_await) + len(supply2_after_await),
+            reward_poke_count=len(full_window_pokes),
+            has_await_reward=True)
+
+        if outcome in ('rewarded', 'unrewarded'):
+            # This function's coverage rule: a category is emitted only when a response time
+            # could also be computed. The rest are counted as failures with a null category, and
+            # picked up later by save_results._derive_outcome -- DECISIONS section 14.
             if response_time_ms is None:
                 failed_calculations += 1
                 per_trial_rows.append(_rt_row(trial_id, np.nan, None, target=target))
                 continue
-            unrewarded_response_times.append(response_time_ms)
-            per_trial_rows.append(_rt_row(trial_id, float(response_time_ms), 'unrewarded', target=target))
+            if outcome == 'rewarded':
+                rewarded_response_times.append(response_time_ms)
+                if hr_success:
+                    hr_rewarded_response_times.append(response_time_ms)
+            else:
+                unrewarded_response_times.append(response_time_ms)
+            per_trial_rows.append(_rt_row(trial_id, float(response_time_ms), outcome, target=target))
             continue
 
         # Timeout: look for a delayed response up to the next completed trial.
@@ -2283,7 +2280,7 @@ def _false_alarm(abortion_time, t_end, *, init_times, cue_rises, reward_rises, d
     fa_time = reward_rises[lo]
     fa_latency_ms = (fa_time - abortion_time).total_seconds() * 1000.0
     fa_port = 1 if fa_time in dip1_rises else (2 if fa_time in dip2_rises else None)
-    return _latency_label(fa_latency_ms, response_time_ms, 'FA'), fa_time, fa_latency_ms, fa_port
+    return latency_label(fa_latency_ms, response_time_ms, 'FA'), fa_time, fa_latency_ms, fa_port
 
 
 def _build_abortion_index(df: pd.DataFrame):
@@ -2691,13 +2688,8 @@ def classify_noninitiated_FA(noninit_df, DIP0, DIP1, DIP2, response_time, hr_odo
                 fa_port = 1
             elif fa_time in dip2_rises:
                 fa_port = 2
-            
-            if fa_latency_ms <= response_time_ms:
-                fa_label = 'FA_time_in'
-            elif fa_latency_ms <= 3.0 * response_time_ms:
-                fa_label = 'FA_time_out'
-            else:
-                fa_label = 'FA_late'
+
+            fa_label = latency_label(fa_latency_ms, response_time_ms, 'FA')
 
         # HR status for position 1
         is_hr = False

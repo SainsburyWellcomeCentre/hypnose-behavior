@@ -600,3 +600,21 @@ also compute a response time, and it counts the rest in `failed_calculations`. P
 three at one helper and letting it fill the gaps would move ~190 trials out of the null bucket
 and into the accuracy denominators — an intended output change that needs its own decision and
 its own fixture regeneration. **Unify the rule; do not unify the coverage.**
+
+### What was done, 2026-08-10
+
+`trial_classification/outcome.py` — a leaf, `classify_completed_trial(supply_count,
+reward_poke_count, has_await_reward, sequence_rewarded)` — and all three sites call it. Each
+keeps what genuinely differs: **its windows** (the caller counts and passes counts), **its
+sequence** (`sequence_rewarded` is an input, never recomputed here) and **its coverage** (the
+response-time pass still emits a category only when it has a response time). `regression.py`
+stayed GREEN through the merge, which is the evidence that the rule was reproduced exactly.
+
+`latency_label` lives there too, replacing the three hand-written copies of the
+in / out / late arithmetic in `_score_false_response`, `_false_alarm` and
+`classify_noninitiated_FA`.
+
+> **6b removes the one conflict, and this merge does not hide it.** Because
+> `sequence_rewarded` is an input, fixing the 0 ms positions fixes trial 277 at its source and
+> all three sites follow. Re-run `qc/outcome_agreement.py` after 6b: the expected result is
+> **zero conflicts**, and anything else means 6b changed a rule it should not have.
