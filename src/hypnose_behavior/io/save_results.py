@@ -22,6 +22,46 @@ from hypnose_helpers.io.serialize import (  # noqa: F401
     _json_safe, _json_default, _normalize_df_for_io,
 )
 
+def _has_value(v):
+    """Truthy-and-present test for a timestamp-ish cell: not NaN, not zero, not blank.
+
+    Not the flag-column truthiness rule of ``DECISIONS.md`` section 6 -- this is applied to
+    ``await_reward_time``, where the question is "is there a timestamp here at all".
+    """
+    try:
+        return pd.notna(v) and v != 0 and v != "0" and str(v).strip().lower() not in {"", "nan"}
+    except Exception:
+        return False
+
+
+def _derive_outcome(row):
+    """Outcome of one trial re-derived from the saved supply/poke counts.
+
+    Deliberately independent of the response-time analysis: this runs over the merged trial
+    table and fills in a category for trials the response-time pass could not compute one for.
+    Module-level rather than nested so `qc/outcome_agreement.py` can measure it directly.
+    """
+    # Single-reward protocol: a completed NON-rewarded ("no-go") sequence is neither
+    # rewarded/unrewarded/timeout in the reward sense — its outcome is carried by
+    # false_response / fr_label. Leave response_time_category empty for these so existing
+    # metrics stay clean. (Bool-safe: pandas may store sequence_rewarded as numpy.bool_.)
+    seq_rew = row.get("sequence_rewarded")
+    if pd.notna(seq_rew) and not bool(seq_rew):
+        return None
+
+    supply = pd.to_numeric(row.get("total_supply_count"), errors="coerce")
+    reward_pokes = pd.to_numeric(row.get("total_reward_pokes"), errors="coerce")
+    await_ts = row.get("await_reward_time")
+
+    if pd.notna(supply) and supply >= 1:
+        return "rewarded"
+    if _has_value(await_ts):
+        if pd.notna(reward_pokes) and reward_pokes >= 1:
+            return "unrewarded"
+        return "timeout_delayed"
+    return None
+
+
 def _find_parent_named(start: Path, prefix: str) -> Path | None:
     for p in [Path(start)] + list(Path(start).parents):
         if p.name.startswith(prefix):
@@ -122,33 +162,6 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
                 trial_df = _merge_with_run(trial_df, comp_rt, cols)
 
         # Derive outcome categories from supply/poke counts (avoids response-time dependency)
-        def _has_value(v):
-            try:
-                return pd.notna(v) and v != 0 and v != "0" and str(v).strip().lower() not in {"", "nan"}
-            except Exception:
-                return False
-
-        def _derive_outcome(row):
-            # Single-reward protocol: a completed NON-rewarded ("no-go") sequence is neither
-            # rewarded/unrewarded/timeout in the reward sense — its outcome is carried by
-            # false_response / fr_label. Leave response_time_category empty for these so existing
-            # metrics stay clean. (Bool-safe: pandas may store sequence_rewarded as numpy.bool_.)
-            seq_rew = row.get("sequence_rewarded")
-            if pd.notna(seq_rew) and not bool(seq_rew):
-                return None
-
-            supply = pd.to_numeric(row.get("total_supply_count"), errors="coerce")
-            reward_pokes = pd.to_numeric(row.get("total_reward_pokes"), errors="coerce")
-            await_ts = row.get("await_reward_time")
-
-            if pd.notna(supply) and supply >= 1:
-                return "rewarded"
-            if _has_value(await_ts):
-                if pd.notna(reward_pokes) and reward_pokes >= 1:
-                    return "unrewarded"
-                return "timeout_delayed"
-            return None
-
         derived_outcomes = trial_df.apply(_derive_outcome, axis=1)
         trial_df["response_time_category"] = derived_outcomes.where(derived_outcomes.notna(), trial_df.get("response_time_category"))
 

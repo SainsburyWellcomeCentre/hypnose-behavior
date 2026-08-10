@@ -541,3 +541,62 @@ Fixed by moving them into two leaves (`prep.py`, `panels.py`), the same shape as
 `frames.py`: the shared thing becomes a leaf and every plotter depends on the leaf rather than on
 a peer. **Zero plotter-to-plotter imports remain**, and that is the invariant to preserve — it is
 cheap to check with one grep and it is what keeps `visualization/` splittable in Phase 10.
+
+---
+
+## 14. The three outcome derivations agree on the rule; they disagree on the *sequence* *(Phase 6a, 2026-08-10)*
+
+Phase 6's premise was that rewarded/unrewarded/timeout is derived three times by code that
+"shares no code and can drift". Measured with `qc/outcome_agreement.py` over **1,731 trials on
+all 9 regression sessions** (1,243 completed), the premise is half right: the three do differ,
+but not where the brief expected.
+
+| pair | jointly defined | conflicts | coverage gap |
+|---|---|---|---|
+| A `classify_trials` vs B `analyze_response_times` | 1,050 | **1** (0.10%) | A defines 193 that B leaves null |
+| A `classify_trials` vs C `save_results._derive_outcome` | 1,079 | **0** | A defines 164 that C leaves null |
+| B `analyze_response_times` vs C `_derive_outcome` | 1,049 | **0** | C defines 30 that B leaves null; B defines 1 that C leaves null |
+
+**The outcome rule itself never conflicts.** Wherever two of the three name a category, they
+name the same one — with a single exception, and that exception is not about the outcome rule.
+
+### The one conflict is the 0 ms positions bug, not a rule difference
+
+`sub-057 20260709`, trial 277. A says `false_response`, B says `rewarded`.
+
+```
+position 1: OdorG  valve 506.0 ms | poke NO POKE RECORD -> position dropped
+position 2: OdorE  valve 571.0 ms | poke 45.5 ms
+position 3: OdorB  valve 556.0 ms | poke 26.7 ms
+odor_sequence written = ['OdorE', 'OdorB']        reward_determinacy = off_protocol
+```
+
+The schema's rewarded sequences are `('OdorC','OdorF','OdorA')` and `('OdorG','OdorE','OdorB')`.
+The animal saw the second one. `classify_trials` drops a position whose poke registered as
+0 ms, so it wrote a two-odor sequence, found it in neither candidate, set
+`sequence_rewarded=False`, and scored a completed rewarded trial as a false response.
+`analyze_response_times` assigns positions from *all* valve events in the window, so it saw the
+full triple, and its `rewarded` is the correct answer.
+
+`reward_determinacy = off_protocol` is the tell: a presented prefix that starts no candidate
+sequence means the sequence was **truncated**, not that the animal ran a no-go trial.
+
+> **This is `DECISIONS.md` section 10 / Phase 6b, reached from a different direction.** The two
+> functions do not disagree about what a reward is. They disagree about what the animal smelled,
+> and the one that drops 0 ms positions is wrong. **Fixing it belongs to 6b**, and 6b will
+> remove this conflict rather than the merge doing so.
+
+### What this licenses, and what it does not
+
+**A pure `classify_completed_trial(record) -> outcome` is safe** — provided the record carries
+`sequence_rewarded` as an *input*, as the Phase 6a brief specifies, rather than recomputing the
+sequence. All three sites then keep feeding it whatever sequence they resolve today, and the
+zero conflicts above are preserved byte-for-byte.
+
+**Closing the coverage gaps is NOT a refactor.** A defines 193 outcomes that B leaves null (163
+`false_response`, 17 `rewarded`, 10 `timeout`, 3 `unrewarded`), and C defines 30 that B leaves
+null. Those nulls are deliberate: `analyze_response_times` emits a category only when it could
+also compute a response time, and it counts the rest in `failed_calculations`. Pointing all
+three at one helper and letting it fill the gaps would move ~190 trials out of the null bucket
+and into the accuracy denominators — an intended output change that needs its own decision and
+its own fixture regeneration. **Unify the rule; do not unify the coverage.**
