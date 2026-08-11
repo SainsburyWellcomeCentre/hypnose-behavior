@@ -174,7 +174,7 @@ Update this table at the end of each phase, in the same commit as the work.
 | 6a split the 4 long functions + unify the outcome rule | **done** 2026-08-10 | `97a01ad`..`5f25e4a` | **The four monoliths are gone**: 3,005 → 977 lines (`classify_trials` 1226→419, `abortion_classification` 736→162, `analyze_response_times` 580→263, `detect_trials` 462→133); the file 3,703 → 3,023. **`regression.py` GREEN on every commit, including the unification** — nothing in this phase moved a value. Two new leaves: `windows.py` (poke/valve primitives) and `outcome.py` (`classify_completed_trial` + `latency_label`), both importing nothing from the package, so `io/save_results.py` reaches the shared rule without a cycle (§3). **3 outcome sites → 1, 3 latency-bucket copies → 1.** The three valve-edge builders and the two poke summaries were measured and **kept apart** under names saying how they differ. 106 lines of dead nested defs dropped. **Measured before merging (§13): 1,731 trials, the rule never conflicts — `DECISIONS.md` §14.** New guard `qc/verbose_diff.py` (stdout, which `regression.py` never sees) and `qc/outcome_agreement.py` |
 
 | 6b `poke_source` + the unpoked positions | **done** 2026-08-10 | `HEAD` | **Intended output change, fixtures regenerated in the same commit.** Every valve position is now written with `poke_source` ∈ `poke` (4620) / `grace` (91) / `outside_grace` (83). **The brief's rule was measured and not followed as written** — all 83 unpoked positions have the port OUT for the whole window with zero DIPort0 transitions, and 75 of them trail an *aborted* trial, where `abortion_classification` independently puts `last_odor_position` at the last **poked** position on 74/74. So a completed trial counts every presented position (the rig advanced through them all) while an aborted one stops the *sequence* at the last real poke (`_trim_unsampled_tail`) — but still **records** the position, so the blobs stay complete and only the credit shrinks. The trim is gated on AwaitReward, verified: `is_aborted` moved on 0 trials and every shrunken trial has null supply/AwaitReward/reward-poke. `_odourdisc_await_window` extracted so that gate has one definition feeding both the trim and the scoring branch. **Acceptance test 1 passed: `outcome_agreement.py` 1 conflict → 0**, trial 277 `false_response` → `rewarded` (§14). **Acceptance test 2 failed as briefed and was not forced: the §15 fallback still fires 20/20** — it lives in `analyze_response_times`, which builds its own position map from valve events; `poke_source` makes the proper anchor *available* but nothing selects it. Left for a follow-up rather than smuggled in. Sampling metrics filter to `poke_source == 'poke'` via `_real_pokes`, which no-ops on pre-6b sessions (§2). Fixture change audited cell-by-cell against HEAD: 18 of 1731 trials move a non-blob column, 83 gain a position, **0 pre-existing position values changed, 0 removed, 0 unexplained** |
-| 6c split `classification_utils.py` | **not started — unblocked** | | 3,138 lines, four clean seams after 6a. **Flat modules, no subpackage.** Verify with the 4b AST byte-identity pass, not just regression. 6b is done, so the position-writing diff is already in history and will not tangle with the split. Home 6b's new helpers in `classify.py`: `_position_poke_times`, `_trim_unsampled_tail`, `_build_presentations`, `_odourdisc_await_window` |
+| 6c split `classification_utils.py` | **done** 2026-08-11 | `HEAD` | **`classification_utils.py` is gone — 3,138 lines, 57 definitions, no facade.** Seven flat modules (`detect_trials`, `classify_trials`, `response_times`, `aborted_trials`, `hidden_rule`, `params`, `index`) plus the two existing leaves. **Pure move, and proved so rather than assumed: `qc/ast_move_check.py` reports 57/57 byte-identical**, 0 changed / missing / duplicated — and the checker was itself validated against injected drift, a whitespace-only edit, a deletion and a duplication first. Layering is a three-layer DAG with **zero worker-to-worker imports** (§17), which is what keeps the two position rules from being merged by proximity; the do-not-merge note now sits in `classify_trials.py`'s docstring and **the settling count was deliberately not taken here**. Two functions the plan's table did not place: the per-run orchestrator `classify_and_analyze_with_response_times` → `run.py`, and the trio `_next_after` / `_recording_end` / `_odourdisc_reward_window_end` → `windows.py` (shared by two workers ⇒ the shared thing becomes a leaf). Three dead `*_SCHEMA_PATH` constants dropped — duplicates of `io/loaders.py`'s live ones. **All five gates GREEN, none regenerated:** `regression.py`, `verify_scripts.py`, `check_imports.py` (62 modules), `verbose_diff.py` (**16,944 lines of stdout identical across 9 sessions**), `plot_regression.py`. **Trap: a dropped mount makes `verbose_diff.py` print GREEN off a 1-line error string — read the line count (§17).** Notebook star-imports left to the user to fix in one pass |
 | ↳ 6b's second acceptance test | **closed, no work owed** | | The §15 fallback still fires 20/20, and that is **not a defect**: those trials were fixed in Phase 11 and are correct. The brief expected `poke_source` to retire the fallback; measured, `analyze_response_times` never reads it, and repointing the target would be cosmetic while risking `search_start` (hence outcomes) and requiring two deliberately different position rules to be reconciled. **Decided: leave it.** `DECISIONS.md` §15 |
 | 7a manifest provenance | not started | | ~40% done in advance by 2c |
 | 7b schema & formats | not started | | intended output change |
@@ -588,14 +588,32 @@ in the file itself. What remains is ~3,000 lines that belong in separate modules
 
 | module | contents |
 |---|---|
-| `detect.py` | `detect_trials` + its attempt/fallback helpers |
-| `classify.py` | `classify_trials` + position assignment, outcome scoring, its summary printer |
+| `detect_trials.py` | `detect_trials` + its attempt/fallback helpers |
+| `classify_trials.py` | `classify_trials` + position assignment, outcome scoring, its summary printer |
 | `response_times.py` | `analyze_response_times` + its helpers and printer |
-| `abortion.py` | `abortion_classification`, `classify_noninitiated_FA` + their printer |
-| `hidden_rule.py` | the hidden-rule resolution shared by `classify` and `response_times` |
-| `schema.py` | `get_experiment_parameters`, `_sampling_parameters_ms`, `_get_single_reward_info` |
+| `aborted_trials.py` | `abortion_classification`, `classify_noninitiated_FA` + their printer |
+| `hidden_rule.py` | the hidden-rule resolution shared by `classify_trials` and `response_times` |
+| `params.py` | `get_experiment_parameters`, `_sampling_parameters_ms`, `_get_single_reward_info` |
 | `index.py` | `build_classification_index` |
-| existing leaves | `windows.py`, `outcome.py` — unchanged |
+| existing leaves | `windows.py`, `outcome.py` |
+
+*(Module names settled at implementation time, 2026-08-11: `detect_trials` / `classify_trials` /
+`aborted_trials` / `params` rather than `detect` / `classify` / `abortion` / `schema`. A module
+named for the function it carries is findable from a traceback; `schema.py` in particular would
+have read as the device schemas, which are a different thing in this repo.)*
+
+**Two functions the table above did not place, settled during the split.**
+
+1. **`classify_and_analyze_with_response_times` → `run.py`.** The per-run orchestrator, and
+   `run.py`'s only consumer. It calls into `classify_trials`, `response_times`,
+   `aborted_trials`, `index` and `params`, so it belongs *above* all of them rather than inside
+   any one, and it is the per-run counterpart of `run.py`'s per-session
+   `analyze_session_multi_run_by_id_date`.
+2. **`_next_after`, `_recording_end`, `_odourdisc_reward_window_end` → `windows.py`**, so that
+   row reads "existing leaves", not "unchanged". All three are shared by `classify_trials` and
+   `response_times`; leaving them in either would have made the other import from a peer, which
+   is the §13 tangle Phase 5 spent its effort removing. They are pure functions of timestamps
+   and pandas objects with no package imports — `windows.py`'s stated contract exactly.
 
 **Flat modules, not a subpackage.** `trial_classification/` has ~9 modules today and would reach
 ~15 — still one screen of `ls`, and it keeps the §3 leaf discipline checkable at a glance. A
@@ -607,6 +625,12 @@ proved it with an AST pass requiring all 112 pre-split function bodies to be byt
 That turns a 3,000-line carve from "regression is green, probably fine" into "provably a move",
 and catches the one thing the fingerprint cannot: a body that drifted while the output happened
 not to move on nine sessions. Write that pass first.
+
+*(4b's pass was not kept. 6c wrote `qc/ast_move_check.py` and kept it this time: it reads the
+pre-split file out of any git ref, so it generalises to Phase 10's `visualization_utils.py`
+split with `--old`/`--new-dir`. It reports MISSING / DUPLICATED / CHANGED / ADDED and was
+checked against injected drift, a whitespace-only edit, a deletion and a duplication before
+being trusted — a checker that has never been seen to fail is not evidence.)*
 
 **After 6b, not before.** 6b rewrites how `classify_trials` writes positions; a file split
 landing in the same window makes that diff unreadable. Same reasoning that put 6a before 6b.

@@ -17,7 +17,11 @@ notebooks/               analysis/visualisation notebooks (import from src; no d
 scripts/                 terminal entry points (thin CLI wrappers; no analysis logic)
 src/hypnose_behavior/
     io/                  data loading, saving, paths (readers, loaders, load_results, save, save_results, paths)
-    trial_classification/ trial detection + classification (classification_utils, detect_trials/stage/settings, merge, summary, run)
+    trial_classification/ trial detection + classification, in three layers: leaves
+                         (windows, outcome, params, hidden_rule, index) <- workers
+                         (detect_trials, classify_trials, response_times,
+                         aborted_trials) <- run; plus detect_stage/settings, merge,
+                         summary. Workers never import each other. 
     metric_analysis/     behavioural metric calculation: metrics/ (definitions, one
                          module per behavioural construct), run/merge/summary
                          (orchestration), frames, resolvers, registry
@@ -122,7 +126,7 @@ python scripts/batch_process.py            --subjids 53 --date-range 20260501 20
 
 1. Trial Classification
 
-The trial_classification notebook runs the trial classification. All functions used in this notebook are in the classification_utils.py file. 
+The trial_classification notebook runs the trial classification. The functions it uses live in `src/hypnose_behavior/trial_classification/`: `run.py` for the session/batch entry points, and `detect_trials.py` / `classify_trials.py` / `response_times.py` / `aborted_trials.py` for the stages themselves. 
 
 batch_analyze_sessions can run on any combination of dates and subjids to run analysis on several subjects or dates at ones. If one parameter is None, it will run on all subjects for date(s) provided or all dates for subject(s) provided. Results are saved as json and csv combination. A summary txt file is saved per session analyzed. 
 

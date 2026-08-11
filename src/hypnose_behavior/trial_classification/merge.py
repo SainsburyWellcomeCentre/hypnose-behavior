@@ -12,7 +12,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-from hypnose_behavior.trial_classification.classification_utils import build_classification_index
+from hypnose_behavior.trial_classification.index import build_classification_index
 
 
 def _concat_align(dfs: Iterable[pd.DataFrame]) -> pd.DataFrame:

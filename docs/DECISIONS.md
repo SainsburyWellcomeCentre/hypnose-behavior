@@ -840,3 +840,69 @@ it is in `REPORT` before assuming a metric change is gated.**
 Consumers with no `fa_movement_latency_ms` column get an empty Series rather than a fallback to
 the old computation, by the §2 rule: a session saved before Phase 11 cannot be made to look
 comparable to one saved after it.
+
+---
+
+## 17. `trial_classification/` is three layers, and the workers must not import each other *(Phase 6c, 2026-08-11)*
+
+`classification_utils.py` (3,138 lines) is **gone** — not turned into a facade of re-exports.
+Its 57 definitions now sit in a three-layer DAG:
+
+| layer | modules | rule |
+|---|---|---|
+| **leaves** | `windows.py`, `outcome.py`, `params.py`, `hidden_rule.py`, `index.py` | import nothing from `trial_classification` |
+| **workers** | `detect_trials.py`, `classify_trials.py`, `response_times.py`, `aborted_trials.py` | import only leaves |
+| **top** | `run.py` | imports workers and leaves |
+
+> **The invariant: zero worker-to-worker imports.** It is the §13 rule that keeps
+> `visualization/` splittable, applied here. The moment `response_times.py` imports from
+> `classify_trials.py`, the two position rules below are one `Cmd-click` apart and the next
+> person merges them.
+
+This is why `_next_after`, `_recording_end` and `_odourdisc_reward_window_end` went to
+`windows.py` rather than staying with `classify_trials`: they are shared by two workers, and
+the shared thing becomes a leaf. `hidden_rule.py` exists for exactly the same reason.
+
+`classify_and_analyze_with_response_times` went to `run.py`. It orchestrates five of the new
+modules, so it belongs above all of them, and it is the per-run counterpart of `run.py`'s
+per-session `analyze_session_multi_run_by_id_date`.
+
+### The two position rules are now in adjacent files — they are still not the same rule
+
+`classify_trials._assign_positions_to_valve_events` and `windows.first_occurrence_positions`
+disagree whenever an odor re-appears **after a different odor**. On a trial presenting A, B, A:
+the first gives **3** positions (it collapses only *consecutive* repeats), the second gives **2**
+(each odor keeps its first position; the later repeat overwrites that position's event). The
+do-not-merge note lives in `classify_trials.py`'s module docstring, at the site.
+
+**The count that would settle whether they are interchangeable on this data has still not been
+taken** — trials whose valve-event list contains a non-consecutive odor repeat, across the 9
+regression sessions. Zero ⇒ a merge is cheap and §15's follow-up becomes tractable; non-zero ⇒
+that is the number of trials a merge would silently move. It is a separate decision from the
+split and was deliberately not acted on during it.
+
+### `qc/ast_move_check.py` — keep it, and prove it before trusting it
+
+Phase 4b's byte-identity pass was not kept, so 6c had to write it again. This one is kept and
+generalised: `--base` reads the pre-split file from any git ref, `--old`/`--new-dir` point it at
+any carve, so **Phase 10's `visualization_utils.py` split can use it as-is**. It reports
+MISSING / DUPLICATED / CHANGED / ADDED, and flags a whitespace-only change as such.
+
+It proves the one thing the fingerprint cannot: a body that drifted in a branch the nine fixture
+sessions never take. 6c ran **57/57 byte-identical**.
+
+> **A checker that has never been seen to fail is not evidence.** Before trusting it, it was run
+> against a copy with an injected statement, a whitespace-only edit, a deleted function and a
+> duplicated module, and confirmed to report each. Do the same to any gate you write.
+
+### Two traps this split walked into
+
+- **A dropped ceph mount makes `verbose_diff.py` pass vacuously.** `_capture_all` turns any
+  exception into a one-line `<<VERBOSE_DIFF_ERROR>>` string, so both trees "agree" and it prints
+  GREEN. **Read the line count**: a real session prints 464–3,083 lines, and 6c's honest run
+  compared 16,944 across the nine. `1 lines` means the mount, not the code.
+- **`SCHEMA_DIR` / `BEHAVIOR_SCHEMA_PATH` / `OLFACTOMETER_SCHEMA_PATH` were dead** in
+  `classification_utils.py` — no function read them, and `valve_poke_plots` imports them from
+  `io/loaders.py`, which defines them identically. They were dropped with the file rather than
+  carried into a new module. `ast_move_check.py` reports uncarried module constants for exactly
+  this review.

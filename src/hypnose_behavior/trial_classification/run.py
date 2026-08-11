@@ -1,4 +1,4 @@
-"""Multi-run session orchestration: discover runs, classify each, merge, save, summarise.
+"""Session orchestration: classify one run, then discover runs, merge, save, summarise.
 
 Extracted from trial_classification/classification_utils.py during the restructuring
 (Phase 3). Pure move -- behaviour unchanged (to be re-verified by the regression
@@ -16,20 +16,189 @@ from datetime import datetime, timezone
 from typing import Optional
 from collections.abc import Mapping
 
+import numpy as np
 import pandas as pd
 
+import hypnose_behavior.trial_classification.detect_settings as detect_settings
 from hypnose_behavior.io.loaders import (
     load_experiment, load_all_streams, load_experiment_events, load_odor_mapping,
 )
 from hypnose_behavior.io.save_results import save_session_analysis_results
 from hypnose_behavior.io.layout import rawdata
-from hypnose_behavior.trial_classification.classification_utils import (
-    detect_trials, classify_and_analyze_with_response_times, classify_noninitiated_FA,
-    _get_single_reward_info,
+from hypnose_behavior.trial_classification.aborted_trials import (
+    abortion_classification, classify_noninitiated_FA,
 )
+from hypnose_behavior.trial_classification.classify_trials import classify_trials
+from hypnose_behavior.trial_classification.detect_trials import detect_trials
+from hypnose_behavior.trial_classification.hidden_rule import (
+    _drop_final_hidden_rule_index, _ensure_int_list, _resolve_hidden_rule_from_stage,
+)
+from hypnose_behavior.trial_classification.index import build_classification_index
+from hypnose_behavior.trial_classification.params import (
+    _get_single_reward_info, get_experiment_parameters,
+)
+from hypnose_behavior.trial_classification.response_times import analyze_response_times
 from hypnose_behavior.trial_classification.merge import merge_classifications
 from hypnose_behavior.trial_classification.summary import print_merged_session_summary
 from hypnose_behavior.utils.helpers import vprint
+
+# --------------------------------------------------------------------------------------
+# One run: detect -> classify -> response times -> abortions, assembled into one dict.
+# Moved here in Phase 6c: it orchestrates classify_trials.py, response_times.py,
+# aborted_trials.py, index.py and params.py, so it belongs above all of them rather than
+# inside any one. analyze_session_multi_run_by_id_date below drives it once per run.
+# --------------------------------------------------------------------------------------
+
+def classify_and_analyze_with_response_times(data, events, trial_counts, odor_map, stage, root, verbose=True, run_id=None):# Wrapper function to fully classify all trials. 
+    """
+    Orchestrates classification + valve/poke timing + response-time augmentation.
+
+    Returns:
+      {
+        'classification': <dict from classify_trial_outcomes_with_pokes_and_valves2>,
+        'response_time_analysis': <dict from analyze_response_times>,
+        'completed_sequences_with_response_times': <DataFrame of completed trials with RT columns>
+      }
+    """
+    sample_offset_time, minimum_sampling_time_by_odor, response_time = get_experiment_parameters(root)
+    sample_offset_time_ms = sample_offset_time * 1000
+    minimum_sampling_time_ms_by_odor = {
+        str(odor): float(threshold) * 1000.0
+        for odor, threshold in (minimum_sampling_time_by_odor or {}).items()
+        if threshold is not None
+    }
+    if not minimum_sampling_time_ms_by_odor:
+        raise ValueError("minimumSamplingTime_by_odor missing or empty in schema; cannot run classification without per-odor thresholds")
+    default_minimum_sampling_time_ms = max(minimum_sampling_time_ms_by_odor.values())
+
+    response_time_sec = response_time
+    if response_time_sec is None:
+        raise ValueError("Response time parameter cannot be extracted from Schema file. Check detect_settings function.")
+
+    params = {
+        'sample_offset_time_ms': sample_offset_time_ms,
+        'minimum_sampling_time_ms_by_odor': dict(minimum_sampling_time_ms_by_odor),
+        'default_minimum_sampling_time_ms': float(default_minimum_sampling_time_ms),
+        'minimum_sampling_time_ms': float(default_minimum_sampling_time_ms),
+        'response_time_window_sec': response_time_sec
+    }
+
+
+    # 0) Detect single-reward protocol once and share with both classifiers (schema-based).
+    #    When this is the default protocol (all sequences rewarded), single_reward_info disables
+    #    every new code path so behaviour/output are identical to before.
+    single_reward_info = _get_single_reward_info(root)
+
+    # 1) Run the stable classifier (valve/poke timing included)
+    classification = classify_trials(
+        data, events, trial_counts, odor_map, stage, root, verbose=verbose,
+        single_reward_info=single_reward_info
+    )
+
+    # 2) Run the response-time summary analyzer (prints/aggregates like the notebook)
+    rt_summary = analyze_response_times(
+        data, trial_counts, events, odor_map, stage, root, verbose=verbose,
+        single_reward_info=single_reward_info
+    )
+
+    # 3) Aborted trial details
+    aborted_detailed = abortion_classification(
+        data, events, classification, odor_map, root, verbose=verbose
+    )
+    if run_id is not None and isinstance(aborted_detailed, pd.DataFrame) and not aborted_detailed.empty:
+        if 'run_id' not in aborted_detailed.columns:
+            aborted_detailed = aborted_detailed.copy()
+            aborted_detailed['run_id'] = run_id
+    classification['aborted_sequences_detailed'] = aborted_detailed
+
+    # 3) Build fast lookup indices for downstream use
+    classification['index'] = build_classification_index(classification)
+
+    # 4) Hidden rule position from stage name/index
+    hidden_rule_indices, sequence_name = _resolve_hidden_rule_from_stage(stage)
+    schema_settings = {}
+    try:
+        _, schema_settings = detect_settings.detect_settings(root)
+    except Exception:
+        schema_settings = {}
+
+    if not hidden_rule_indices:
+        inferred_indices = schema_settings.get('hiddenRuleIndicesInferred')
+        if inferred_indices is None:
+            inferred_indices = schema_settings.get('hiddenRuleIndexInferred')
+        hidden_rule_indices = _ensure_int_list(inferred_indices)
+
+    hidden_rule_indices = sorted({idx for idx in hidden_rule_indices if isinstance(idx, int)})
+    # Final position is always rewarded -> never a hidden-rule position (single-reward untouched).
+    hidden_rule_indices = _drop_final_hidden_rule_index(hidden_rule_indices, schema_settings, single_reward_info[0])
+    hidden_rule_positions = [idx + 1 for idx in hidden_rule_indices]
+    hidden_rule_location = hidden_rule_indices[0] if hidden_rule_indices else None
+    hidden_rule_pos = hidden_rule_positions[0] if hidden_rule_positions else None
+
+    if hidden_rule_positions:
+        if len(hidden_rule_positions) > 1:
+            pos_str = ", ".join(str(pos) for pos in hidden_rule_positions)
+            idx_str = ", ".join(str(idx) for idx in hidden_rule_indices)
+            print(f"Hidden rule locations extracted: Positions {pos_str} (indices {idx_str})")
+        else:
+            print(f"Hidden rule location extracted: Location{hidden_rule_location} (index {hidden_rule_location}, position {hidden_rule_pos})")
+    else:
+        seq_label = sequence_name or str(stage)
+        print(f"No Hidden Rule Location found in sequence name: {seq_label}. Proceeding without Hidden Rule analysis.")
+
+    # Single-reward protocol status (always printed, like the hidden-rule message above)
+    if single_reward_info[0]:
+        print(f"Single-reward protocol detected: {len(single_reward_info[1])} rewarded sequence(s); "
+              f"non-rewarded completions classified as false_response.")
+    else:
+        print("Single-reward protocol: not detected (all sequences rewarded at final position; standard analysis).")
+
+# 5) Attach params and RT summary to classification
+    classification['hidden_rule_location'] = hidden_rule_location
+    classification['hidden_rule_position'] = hidden_rule_pos
+    classification['hidden_rule_locations'] = list(hidden_rule_indices)
+    classification['hidden_rule_positions'] = list(hidden_rule_positions)
+    classification.update(params)
+    classification['response_time_analysis'] = rt_summary
+    
+# 6) Build completed_sequences_with_response_times by merging analyzer per_trial (no recomputation)
+    completed_df = classification.get('completed_sequences', pd.DataFrame()).copy()
+    per_trial_df = rt_summary.get('per_trial')
+    if isinstance(completed_df, pd.DataFrame) and not completed_df.empty and isinstance(per_trial_df, pd.DataFrame) and not per_trial_df.empty:
+        if 'trial_id' in completed_df.columns and 'trial_id' in per_trial_df.columns:
+            completed_with_rt = completed_df.merge(
+                per_trial_df[[c for c in ('trial_id', 'response_time_ms', 'response_time_category',
+                                          'completed_window_latency_ms')
+                              if c in per_trial_df.columns]],
+                on='trial_id',
+                how='left',
+                validate='one_to_one'
+            )
+        else:
+            completed_with_rt = completed_df.copy()
+            completed_with_rt['response_time_ms'] = np.nan
+            completed_with_rt['response_time_category'] = np.nan
+    else:
+        completed_with_rt = completed_df
+        if isinstance(completed_with_rt, pd.DataFrame) and not completed_with_rt.empty:
+            # ensure RT columns exist
+            if 'response_time_ms' not in completed_with_rt.columns:
+                completed_with_rt['response_time_ms'] = np.nan
+            if 'response_time_category' not in completed_with_rt.columns:
+                completed_with_rt['response_time_category'] = np.nan
+
+    classification['completed_sequences_with_response_times'] = completed_with_rt
+
+    # 7) Build indices after everything is attached
+    classification['index'] = build_classification_index(classification)
+
+    # 8) Return wrapper payload
+    return {
+        'classification': classification,
+        'response_time_analysis': rt_summary,
+        'completed_sequences_with_response_times': completed_with_rt,
+    }
+
 
 def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verbose: bool = True, max_runs: int = 32, save: bool = True, print_summary: bool = True):
     """

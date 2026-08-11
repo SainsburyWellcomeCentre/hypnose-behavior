@@ -625,3 +625,62 @@ def accumulate_sampling_time(segments, sample_offset_time_ms, required_minimum_m
             break
 
     return continuous_time, last_seg_end, success
+
+
+# --------------------------------------------------------------------------------------
+# Session-level windows
+#
+# Shared by classify_trials and analyze_response_times. They live here, rather than in
+# either classifier, so neither imports from the other -- the same leaf discipline as the
+# rest of this module (DECISIONS.md sections 3 and 13).
+# --------------------------------------------------------------------------------------
+
+def _next_after(sorted_series, ts):
+    """First entry of a sorted series strictly after ``ts``, or ``None``."""
+    if sorted_series is None or sorted_series.empty:
+        return None
+    later = sorted_series[sorted_series > ts]
+    return later.iloc[0] if not later.empty else None
+
+
+def _recording_end(initiation_starts_sorted, cue_poke_starts_sorted, supply_port1_times,
+                   supply_port2_times, port1_pokes, port2_pokes, trial_end):
+    """Latest timestamp any stream reaches, used to bound a reward window with no next trial.
+
+    Falls back to ``trial_end`` when every stream is empty.
+    """
+    candidates = [
+        initiation_starts_sorted.iloc[-1] if not initiation_starts_sorted.empty else None,
+        cue_poke_starts_sorted.iloc[-1] if not cue_poke_starts_sorted.empty else None,
+        supply_port1_times[-1] if supply_port1_times else None,
+        supply_port2_times[-1] if supply_port2_times else None,
+        port1_pokes.index.max() if not port1_pokes.empty else None,
+        port2_pokes.index.max() if not port2_pokes.empty else None,
+        trial_end,
+    ]
+    candidates = [c for c in candidates if c is not None and not pd.isna(c)]
+    return max(candidates) if candidates else trial_end
+
+
+def _odourdisc_reward_window_end(next_init, next_cue_after_next_init, await_time,
+                                 cue_poke_starts_sorted, recording_end):
+    """End of the reward window on odour-discrimination protocols.
+
+    These sessions have no fixed response window: the animal may collect at any point before it
+    re-engages, so the window runs to the later of the next initiation and the first cue poke
+    after it. With no next initiation it runs to the next cue poke, or to the end of the
+    recording. Never earlier than ``await_time``.
+
+    Returns ``(reward_window_end, next_cue_poke)``.
+    """
+    if next_init is not None:
+        candidates = [c for c in (next_init, next_cue_after_next_init) if c is not None]
+        reward_window_end = max(candidates) if candidates else next_init
+        next_cue_poke = next_cue_after_next_init
+    else:
+        next_cue_poke = _next_after(cue_poke_starts_sorted, await_time)
+        reward_window_end = next_cue_poke if next_cue_poke is not None else recording_end
+
+    if reward_window_end < await_time:
+        reward_window_end = await_time
+    return reward_window_end, next_cue_poke
