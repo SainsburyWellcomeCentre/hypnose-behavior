@@ -186,28 +186,59 @@ def collapse_consecutive_odors(valve_events: list[dict]) -> list[dict]:
     return collapsed
 
 
+def positions_by_odor(valve_events: list[dict], *, seed: dict | None = None,
+                      max_positions: int | None = None) -> tuple[dict, list]:
+    """**The** position rule for the package: one position per odor, last activation wins.
+
+    Each new odor name takes the next position number; an odor already seen keeps its original
+    position and its event is *overwritten* by the later activation. So a trial presenting
+    A, B, A yields **two** positions, with position 1 holding the second A.
+
+    A duplicate is a sequence **restart**, not a longer sequence. The rig runs one sequence per
+    trial and the schemas never repeat an odor within one, so an odor re-appearing after a
+    different odor means several sampling runs were merged into one trial -- an experiment-side
+    fault seen once in 2025 (``sub-040 20251124``) and in **0 of 46,112** trials across subjects
+    056-066. Overwriting keeps the *last* run, which is the one the trial's outcome events
+    belong to. The repeated odors are returned so the caller can warn: this is silent on sound
+    data, so if it ever speaks it is worth investigating.
+
+    ``seed`` pre-places positions the caller assigned by another key -- ``classify_trials`` fixes
+    position 1 on the physical *valve*, because two valves can carry the same odor and only a
+    repeat of the same valve is a re-attempt. ``max_positions`` caps the sequence length; a
+    duplicate never consumes a new position, so it is never capped away.
+
+    Returns ``(position_locations, repeated_odors)``.
+    """
+    position_locations: dict[int, dict] = dict(seed or {})
+    odor_to_pos: dict = {ev['odor_name']: pos for pos, ev in position_locations.items()}
+    next_pos = (max(position_locations) + 1) if position_locations else 1
+    repeated_odors: list = []
+
+    for event in valve_events:
+        odor = event['odor_name']
+        if odor in odor_to_pos:
+            position_locations[odor_to_pos[odor]] = event
+            repeated_odors.append(odor)
+            continue
+        if max_positions is not None and next_pos > max_positions:
+            break
+        odor_to_pos[odor] = next_pos
+        position_locations[next_pos] = event
+        next_pos += 1
+
+    return position_locations, repeated_odors
+
+
 def first_occurrence_positions(trial_valve_events: list[dict]) -> tuple[dict, list]:
-    """Assign positions by **first occurrence of each odor**, ``analyze_response_times``' rule.
+    """``positions_by_odor`` with no seed and no cap, returning the ordered position numbers.
 
-    Each new odor name takes the next position number; a repeat of an odor already seen keeps
-    its original position and *overwrites* that position's event with the later activation.
-    So a trial presenting A, B, A yields two positions, with position 1 holding the second A.
-
-    This is not how ``classify_trials`` assigns positions -- that collapses only *consecutive*
-    repeats and keeps a non-consecutive re-entry as a new position. The two therefore disagree
-    on any trial where an odor re-appears after a different one, and are kept apart.
+    ``analyze_response_times``' entry point into the shared rule. Until Phase 6c-follow-up this
+    was a second, independent implementation that disagreed with ``classify_trials`` whenever an
+    odor re-appeared after a different one; both now resolve positions the same way.
 
     Returns ``(position_locations, ordered_positions)``.
     """
-    position_locations: dict[int, dict] = {}
-    odor_to_pos: dict[str, int] = {}
-    next_pos = 1
-    for event in trial_valve_events:
-        odor = event['odor_name']
-        if odor not in odor_to_pos:
-            odor_to_pos[odor] = next_pos
-            next_pos += 1
-        position_locations[odor_to_pos[odor]] = event
+    position_locations, _repeated = positions_by_odor(trial_valve_events)
     return position_locations, sorted(position_locations.keys())
 
 

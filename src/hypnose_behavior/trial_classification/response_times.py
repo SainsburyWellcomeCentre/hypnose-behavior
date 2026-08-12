@@ -10,8 +10,9 @@ The anchor falls back to the animal's last cue-port exit *before* the odor when 
 inside the odor window finds no exit; that rescue is correct and still fires on 20 trials.
 Do not treat it as dead because ``poke_source`` exists (``DECISIONS.md`` section 15).
 
-This module assigns positions with ``windows.first_occurrence_positions``, which is **not**
-the rule ``classify_trials`` uses -- see the do-not-merge note in ``classify_trials.py``.
+Positions come from ``windows.first_occurrence_positions``, a thin entry point into
+``windows.positions_by_odor`` -- the single position rule, shared with ``classify_trials``
+since the two were measured and found to agree on all but one experiment-faulted trial.
 """
 from __future__ import annotations
 

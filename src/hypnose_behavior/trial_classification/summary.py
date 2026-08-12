@@ -207,8 +207,8 @@ def print_merged_session_summary(merged_classification: dict, subjid=None, date=
                 print(f"   -- FR Time In (within {rt_lbl}): {fr_in} ({pct(fr_in, fr_true):.1f}%)")
                 print(f"   -- FR Time Out (up to {rt_lbl3}): {fr_out} ({pct(fr_out, fr_true):.1f}%)")
                 print(f"   -- FR Late (after 3x, before next trial): {fr_late} ({pct(fr_late, fr_true):.1f}%)")
-                if "fr_latency_ms" in comp_fr.columns:
-                    s_fr = pd.to_numeric(comp_fr.loc[comp_fr["false_response"] == True, "fr_latency_ms"], errors="coerce").dropna()
+                if "fr_window_latency_ms" in comp_fr.columns:
+                    s_fr = pd.to_numeric(comp_fr.loc[comp_fr["false_response"] == True, "fr_window_latency_ms"], errors="coerce").dropna()
                     if len(s_fr):
                         print(f"   -- FR latency: median {fmt_ms(s_fr.median())} ms, mean {fmt_ms(s_fr.mean())} ms")
             print()
@@ -438,7 +438,7 @@ def print_merged_session_summary(merged_classification: dict, subjid=None, date=
             print(f"  - False Alarm abortions: {fa_total} ({pct(fa_total, total):.1f}%)")
             if fa_total > 0:
                 print(f"      - FA Time In - Within Response Time Window ({float(response_time_window_sec) if response_time_window_sec is not None else 'n/a'} s):  {fa_in} ({pct(fa_in, fa_total):.1f}%)")
-                s_in = pd.to_numeric(ab_det.loc[ab_det['fa_label'] == 'FA_time_in', 'fa_latency_ms'], errors='coerce').dropna() if 'fa_latency_ms' in ab_det.columns else pd.Series([], dtype=float)
+                s_in = pd.to_numeric(ab_det.loc[ab_det['fa_label'] == 'FA_time_in', 'fa_window_latency_ms'], errors='coerce').dropna() if 'fa_window_latency_ms' in ab_det.columns else pd.Series([], dtype=float)
                 if len(s_in):
                     print(f"          - Response Time: median={s_in.median():.1f} ms, avg={s_in.mean():.1f} ms, range: {s_in.min():.1f} - {s_in.max():.1f} ms")
                 if response_time_window_sec is not None:
@@ -447,11 +447,11 @@ def print_merged_session_summary(merged_classification: dict, subjid=None, date=
                     print(f"      - FA Time Out - Up to 3x Response Time Window ({int(lower_rt)}-{int(upper_rt)} s):  {fa_out} ({pct(fa_out, fa_total):.1f}%)")
                 else:
                     print(f"      - FA Time Out: {fa_out} ({pct(fa_out, fa_total):.1f}%)")
-                s_out = pd.to_numeric(ab_det.loc[ab_det['fa_label'] == 'FA_time_out', 'fa_latency_ms'], errors='coerce').dropna() if 'fa_latency_ms' in ab_det.columns else pd.Series([], dtype=float)
+                s_out = pd.to_numeric(ab_det.loc[ab_det['fa_label'] == 'FA_time_out', 'fa_window_latency_ms'], errors='coerce').dropna() if 'fa_window_latency_ms' in ab_det.columns else pd.Series([], dtype=float)
                 if len(s_out):
                     print(f"          - Response Time: median={s_out.median():.1f} ms, avg={s_out.mean():.1f} ms, range: {s_out.min():.1f} - {s_out.max():.1f} ms")
                 print(f"      - FA Late - After 3x Response Time up to next trial: {fa_late} ({pct(fa_late, fa_total):.1f}%)")
-                s_late = pd.to_numeric(ab_det.loc[ab_det['fa_label'] == 'FA_late', 'fa_latency_ms'], errors='coerce').dropna() if 'fa_latency_ms' in ab_det.columns else pd.Series([], dtype=float)
+                s_late = pd.to_numeric(ab_det.loc[ab_det['fa_label'] == 'FA_late', 'fa_window_latency_ms'], errors='coerce').dropna() if 'fa_window_latency_ms' in ab_det.columns else pd.Series([], dtype=float)
                 if len(s_late):
                     print(f"          - Response Time: median={s_late.median():.1f} ms, avg={s_late.mean():.1f} ms, range: {s_late.min():.1f} - {s_late.max():.1f} ms")
 

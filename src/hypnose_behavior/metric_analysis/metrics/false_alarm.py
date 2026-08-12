@@ -250,14 +250,14 @@ def FA_position_bias_session(results):
 
 @metric(frame="trials", title="FA Average Response Times")
 def FA_avg_response_times(trials):
-    """Mean `fa_latency_ms` per FA subtype."""
+    """Mean `fa_window_latency_ms` per FA subtype."""
     out = {}
-    if trials.empty or "fa_label" not in trials.columns or "fa_latency_ms" not in trials.columns:
+    if trials.empty or "fa_label" not in trials.columns or "fa_window_latency_ms" not in trials.columns:
         return out
     fa_df = trials[trials["fa_label"].notna()]
     for label, pretty in [("FA_time_in", "FA Time In"), ("FA_time_out", "FA Time Out"),
                           ("FA_late", "FA Late")]:
-        s = pd.to_numeric(fa_df.loc[fa_df["fa_label"] == label, "fa_latency_ms"], errors="coerce").dropna()
+        s = pd.to_numeric(fa_df.loc[fa_df["fa_label"] == label, "fa_window_latency_ms"], errors="coerce").dropna()
         avg = s.mean() if not s.empty else np.nan
         out[pretty] = float(avg) if not np.isnan(avg) else np.nan
     return out
@@ -272,7 +272,7 @@ def FA_avg_response_times_session(results):
     fa_df = df[df["fa_label"].notna()]
     for label, pretty in [("FA_time_in", "FA Time In"), ("FA_time_out", "FA Time Out"),
                           ("FA_late", "FA Late")]:
-        n = len(pd.to_numeric(fa_df.loc[fa_df["fa_label"] == label, "fa_latency_ms"],
+        n = len(pd.to_numeric(fa_df.loc[fa_df["fa_label"] == label, "fa_window_latency_ms"],
                               errors="coerce").dropna())
         avg = out[pretty]
         print(f"{pretty}: avg={avg:.1f} ms (n={n})" if not np.isnan(avg) else f"{pretty}: nan (n={n})")
@@ -690,10 +690,10 @@ def fa_rate_by_position(trials, *, fa_types=None):
 def fa_latency_from_pokeout(trials, *, fa_types=None):
     """`fa_time` minus the animal's last cue-port exit before it, in ms. Checklist 19.
 
-    **Not** `trial_data.fa_latency_ms`, which is measured from the abortion timestamp and is
+    **Not** `trial_data.fa_window_latency_ms`, which is measured from the abortion timestamp and is
     what `fa_label` buckets (`DECISIONS.md` section 16 -- (a) vs (b)).
 
-    Reads `fa_movement_latency_ms` rather than re-deriving the anchor. It used to compute it
+    Reads `fa_response_time_ms` rather than re-deriving the anchor. It used to compute it
     from `position_data.poke_odor_end`, which is wrong twice over: that timestamp is synthetic
     and 25 ms late whenever the pre-odor grace produced the entry (section 15), and it does not
     exclude the animal returning to the cue port between giving up and false-alarming, which
@@ -704,12 +704,12 @@ def fa_latency_from_pokeout(trials, *, fa_types=None):
     silently falling back to the old computation would make old and new sessions look
     comparable when they measure different things -- the section 2 rule for absent provenance.
     """
-    if "fa_movement_latency_ms" not in trials.columns or "global_trial_id" not in trials.columns:
+    if "fa_response_time_ms" not in trials.columns or "global_trial_id" not in trials.columns:
         return pd.Series(dtype=float)
     selected = trials[_fa_filter_mask(trials, fa_types)] if fa_types is not None else trials
     if selected.empty:
         return pd.Series(dtype=float)
-    latencies = pd.to_numeric(selected["fa_movement_latency_ms"], errors="coerce")
+    latencies = pd.to_numeric(selected["fa_response_time_ms"], errors="coerce")
     return pd.Series(latencies.to_numpy(),
                      index=selected["global_trial_id"].to_numpy(),
                      dtype=float).dropna()

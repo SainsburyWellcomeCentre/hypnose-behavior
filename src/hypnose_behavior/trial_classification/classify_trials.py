@@ -5,24 +5,28 @@
 (``position_valve_times``, ``position_poke_times``, ``presentations``), each entry carrying
 its ``poke_source`` (``DECISIONS.md`` section 10).
 
-Do not merge ``_assign_positions_to_valve_events`` with ``windows.first_occurrence_positions``
-------------------------------------------------------------------------------------------
-They look like one helper and are two different rules. On a trial presenting **A, B, A**:
+One position rule
+-----------------
+Positions come from ``windows.positions_by_odor``, the single rule shared with
+``analyze_response_times``: **one position per odor, and a later activation overwrites the
+position that odor already holds**. A trial presenting A, B, A is therefore **2 positions**,
+position 1 holding the *second* A.
 
-* ``_assign_positions_to_valve_events`` (here) collapses only *consecutive* repeats, so a
-  non-consecutive re-entry opens a **new** position -- **3 positions**.
-* ``windows.first_occurrence_positions`` (``analyze_response_times``' rule) gives each odor
-  its first position and lets a later repeat **overwrite** that position's event -- **2
-  positions**, with position 1 holding the *second* A.
+This module and ``analyze_response_times`` once resolved positions differently -- the rule here
+opened a *new* position for a non-consecutive re-entry, giving 3 positions for A, B, A. The two
+were measured before being merged (``DECISIONS.md`` section 13's requirement): they disagree
+only when an odor re-appears after a different odor, which happens on **1 of 1,731** fixture
+trials and **0 of 46,112** trials across subjects 056-066.
 
-They diverge exactly when an odor re-appears after a different odor. Merging them is a
-scientific decision about which rule is right, not a refactoring one, and the count that would
-settle whether they are interchangeable on this data has not been taken. ``DECISIONS.md``
-sections 13 and 15 -- Phase 5 was sent to merge seven such "twins" and found five were
-different rules sharing a name, one pair disagreeing on 63.8% of trials.
+That single trial is an experiment-side fault, not a longer sequence: the rig failed to emit an
+``InitiationSequence`` between three sampling runs, so ``F,A / F,A / F,A`` was recorded as one
+trial. Overwriting resolves it to the **last** run, which is the run the trial's outcome events
+belong to. ``_assign_positions_to_valve_events`` returns the repeated odors and the caller
+raises a ``RuntimeWarning``: silent on sound data, and meaningful precisely because of that.
 """
 from __future__ import annotations
 
+import warnings
 from collections import defaultdict
 
 import numpy as np
@@ -120,11 +124,13 @@ def _assign_positions_to_valve_events(trial_valve_events, max_positions, require
     activations of that same valve become ``prior_presentations`` -- failed Position-1 attempts
     that are reported separately as non-initiated.
 
-    Later positions come from the event list with *consecutive* repeats of an odor collapsed to
-    their last activation. A non-consecutive re-entry of an odor is a new position, which is
-    what distinguishes this from ``windows.first_occurrence_positions``.
+    Later positions come from ``windows.positions_by_odor`` -- the single position rule, shared
+    with ``analyze_response_times``. Consecutive repeats are collapsed to their last activation
+    first; a *non-consecutive* re-entry is a sequence **restart**, so it overwrites the position
+    that odor already holds rather than opening a new one. The repeated odors are returned so
+    the caller can warn.
 
-    Returns ``(position_locations, prior_presentations)``.
+    Returns ``(position_locations, prior_presentations, repeated_odors)``.
     """
     position_locations: dict[int, dict] = {}
     prior_presentations: list[dict] = []
@@ -153,14 +159,10 @@ def _assign_positions_to_valve_events(trial_valve_events, max_positions, require
             ]
 
     dedup_events = windows.collapse_consecutive_odors(trial_valve_events)
-    next_pos = 2
-    for event in dedup_events[1:]:
-        if next_pos > max_positions:
-            break
-        position_locations[next_pos] = event
-        next_pos += 1
+    position_locations, repeated_odors = windows.positions_by_odor(
+        dedup_events[1:], seed=position_locations, max_positions=max_positions)
 
-    return position_locations, prior_presentations
+    return position_locations, prior_presentations, repeated_odors
 
 
 def _position_valve_times(position_locations, max_positions, prior_presentations, required_min_ms_for):
@@ -572,27 +574,27 @@ def _score_false_response(trial_dict, *, await_reward_time, fr_window_end, port1
         trial_dict['fr_time'] = pd.NaT
         trial_dict['fr_port'] = None
         trial_dict['fr_odor_identity'] = None
-        trial_dict['fr_latency_ms'] = np.nan
-        trial_dict['fr_movement_latency_ms'] = np.nan
+        trial_dict['fr_window_latency_ms'] = np.nan
+        trial_dict['fr_response_time_ms'] = np.nan
         return
 
     fr_time, fr_port, fr_odor = tagged_pokes[0]
-    fr_latency_ms = (fr_time - await_reward_time).total_seconds() * 1000.0
+    fr_window_latency_ms = (fr_time - await_reward_time).total_seconds() * 1000.0
     trial_dict['false_response'] = True
     trial_dict['fr_time'] = fr_time
     trial_dict['fr_port'] = fr_port
     trial_dict['fr_odor_identity'] = fr_odor
-    trial_dict['fr_latency_ms'] = float(fr_latency_ms)
-    # (b) how fast it travelled once it finally left the cue port. fr_latency_ms above is (a),
+    trial_dict['fr_window_latency_ms'] = float(fr_window_latency_ms)
+    # (b) how fast it travelled once it finally left the cue port. fr_window_latency_ms above is (a),
     # time since the sequence completed, and it is what fr_label buckets. DECISIONS section 16.
     _fr_anchor = windows.last_poke_end_before(cue_series, fr_time)
-    trial_dict['fr_movement_latency_ms'] = (
+    trial_dict['fr_response_time_ms'] = (
         float((fr_time - _fr_anchor).total_seconds() * 1000.0) if _fr_anchor is not None else np.nan)
     # Parity with unrewarded rows so downstream poke-based logic stays consistent.
     trial_dict['first_reward_poke_time'] = fr_time
     trial_dict['first_reward_poke_port'] = fr_port
     trial_dict['first_reward_poke_odor_identity'] = fr_odor
-    trial_dict['fr_label'] = latency_label(fr_latency_ms, response_time_ms_window, 'FR')
+    trial_dict['fr_label'] = latency_label(fr_window_latency_ms, response_time_ms_window, 'FR')
 
 
 def _label_non_initiated_odors(non_initiated_trials, odor_map):
@@ -780,8 +782,20 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
         trial_end = trial['sequence_end']
 
         valve_activations = windows.valve_events_overlapping(all_valve_activations, trial_start, trial_end)
-        position_locations, prior_presentations = _assign_positions_to_valve_events(
+        position_locations, prior_presentations, repeated_odors = _assign_positions_to_valve_events(
             valve_activations, max_positions, required_min_ms_for)
+        if repeated_odors:
+            # Silent on sound data (0 of 46,112 trials, subjects 056-066), so reaching this is
+            # meaningful: the rig merged several sampling runs into one trial. Raised as a
+            # warning rather than printed, so it surfaces regardless of `verbose` and
+            # `print_summary`.
+            warnings.warn(
+                f"trial {trial.get('trial_id')}: odor(s) {sorted(set(repeated_odors))} were "
+                f"presented again after a different odor, between {trial_start} and {trial_end}. "
+                "Several sampling runs were recorded as one trial; the sequence has been "
+                "resolved to the LAST run. Check this session's initiation events.",
+                RuntimeWarning, stacklevel=2,
+            )
         position_valve_times = _position_valve_times(
             position_locations, max_positions, prior_presentations, required_min_ms_for)
         position_poke_times = _position_poke_times(

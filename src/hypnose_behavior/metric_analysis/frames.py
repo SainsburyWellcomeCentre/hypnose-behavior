@@ -24,6 +24,7 @@ place where today's behaviour and the eventual definition differ, and why.
 
 import json
 import re
+import warnings
 from typing import Optional
 
 import pandas as pd
@@ -111,10 +112,52 @@ def _as_int(val) -> Optional[int]:
 
 
 def _last_position(trial) -> Optional[int]:
-    for col in ("last_odor_position", "last_event_index"):
-        if col in trial:
-            return _as_int(trial.get(col))
-    return None
+    """Last counted **position** (1-based).
+
+    ``last_odor_position`` is already a position. ``last_event_index`` is a
+    0-based index into ``presentations``, so it needs ``+1`` to be the same
+    unit -- the two were previously returned interchangeably, which was a latent
+    off-by-one that never fired because ``last_odor_position`` is a column on
+    every session written by this pipeline.
+    """
+    if "last_odor_position" in trial:
+        return _as_int(trial.get("last_odor_position"))
+    idx = _as_int(trial.get("last_event_index"))
+    return None if idx is None else idx + 1
+
+
+def _presented_max(trial) -> Optional[int]:
+    """Deepest position the **rig presented** -- every position whose valve opened.
+
+    ``position_poke_times`` is read **first** even though ``presentations`` is
+    the more natural name for "what was presented". On sessions written by this
+    pipeline the two carry the same position set -- verified, their maxima agree
+    on 1,730 of 1,730 trials -- so the order cannot matter there. It matters for
+    sessions saved earlier, where the blobs did *not* agree (section 2): reading
+    ``position_poke_times`` first reproduces exactly what this function returned
+    before, so a re-analysis of old derivatives cannot move.
+    """
+    for col in ("position_poke_times", "presentations"):
+        entries = _entries_by_position(trial.get(col))
+        if entries:
+            return max(entries)
+    return _last_position(trial)
+
+
+def _sampled_max(trial) -> Optional[int]:
+    """Deepest position the **animal sampled** (``poke_source == 'poke'``), or None.
+
+    Returns None when no entry carries the marker -- which includes every
+    session saved before Phase 6b, none of which has ``poke_source`` at all.
+    Callers must fall back rather than read "no marker" as "all real pokes"
+    (``DECISIONS.md`` sections 2 and 10).
+    """
+    poked = [pos for pos, entry in _entries_by_position(trial.get("presentations")).items()
+             if entry.get("poke_source") == "poke"]
+    if not poked:
+        poked = [pos for pos, entry in _entries_by_position(trial.get("position_poke_times")).items()
+                 if entry.get("poke_source") == "poke"]
+    return max(poked) if poked else None
 
 
 def _max_poke_time_position(trial) -> Optional[int]:
@@ -142,37 +185,59 @@ def sequence_depth(trial) -> Optional[int]:
     -- see ``sampled_positions`` for the filterable, possibly-gappy counterpart,
     which answers a different question and must not be substituted here.
 
-    The contiguous fill is doing real work today, not just tidying: a position
-    whose poke registers as ~0 ms is currently omitted from
-    ``position_poke_times``, ``presentations`` *and* ``num_odors`` even though
-    the odor was presented and the sequence advanced through it. ``1..max``
-    recovers it; plain membership would silently under-count.
+    The depth is what the trial is **credited** with, and that is
+    ``max(presentations)`` filtered by ``poke_source`` only where the filter is
+    required:
 
-    **On the source, and a deliberate difference from the audit's target
-    definition.** The Phase 4a metric audit (Q5; closed, and superseded by
-    ``docs/DECISIONS.md`` section 10) specifies the eventual form as
-    ``1..max(position in presentations)`` for every trial. That is the right end
-    state, but it is not what the canonical metrics compute today: for an
-    aborted trial they walk ``1..last_odor_position``, and the two disagree
-    whenever the ``PRE_ODOR_GRACE_MS`` path wrote a synthetic trailing position
-    that the abort-detection logic never counted (``classification_utils``
-    :1281-1293 vs :2986), or ``last_odor_position`` is null.
+    - **completed** -- every presented position counts. The rig advanced through
+      all of them, including a final one our DIPort0 reconstruction scores as
+      unpoked, so the filter must *not* be applied.
+    - **aborted** -- the sequence stops at the last real poke, so the filter
+      *is* applied. Falls back to ``last_odor_position``, which the abort
+      pipeline derives independently and which agrees with the filtered maximum
+      on **486 of 486** trials where both are defined.
 
-    Adopting the ``presentations`` form now would not be *more* correct -- it
-    would bake that grace artifact into the denominators, since nothing yet
-    distinguishes a genuine short poke from a synthesised one. Phase 7b adds
-    ``poke_source`` and writes the 0 ms positions; only then can the two sources
-    agree. So this reproduces **today's** rule exactly, and the aborted/completed
-    split below then collapses into the single ``presentations`` form.
+    That split is ``DECISIONS.md`` section 10's rule, and it is why neither
+    single-meaning form may be substituted. Measured on the 9 fixture sessions
+    (1,731 trials):
 
-    Measured on the 9 fixture sessions: 10 of 1731 trials disagree, changing the
-    reached counts on 3 of them (sub-057, sub-059, sub-048) and with them
-    ``abortion_rate_positionX`` and ``fa_abortion_stats``.
+    ==========================================  ==========================
+    ``max(presentations)`` unfiltered            moves **84** trials
+    this rule                                    the current values
+    ``max(poke_source == 'poke')`` everywhere    moves **32** trials
+    ==========================================  ==========================
+
+    The first re-credits the trailing positions the abort trim removed; the last
+    drops a completed trial's trailing presented position.
+
+    It must also stay **monotonic** -- a trial that reached position 5 reached
+    1-4 as well -- which is why it returns a depth to be filled contiguously
+    rather than a set. See ``sampled_positions`` for the filterable,
+    possibly-gappy counterpart, which answers a different question and must not
+    be substituted here.
+
+    Warns when neither the filtered maximum nor ``last_odor_position`` resolves
+    an aborted trial: that is a trial with no sampled position at all, and it
+    drops out of every per-position denominator, so it is worth investigating
+    rather than silently counting as nothing.
     """
-    if _is_aborted(trial):
-        return _last_position(trial)
-    max_pos = _max_poke_time_position(trial)
-    return max_pos if max_pos is not None else _last_position(trial)
+    if not _is_aborted(trial):
+        return _presented_max(trial)
+
+    sampled = _sampled_max(trial)
+    if sampled is not None:
+        return sampled
+    # Sessions saved before `poke_source` existed carry no marker to filter on.
+    fallback = _last_position(trial)
+    if fallback is None:
+        warnings.warn(
+            "aborted trial has no sampled position: neither a `poke_source == 'poke'` "
+            "entry nor `last_odor_position` resolves its depth, so it contributes to no "
+            "per-position denominator. "
+            f"trial_id={trial.get('trial_id')} run_id={trial.get('run_id')}.",
+            RuntimeWarning, stacklevel=2,
+        )
+    return fallback
 
 
 def presented_positions(trial) -> list[int]:

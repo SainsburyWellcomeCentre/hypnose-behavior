@@ -176,6 +176,7 @@ Update this table at the end of each phase, in the same commit as the work.
 | 6b `poke_source` + the unpoked positions | **done** 2026-08-10 | `HEAD` | **Intended output change, fixtures regenerated in the same commit.** Every valve position is now written with `poke_source` ∈ `poke` (4620) / `grace` (91) / `outside_grace` (83). **The brief's rule was measured and not followed as written** — all 83 unpoked positions have the port OUT for the whole window with zero DIPort0 transitions, and 75 of them trail an *aborted* trial, where `abortion_classification` independently puts `last_odor_position` at the last **poked** position on 74/74. So a completed trial counts every presented position (the rig advanced through them all) while an aborted one stops the *sequence* at the last real poke (`_trim_unsampled_tail`) — but still **records** the position, so the blobs stay complete and only the credit shrinks. The trim is gated on AwaitReward, verified: `is_aborted` moved on 0 trials and every shrunken trial has null supply/AwaitReward/reward-poke. `_odourdisc_await_window` extracted so that gate has one definition feeding both the trim and the scoring branch. **Acceptance test 1 passed: `outcome_agreement.py` 1 conflict → 0**, trial 277 `false_response` → `rewarded` (§14). **Acceptance test 2 failed as briefed and was not forced: the §15 fallback still fires 20/20** — it lives in `analyze_response_times`, which builds its own position map from valve events; `poke_source` makes the proper anchor *available* but nothing selects it. Left for a follow-up rather than smuggled in. Sampling metrics filter to `poke_source == 'poke'` via `_real_pokes`, which no-ops on pre-6b sessions (§2). Fixture change audited cell-by-cell against HEAD: 18 of 1731 trials move a non-blob column, 83 gain a position, **0 pre-existing position values changed, 0 removed, 0 unexplained** |
 | 6c split `classification_utils.py` | **done** 2026-08-11 | `HEAD` | **`classification_utils.py` is gone — 3,138 lines, 57 definitions, no facade.** Seven flat modules (`detect_trials`, `classify_trials`, `response_times`, `aborted_trials`, `hidden_rule`, `params`, `index`) plus the two existing leaves. **Pure move, and proved so rather than assumed: `qc/ast_move_check.py` reports 57/57 byte-identical**, 0 changed / missing / duplicated — and the checker was itself validated against injected drift, a whitespace-only edit, a deletion and a duplication first. Layering is a three-layer DAG with **zero worker-to-worker imports** (§17), which is what keeps the two position rules from being merged by proximity; the do-not-merge note now sits in `classify_trials.py`'s docstring and **the settling count was deliberately not taken here**. Two functions the plan's table did not place: the per-run orchestrator `classify_and_analyze_with_response_times` → `run.py`, and the trio `_next_after` / `_recording_end` / `_odourdisc_reward_window_end` → `windows.py` (shared by two workers ⇒ the shared thing becomes a leaf). Three dead `*_SCHEMA_PATH` constants dropped — duplicates of `io/loaders.py`'s live ones. **All five gates GREEN, none regenerated:** `regression.py`, `verify_scripts.py`, `check_imports.py` (62 modules), `verbose_diff.py` (**16,944 lines of stdout identical across 9 sessions**), `plot_regression.py`. **Trap: a dropped mount makes `verbose_diff.py` print GREEN off a 1-line error string — read the line count (§17).** Notebook star-imports left to the user to fix in one pass |
 | ↳ 6b's second acceptance test | **closed, no work owed** | | The §15 fallback still fires 20/20, and that is **not a defect**: those trials were fixed in Phase 11 and are correct. The brief expected `poke_source` to retire the fallback; measured, `analyze_response_times` never reads it, and repointing the target would be cosmetic while risking `search_start` (hence outcomes) and requiring two deliberately different position rules to be reconciled. **Decided: leave it.** `DECISIONS.md` §15 |
+| 6 close-out — one position rule, `sequence_depth`, latency rename | **done** 2026-08-12 | `HEAD` | **Phase 6's three deferred items, measured then closed in one commit with one fixture regeneration.** (1) **Three** position rules → one (`windows.positions_by_odor`); the third, in `aborted_trials._abort_positioned_events`, was uncatalogued by §13/§15 and matched the *old* classify rule, so merging only the two named ones left the tree self-inconsistent on the very trial at issue. Measured before merging: divergence needs a non-consecutive odor repeat — **1 of 1,731** fixture trials, **0 of 46,112** across subs 056-066 (263 sessions, read-only). (2) `sequence_depth` stated as one expression — completed `max(presentations)`, aborted `max(poke_source=='poke')` + `last_odor_position` fallback; the two single-meaning alternatives were measured at **84** and **32** moved trials and rejected. (3) latency rename, 46 replacements, **no value moved** (8 sessions: added/removed columns, zero changed). **Exactly one trial moved overall** — `sub-040 20251124` t44, an *experiment* fault (no `InitiationSequence` for 97.9 s ⇒ three F→A runs recorded as one trial); `detect_trials` deliberately unchanged, the rig itself emitted one `ChooseRandomSequence`. Two `RuntimeWarning`s added, silent on sound data. **Trap: an md5 RED says nothing about scale** — the abort-rule inconsistency showed up only as `last_odor_position` *not* moving in a cell-level diff. **Trap: a two-tree diff cannot see both sides being equally broken** — 2 `plot_regression` cases are now *vacuously* green until the server derivatives are re-analysed at the end of 7b. `DECISIONS.md` §18 |
 | 7a manifest provenance | not started | | ~40% done in advance by 2c |
 | 7b schema & formats | not started | | intended output change |
 | 8 profile, then vectorise | not started | | |
@@ -479,38 +480,35 @@ is Phase 10's split and was never reachable from here.*
 
 ---
 
-### Naming debt to settle later — the (a)/(b) latency pair *(11, 2026-08-10)*
+### Naming debt — the (a)/(b) latency pair  **SETTLED 2026-08-12**
 
-Every reward-port latency now exists twice. Both **end at the reward-port poke**; they differ
-only in where they start — **(a)** at the window start (what the labels bucket), **(b)** at the
+Every reward-port latency exists twice. Both **end at the reward-port poke**; they differ only
+in where they start — **(a)** at the window start (what the FA/FR labels bucket), **(b)** at the
 animal's last cue-port exit before that poke (how fast it moved). `DECISIONS.md` §16.
 
-The base names are not yet consistent about which is which:
+The base names did not say which was which. Settled as a **pure rename — no value moved**:
 
-| family | (a) window-relative | (b) movement |
+| was | is | which |
 |---|---|---|
-| completed | `completed_window_latency_ms` | **`response_time_ms`** |
-| aborted (FA) | **`fa_latency_ms`** | `fa_movement_latency_ms` |
-| no-go (FR) | **`fr_latency_ms`** | `fr_movement_latency_ms` |
+| `fa_latency_ms` | `fa_window_latency_ms` | (a) |
+| `fr_latency_ms` | `fr_window_latency_ms` | (a) |
+| `fa_movement_latency_ms` | `fa_response_time_ms` | (b) |
+| `fr_movement_latency_ms` | `fr_response_time_ms` | (b) |
+| `completed_window_latency_ms` | *unchanged* | (a) |
+| `response_time_ms` | *unchanged* | (b) |
 
-**The agreed target (2026-08-10) is a pure rename — no value moves:**
+Every (a) ends `_window_latency_ms`; every (b) is a `response_time`. It worked as a rename
+**because `response_time_ms` was already (b) and `completed_window_latency_ms` already (a)** —
+the completed pair needed nothing. `trial_data` values are untouched; the fixture md5s moved
+only because column *names* are part of the canonical CSV.
 
-| family | (a) → | (b) → |
-|---|---|---|
-| completed | `completed_window_latency_ms` *(already correct)* | `response_time_ms` *(already correct)* |
-| aborted | `fa_latency_ms` → `fa_window_latency_ms` | `fa_movement_latency_ms` → `fa_response_time_ms` |
-| no-go | `fr_latency_ms` → `fr_window_latency_ms` | `fr_movement_latency_ms` → `fr_response_time_ms` |
+`response_time_ms` was **not** repointed to (a) for symmetry: measured, that costs ~1063 changed
+values and about a second on `avg_response_time`, where the rename costs none. The residual
+asymmetry — completed's (b) has no `completed_` prefix — is the price, taken knowingly.
 
-Every (a) ends `_window_latency_ms`; every (b) is a `response_time`. This works **because
-`response_time_ms` is already (b) and `completed_window_latency_ms` is already (a)** — so the
-completed pair needs nothing, and the FA/FR pairs need only new names. `trial_data` values are
-untouched; the fixture md5s move only because column *names* are part of the canonical CSV.
-
-Do **not** instead repoint `response_time_ms` to (a) for symmetry: that was measured and costs
-~1063 changed values and about a second on `avg_response_time`, where the rename costs none.
-
-`metric_analysis/metrics/false_alarm.fa_latency_from_pokeout` **was** a third, worse attempt at
-(b); it now reads `fa_movement_latency_ms` (§16). When the rename lands, follow it there too.
+**Registry keys did not move.** `fa_latency_by_type` and `fa_latency_from_pokeout` keep their
+names and read the renamed columns; a registry key is a key in `metrics_*.json`, so renaming one
+would be an output change beyond a column rename.
 
 ## Phase 6 — Trial classification  *(highest risk; split into 6a and 6b)*
 
@@ -560,6 +558,13 @@ the only step that can legitimately move a value, and it arrives alone.
 `plot_choice_history` in `visualization/` re-derives the same *display* category rule from
 `response_time_category` + `hidden_rule_success` + `fa_label`. It computes no rate, so 4a left
 it alone — it belongs to this consolidation.
+
+> **Reassigned to Phase 10 (2026-08-11), and not done in Phase 6.** Measured after 6c: it reads
+> the **stored** `response_time_category` rather than re-deriving the outcome from supply/poke
+> counts, so it cannot disagree with the rule that 6a unified — what it duplicates is the
+> *display* mapping (category + hr flag + `fa_label` → `trial_type`, linestyle, colour).
+> `visualization/` imports nothing from `outcome.py` and does not need to. That makes it a
+> plotter-tidying job, which is Phase 10's, not an outcome-correctness job.
 
 **On "shorter functions":** length is the symptom, not the goal. Extract at seams that are
 **pure and independently testable**; shortness follows. Splitting purely to reduce line count
@@ -661,6 +666,30 @@ is the number of trials a merge would silently move, and which rule is right bec
 scientific question, not a refactoring one. Either way this is a *separate* decision from 6c —
 do the count, record it here, do not act on it during the split.
 
+### Phase 6 is closed  *(2026-08-12)*
+
+6a, 6b and 6c landed GREEN; the three deferred items were then measured and closed together in
+one commit with a single fixture regeneration. **`DECISIONS.md` §18** holds what they settled.
+
+| # | item | outcome |
+|---|---|---|
+| 1 | the two position rules | **merged** onto `windows.positions_by_odor`. Measured first: they diverge only on a non-consecutive odor repeat — **1 of 1,731** fixture trials, **0 of 46,112** across subs 056-066. A **third**, uncatalogued rule was found in `aborted_trials._abort_positioned_events` and merged too |
+| 2 | `sequence_depth`'s branch | **kept as one expression**, not collapsed onto `presentations`: completed → `max(presentations)`, aborted → `max(poke_source=='poke')` w/ `last_odor_position` fallback. The three candidates were measured — the unfiltered form moves **84** trials, the fully-filtered one **32**; this rule moves none |
+| 3 | the (a)/(b) latency rename | **done**, 46 replacements. Pure rename, no value moved — 8 of 9 sessions showed added/removed columns and **zero** changed ones |
+
+**One trial moved in total**, `sub-040 20251124` trial 44, and it is an experiment fault rather
+than analysis (§18): the rig emitted no `InitiationSequence` for 97.9 s, so three F→A sampling
+runs became one trial. `detect_trials` was **not** changed — it is faithful to the rig, which
+also emitted a single `ChooseRandomSequence` for the whole period.
+
+**Two standing warnings were added**, both silent on sound data and therefore meaningful when
+they speak: a repeated odor within a trial, and an aborted trial whose depth resolves by neither
+route.
+
+> **Left deliberately undone: the server's derivatives are stale** and every plotter reading the
+> renamed columns returns empty on them. Re-analyse at the end of 7b, not before — see the note
+> in 7b, and the two `plot_regression` cases that are *vacuously* green until then.
+
 ### The gate for Phase 6 is `regression.py`, not `plot_regression.py`
 
 The inverse of Phase 5. `trial_classification/` writes `trial_data`, so **`regression.py` (~15
@@ -707,6 +736,52 @@ regression unaffected.
 - **Typed `@dataclass TrialRecord`** for the flat trial table: replace the free-form ~60-key
   dict (with its singular/plural aliases) with explicit typed fields, validation in
   `__post_init__`, and `.to_row()` for the DataFrame.
+
+  > **Split the dataclass from the validation.** The conversion (typed fields, `.to_row()`,
+  > killing the aliases) is a pure restructure and `regression.py` GREEN is a hard invariant on
+  > it. Raising checks in `__post_init__` are new *failure behaviour* and belong with Phase 9:
+  > a green golden master proves none of those branches fire, so it cannot tell "validation is
+  > correct" from "validation is dead code". Landing both together repeats the mistake 6a/6b
+  > were split to avoid — a RED that cannot be attributed.
+
+  > **Then make the dataclass the schema check the loader has been missing** *(agreed
+  > 2026-08-12)*. Once `TrialRecord` exists it is the single declaration of what `trial_data`
+  > should contain, so `io/load_results.py` can say:
+  >
+  > ```python
+  > missing = set(TrialRecord.__dataclass_fields__) - set(trial_data.columns)
+  > if missing:
+  >     warn(f"{session}: saved before {missing} existed -- re-run trial classification")
+  > ```
+  >
+  > **Why this and not 7a's version stamp:** a git SHA says *something* changed between the
+  > saved file and now, not whether *this file* is affected — a one-line plotter fix and a
+  > trial-classification restructure look identical to it, and only one needs a re-run.
+  > Comparing field sets answers the question actually being asked, and costs no maintenance
+  > because the dataclass is already the source of truth.
+  >
+  > **The concrete case this exists for:** the Phase 6 latency rename (`fa_latency_ms` →
+  > `fa_window_latency_ms` and the three others). Every derivative saved before it carries the
+  > old names, so `FA_avg_response_times` and `sing_rew`'s `FR_latency` find no column, hit
+  > their `if col not in trials.columns` guard and return **empty — a blank figure with no
+  > error**. Measured on the archive: `plot_regression`'s `FR_latency` lost all 35 lines and
+  > `plot_response_times_completed_vs_fa` all 12. Silent staleness is the failure mode; this
+  > check is what makes it speak. Deliberately **not** patched with a legacy-name map in
+  > Phase 6 — that would have been a special case to unpick here.
+  >
+  > **Re-analyse the server's derivatives at the end of 7b, not before** *(agreed 2026-08-12)*.
+  > 7b is the last phase that changes the saved schema, so re-running earlier means running
+  > twice. Note the two gates differ here and only one is affected: `regression.py` recomputes
+  > from **rawdata** into a temp dir and never reads the archive, so it is unaffected;
+  > `plot_regression.py` reads the **saved derivatives**, so it is.
+  >
+  > **Until that re-run, two `plot_regression` cases are vacuously green** — `FR_latency`
+  > (`sub-057 20260709`) and `plot_response_times_completed_vs_fa` (`sub-040 20251124`,
+  > `20251229`). Both trees look for the renamed columns, neither finds them in the stale
+  > files, and both draw nothing, so the diff is empty *because both sides are broken*. A
+  > two-tree diff cannot see that; do not read those two greens as coverage, and re-run those
+  > three sessions first. **Phase 10 depends on `plot_regression`, so this must be cleared
+  > before it starts.**
 - **Flatten the JSON-blob columns** (`position_valve_times`, `position_poke_times`,
   `presentations`) into a tidy long-format side-table `position_data` — one row per
   `trial_id × position` with odor / valve_start / valve_end / poke_time_ms. `frames.build_position_data`
@@ -830,9 +905,19 @@ Unblocks multi-modal alignment. Independent of the rest — can run in parallel.
 
 **Unit tests** (`tests/`, or adjacent to `src/hypnose_behavior/qc/`): fast, mount-free tests for
 the outcome classifier, FR/FA buckets, `_get_single_reward_info`, `_parse_date_input`,
-`validate_subject`. **Build the outcome-classifier tests before Phase 6.**
-`hypnose-helpers/tests/test_layout.py` (20 tests, mount-free, runs without pytest) is the
-pattern.
+`validate_subject`. `hypnose-helpers/tests/test_layout.py` (20 tests, mount-free, runs without
+pytest) is the pattern.
+
+> **The "build the outcome-classifier tests before Phase 6" prerequisite was dropped
+> (2026-08-11), after Phase 6 shipped without it.** `regression.py` exercises
+> `classify_completed_trial` across 1,731 trials on 9 sessions and runs in a few minutes, which
+> is stronger coverage than a handful of hand-written cases — and 6a/6b/6c are all committed
+> GREEN, so the risk the prerequisite guarded against is spent.
+>
+> **Where it would still earn its place is 7b**, not Phase 6: `TrialRecord.__post_init__` is new
+> validation logic whose branches the 9 fixture sessions may never take, and a golden master
+> cannot see an unexercised branch. Reconsider there, on the evidence, rather than as a standing
+> obligation.
 
 **Lightweight CI** (optional): `check_imports` + unit tests in GitHub Actions on PRs. The
 regression stays local — CI can't reach the data.

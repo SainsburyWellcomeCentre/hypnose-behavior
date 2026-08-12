@@ -3,7 +3,7 @@
 In the single-reward protocol not every candidate sequence is rewarded at its
 final position (see README, "Single-Reward Protocol / False Response
 Information"). Completed non-rewarded ("no-go") sequences are scored via the
-``false_response`` / ``fr_label`` / ``fr_latency_ms`` / ``fr_port`` columns,
+``false_response`` / ``fr_label`` / ``fr_window_latency_ms`` / ``fr_port`` columns,
 analogous to the false-alarm columns used for aborted trials.
 
 General plotting helpers (boxplots, rolling/daily summary lines, marker sizing,
@@ -411,7 +411,7 @@ def _session_fr_latencies(completed, fr_labels):
     all_vals = []
     by_port = {"A": [], "B": []}
     for _, row in fr_df.iterrows():
-        lat = row.get("fr_latency_ms")
+        lat = row.get("fr_window_latency_ms")
         if lat is None or pd.isna(lat):
             continue
         lat = float(lat)
@@ -463,7 +463,7 @@ def FR_latency(
     One figure per subject, pooling all selected days into a single boxplot with
     two groups on the X axis:
 
-    - "False Response": ``fr_latency_ms`` of false-response trials
+    - "False Response": ``fr_window_latency_ms`` of false-response trials
       (``false_response == True``, optionally filtered to ``fr_types`` via
       ``fr_label``; default ``"FR_time_in"`` only).
     - "Reward": response time of rewarded trials

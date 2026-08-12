@@ -720,13 +720,13 @@ A flat 25 ms bias on every trial where the fallback fires.
 
 - **163 `false_response`** — `analyze_response_times` deliberately skips single-reward no-go
   completions so they stay out of the rewarded/unrewarded/timeout denominators. Their latency is
-  recorded as `fr_latency_ms`, off a **different anchor** (`await_reward_time`, not the last
+  recorded as `fr_window_latency_ms`, off a **different anchor** (`await_reward_time`, not the last
   poke-out), so the two are not interchangeable.
 - **10 `timeout`** — no reward-port poke anywhere, so there is no response to time.
 
-And measured for completeness: `fr_latency_ms` is present on **101/101** trials where a false
+And measured for completeness: `fr_window_latency_ms` is present on **101/101** trials where a false
 response occurred and absent on all 63 `nFR`, exactly 1:1 with the `false_response` flag. The
-abort side is identical (`fa_latency_ms` 69/69 on FA, 0/44 on nFA). **Absence there means the
+abort side is identical (`fa_window_latency_ms` 69/69 on FA, 0/44 on nFA). **Absence there means the
 animal correctly withheld, not that a measurement failed.**
 
 ### 6b did NOT retire this fallback *(measured 2026-08-10)*
@@ -787,9 +787,13 @@ resampling time to the response inflates it; on one abort by 284 seconds.
 
 | family | (a) window-relative | (b) movement |
 |---|---|---|
-| completed | `completed_window_latency_ms` *(new)* | **`response_time_ms`** *(re-anchored)* |
-| aborted | **`fa_latency_ms`** *(unchanged)* | `fa_movement_latency_ms` *(new)* |
-| no-go | **`fr_latency_ms`** *(unchanged)* | `fr_movement_latency_ms` *(new)* |
+| completed | `completed_window_latency_ms` | **`response_time_ms`** |
+| aborted | `fa_window_latency_ms` | `fa_response_time_ms` |
+| no-go | `fr_window_latency_ms` | `fr_response_time_ms` |
+
+**Every (a) ends `_window_latency_ms`; every (b) is a `response_time`.** The names below were
+settled by the Phase 6 rename (2026-08-12) — `fa_latency_ms` / `fr_latency_ms` were (a) under a
+name that did not say so, and `fa_movement_latency_ms` / `fr_movement_latency_ms` were (b).
 
 ### Labels stay on (a), and therefore do not move
 
@@ -804,13 +808,27 @@ answers, and only (a) can answer it.
 The same reasoning keeps `unrewarded` / `timeout` on (a): the outcome window still opens at
 AwaitReward, so **no outcome flips and `decision_accuracy` does not move**.
 
-### The naming is knowingly inconsistent
+### The naming was inconsistent; the rename settled it *(2026-08-12)*
 
-`response_time_ms` is (b) while `fa_latency_ms` / `fr_latency_ms` are (a). Making
-`response_time_ms` mean (a) would have been consistent, but it repoints ~1063 values and shifts
-`avg_response_time` by about a second, against 39 values for keeping it as (b). The trade was
-taken deliberately; the debt is recorded in the plan under Phase 6, to be settled as one
-intended change rather than smuggled in here. **`avg_response_time` reads (b).**
+`response_time_ms` is (b) while `fa_latency_ms` / `fr_latency_ms` were (a) under names that did
+not say which they were. Making `response_time_ms` mean (a) would have been consistent the other
+way, but it repoints ~1063 values and shifts `avg_response_time` by about a second, against 39
+values for keeping it as (b) — so **the semantics stayed and only the names moved**:
+`fa_latency_ms` → `fa_window_latency_ms`, `fr_latency_ms` → `fr_window_latency_ms`,
+`fa_movement_latency_ms` → `fa_response_time_ms`, `fr_movement_latency_ms` →
+`fr_response_time_ms`. No `trial_data` value changed; the fixture md5s moved because column
+*names* are part of the canonical CSV. **`avg_response_time` reads (b).**
+
+The registry keys did **not** move: `fa_latency_by_type` and `fa_latency_from_pokeout` keep
+their names and simply read the renamed columns, because a registry key is a key in
+`metrics_*.json` and renaming one is an output change beyond a column rename.
+
+> **What the labels do and do not read.** `fa_label` / `fr_label` bucket **(a)**, via
+> `outcome.latency_label`. The **completed** outcome buckets neither:
+> `classify_completed_trial` takes no latency at all — `rewarded` is a supply delivery,
+> `unrewarded` is a reward-port poke without one, `timeout` is neither. Section 16's earlier
+> phrasing ("keeps `unrewarded`/`timeout` on (a)") meant the *window the counts are taken in*,
+> not a latency comparison, and read as if a latency decided the label. It does not.
 
 ### Consequence for the anchor primitive
 
@@ -819,14 +837,14 @@ intended change rather than smuggled in here. **`avg_response_time` reads (b).**
 metric `metric_analysis/metrics/false_alarm.fa_latency_from_pokeout` was an attempt at (b) that
 anchored on `poke_odor_end`, so it carried exactly that bias **and** did not exclude resampling.
 
-**Repointed 2026-08-10** — it now reads `fa_movement_latency_ms` and its frame drops from
+**Repointed 2026-08-10** — it now reads `fa_response_time_ms` and its frame drops from
 `trials+position_data` to `trials`. Measured on the two `fa_analysis` gate sessions the row
 *membership is identical* (90/90 and 15/15), so this is purely a value change, and a large one:
 
 | | median, sub-040 20251124 |
 |---|---|
 | old, from `poke_odor_end` | 11216.0 ms |
-| `fa_latency_ms` — (a), from the abortion | 7821.7 ms |
+| `fa_window_latency_ms` — (a), from the abortion | 7821.7 ms |
 | new — (b) | **1822.3 ms** |
 
 The old value exceeded even the abortion-anchored latency, because the last odor's poke-out
@@ -837,7 +855,7 @@ the metrics fingerprint. The gate that sees it is `plot_regression.py`, whose `f
 goes RED by design. **A metric outside `REPORT` is invisible to the golden master; check whether
 it is in `REPORT` before assuming a metric change is gated.**
 
-Consumers with no `fa_movement_latency_ms` column get an empty Series rather than a fallback to
+Consumers with no `fa_response_time_ms` column get an empty Series rather than a fallback to
 the old computation, by the §2 rule: a session saved before Phase 11 cannot be made to look
 comparable to one saved after it.
 
@@ -906,3 +924,74 @@ sessions never take. 6c ran **57/57 byte-identical**.
   `io/loaders.py`, which defines them identically. They were dropped with the file rather than
   carried into a new module. `ast_move_check.py` reports uncarried module constants for exactly
   this review.
+
+---
+
+## 18. One position rule, and the experiment fault it exposed *(Phase 6 follow-up, 2026-08-12)*
+
+**Intended output change: one trial, fixtures regenerated 2026-08-12.**
+
+There were **three** position rules, not the two §13/§15 named. The third,
+`aborted_trials._abort_positioned_events`, was uncatalogued and happened to match the *old*
+`classify_trials` rule — so unifying only the two named ones left the codebase disagreeing with
+itself on exactly the trial the unification was meant to fix.
+
+Measured before merging, as §13 requires: they diverge **only** when an odor re-appears after a
+*different* odor. That is **1 of 1,731** fixture trials and **0 of 46,112** trials across
+subjects 056-066 (263 sessions, read-only scan of saved `trial_data`).
+
+> **The single rule is `windows.positions_by_odor`: one position per odor, and a later
+> activation overwrites the position that odor already holds.** All three sites use it.
+> Duplicates are *rejected*, not given a new position, because within one trial the rig runs one
+> sequence and the schemas never repeat an odor — a duplicate means several sampling runs were
+> merged, and overwriting keeps the **last** run, which is the run the outcome events belong to.
+
+### The one divergent trial is an experiment fault, not a long sequence
+
+`sub-040 20251124` run 3 trial 44. `InitiationSequence` fired at 15:34:24.806 and **not again
+until 15:36:02.720** — 97.9 s — and `detect_trials` ends a trial at the next initiation, so
+three separate F→A sampling runs became one trial with valve events F,A,F,A,F,A: six collapsed
+positions, truncated to five by `max_positions`.
+
+**`detect_trials` is faithful to the rig and was not changed.** The task software emitted one
+`ChooseRandomSequence` for the whole 98 s, i.e. it also considered this one trial. The fault is
+upstream of the analysis. Fixing it at the *position* layer resolves the trial to `F,A` from the
+last run, and needs no change to trial detection.
+
+Two segmentation approaches were tried and are **wrong** — do not revisit them:
+
+- **`odour_led` is not a run marker.** It is the inverse of valve activity and also goes ON
+  mid-run whenever a poke is too short (15:34:41.534, with F reopening 200 ms later).
+- **Splitting the *collapsed* odor list puts the boundary ~10 s early**, merging `F(46.315)`
+  with `F(56.024)` because they are consecutive after collapse, which would give position 1 a
+  ten-second valve window. Any such split must run on the **raw** event list.
+
+`classify_trials` raises a `RuntimeWarning` naming the repeated odors whenever this fires. It is
+silent on all sound data, which is what makes it worth reading.
+
+### `sequence_depth` is the **credited** depth, and neither single-meaning form
+
+- **completed** -> `max(presentations)`, unfiltered: the rig advanced through every position.
+- **aborted** -> `max(poke_source == 'poke')`, falling back to `last_odor_position`, warning
+  when neither resolves (2 such trials exist: `sub-057` 332, trimmed to empty, and `sub-040` 82,
+  zero positions — both already contributed to no denominator).
+
+Measured over 1,731 trials, the alternatives are not substitutable: unfiltered
+`max(presentations)` everywhere **moves 84 trials** (re-crediting what the abort trim removed);
+`max(poke_source=='poke')` everywhere **moves 32** (dropping a completed trial's trailing
+presented position). This rule reproduces the previous branch exactly.
+
+The fallback's 486-of-486 agreement with `last_odor_position` is only meaningful **because the
+abort pipeline now numbers positions the same way**. Before this change it did not, and that
+agreement silently broke on trial 44 while every other position column moved — caught by a
+cell-level diff, invisible to an md5.
+
+> **`_presented_max` reads `position_poke_times` before `presentations` on purpose.** On
+> sessions this pipeline writes, the two carry the same positions (maxima agree 1,730/1,730), so
+> the order cannot matter. It matters for pre-6b files where they did *not* agree (§2): reading
+> `position_poke_times` first reproduces exactly what the old code returned.
+
+`frames._last_position` now adds `+1` to `last_event_index` — it is a **0-based index** into
+`presentations` while `last_odor_position` is a **1-based position**, and the two were being
+returned interchangeably. A latent off-by-one that never fired, because `last_odor_position` is
+a column on every session this pipeline writes.

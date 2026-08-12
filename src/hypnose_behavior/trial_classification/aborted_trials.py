@@ -36,12 +36,24 @@ def _norm_fa(val):
 
 
 def _abort_positioned_events(evs_raw, max_positions):
-    """Collapse consecutive odor repeats and take the first ``max_positions`` of what remains.
+    """Positions for the abort pipeline, via the shared rule ``windows.positions_by_odor``.
+
+    Consecutive repeats collapse to their last activation, then one position per odor with a
+    later activation overwriting it, capped at ``max_positions``. Identical to numbering the
+    collapsed list ``1..n`` -- which is what this did before -- on every trial whose odors are
+    distinct, i.e. all but the experiment-faulted ones.
+
+    It must be the same rule ``classify_trials`` uses, not merely a similar one: this function
+    produces ``last_odor_position``, and ``frames.sequence_depth`` falls back to it when a
+    session carries no ``poke_source``. The two agree on 486 of 486 aborted trials, and that
+    agreement is only meaningful while both number positions the same way.
 
     Returns ``(events, positions)`` as parallel lists, positions numbered from 1.
     """
-    evs = windows.collapse_consecutive_odors(evs_raw)[:max_positions]
-    return evs, list(range(1, len(evs) + 1))
+    evs = windows.collapse_consecutive_odors(evs_raw)
+    position_locations, _repeated = windows.positions_by_odor(evs, max_positions=max_positions)
+    positions = sorted(position_locations)
+    return [position_locations[p] for p in positions], positions
 
 
 def _abort_presentations(evs, positions, cue_series, sample_offset_time_ms, required_min_ms_for):
@@ -154,11 +166,11 @@ def _false_alarm(abortion_time, t_end, *, init_times, cue_rises, reward_rises, d
         return 'nFA', pd.NaT, np.nan, None, np.nan
 
     fa_time = reward_rises[lo]
-    fa_latency_ms = (fa_time - abortion_time).total_seconds() * 1000.0
+    fa_window_latency_ms = (fa_time - abortion_time).total_seconds() * 1000.0
     fa_port = 1 if fa_time in dip1_rises else (2 if fa_time in dip2_rises else None)
     anchor = windows.last_poke_end_before(cue_series, fa_time)
     movement_ms = float((fa_time - anchor).total_seconds() * 1000.0) if anchor is not None else np.nan
-    return (latency_label(fa_latency_ms, response_time_ms, 'FA'), fa_time, fa_latency_ms,
+    return (latency_label(fa_window_latency_ms, response_time_ms, 'FA'), fa_time, fa_window_latency_ms,
             fa_port, movement_ms)
 
 
@@ -204,7 +216,7 @@ def _print_abortion_summary(aborted_detailed, classification, response_time, res
 
     def fa_latency_stats(label, indent="          "):
         s = pd.to_numeric(
-            aborted_detailed.loc[aborted_detailed['fa_label'] == label, 'fa_latency_ms'],
+            aborted_detailed.loc[aborted_detailed['fa_label'] == label, 'fa_window_latency_ms'],
             errors='coerce',
         ).dropna()
         if len(s):
@@ -482,7 +494,7 @@ def abortion_classification(data, events, classification, odor_map, root, verbos
         )
 
         abortion_time = _abortion_time(cue_intervals, t_start, t_end)
-        fa_label, fa_time, fa_latency_ms, fa_port, fa_movement_ms = _false_alarm(
+        fa_label, fa_time, fa_window_latency_ms, fa_port, fa_movement_ms = _false_alarm(
             abortion_time, t_end, init_times=init_times, cue_rises=cue_rises,
             reward_rises=reward_rises, dip1_rises=dip1_rises, dip2_rises=dip2_rises,
             response_time_ms=response_time_ms, port_series=[DIP0, DIP1, DIP2], cue_series=DIP0)
@@ -505,9 +517,9 @@ def abortion_classification(data, events, classification, odor_map, root, verbos
             'abortion_time': abortion_time,
             'fa_label': fa_label,
             'fa_time': fa_time,
-            'fa_latency_ms': float(fa_latency_ms) if pd.notna(fa_latency_ms) else np.nan,
+            'fa_window_latency_ms': float(fa_window_latency_ms) if pd.notna(fa_window_latency_ms) else np.nan,
             'fa_port': fa_port,
-            'fa_movement_latency_ms': fa_movement_ms,
+            'fa_response_time_ms': fa_movement_ms,
         })
 
     aborted_detailed = pd.DataFrame(rows)
@@ -556,14 +568,14 @@ def classify_noninitiated_FA(noninit_df, DIP0, DIP1, DIP2, response_time, hr_odo
         # Scan for first reward-port poke in (attempt_end, next_cue_in]
         fa_label = 'nFA'
         fa_time = pd.NaT
-        fa_latency_ms = np.nan
+        fa_window_latency_ms = np.nan
         fa_port = None
         fa_movement_ms = np.nan
 
         reward_after = [t for t in reward_rises if attempt_end < t <= next_cue_in]
         if reward_after:
             fa_time = reward_after[0]
-            fa_latency_ms = (fa_time - attempt_end).total_seconds() * 1000.0
+            fa_window_latency_ms = (fa_time - attempt_end).total_seconds() * 1000.0
             
             # Determine which port ← NEW
             if fa_time in dip1_rises:
@@ -571,7 +583,7 @@ def classify_noninitiated_FA(noninit_df, DIP0, DIP1, DIP2, response_time, hr_odo
             elif fa_time in dip2_rises:
                 fa_port = 2
 
-            fa_label = latency_label(fa_latency_ms, response_time_ms, 'FA')
+            fa_label = latency_label(fa_window_latency_ms, response_time_ms, 'FA')
 
         # HR status for position 1
         is_hr = False
@@ -583,9 +595,9 @@ def classify_noninitiated_FA(noninit_df, DIP0, DIP1, DIP2, response_time, hr_odo
             **row.to_dict(),
             'fa_label': fa_label,
             'fa_time': fa_time,
-            'fa_latency_ms': fa_latency_ms,
+            'fa_window_latency_ms': fa_window_latency_ms,
             'fa_port': fa_port,
-            'fa_movement_latency_ms': fa_movement_ms,
+            'fa_response_time_ms': fa_movement_ms,
             'is_hr': is_hr
         })
         
