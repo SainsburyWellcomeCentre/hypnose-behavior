@@ -119,6 +119,7 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
             'default_minimum_sampling_time_ms': cls.get('default_minimum_sampling_time_ms'),
             'minimum_sampling_time_ms_by_odor': cls.get('minimum_sampling_time_ms_by_odor'),
             'response_time_window_sec': cls.get('response_time_window_sec'),
+            'protocol_mode': cls.get('protocol_mode'),
             'hidden_rule_location': cls.get('hidden_rule_location'),
             'hidden_rule_position': cls.get('hidden_rule_position'),
             'hidden_rule_locations': cls.get('hidden_rule_locations'),
@@ -214,6 +215,12 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
         else:
             merged['minimum_sampling_time_ms_by_odor'] = {}
         merged['response_time_window_sec'] = first['response_time_window_sec']
+        # The session's protocol mode, which decides `trial_data`'s column set. Taken from
+        # run 1: a session is one protocol, and every run's mode is kept in
+        # `per_run_parameters` regardless. Were runs ever to disagree, the merged table
+        # would be the union of both modes' columns, so the manifest's mode stays a
+        # subset and the loader check cannot raise a false alarm on it.
+        merged['protocol_mode'] = first.get('protocol_mode')
         merged['hidden_rule_location'] = first.get('hidden_rule_location')
         merged['hidden_rule_position'] = first.get('hidden_rule_position')
         merged['hidden_rule_locations'] = list(first.get('hidden_rule_locations') or [])

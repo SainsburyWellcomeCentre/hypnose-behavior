@@ -2,8 +2,9 @@
   "subjid": "061",
   "date": "20260729",
   "label": "odourdiscrimination_stage4",
-  "trial_data": "56f0e7b95204d757aa1cc3d9699935c1",
+  "trial_data": "32b1114eb0b72ce2f4df0fcc95db24ef",
   "trial_data_columns": {
+    "abort_reason": "d832bfe78904c87bbc67b08ae2ab0318",
     "abortion_time": "d832bfe78904c87bbc67b08ae2ab0318",
     "abortion_type": "d832bfe78904c87bbc67b08ae2ab0318",
     "attempt_number": "3bde0a23c0d7d58fc3715c91238597e8",

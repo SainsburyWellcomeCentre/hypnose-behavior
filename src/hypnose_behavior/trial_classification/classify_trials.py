@@ -26,6 +26,7 @@ raises a ``RuntimeWarning``: silent on sound data, and meaningful precisely beca
 """
 from __future__ import annotations
 
+import copy
 import warnings
 from collections import defaultdict
 
@@ -35,7 +36,9 @@ import pandas as pd
 # The saved schema's declaration of the protocol modes. `io/protocol_schema.py` is a leaf
 # (standard library only) and both package `__init__`s are docstring-only, so this is a
 # one-way edge and not the cycle it looks like -- `docs/DECISIONS.md` section 3.
-from hypnose_behavior.io.protocol_schema import resolve_mode
+from hypnose_behavior.io.protocol_schema import (
+    DATETIME_FIELDS, record_class_for, resolve_mode,
+)
 import hypnose_behavior.trial_classification.windows as windows
 from hypnose_behavior.trial_classification.hidden_rule import (
     _check_hidden_rule, _drop_final_hidden_rule_index,
@@ -445,27 +448,27 @@ def _reward_pokes_between(port1_pokes, port2_pokes, window_start, window_end):
     return pokes1, pokes2, tagged
 
 
-def _record_supply_outcome(trial_dict, supply1, supply2, tagged_supply):
+def _record_supply_outcome(rec, supply1, supply2, tagged_supply):
     """Write the rewarded-trial supply columns onto a trial record."""
     first_supply_time, first_supply_port, first_supply_odor = tagged_supply[0]
-    trial_dict['first_supply_time'] = first_supply_time
-    trial_dict['first_supply_port'] = first_supply_port
-    trial_dict['first_supply_odor_identity'] = first_supply_odor
-    trial_dict['supply1_count'] = len(supply1)
-    trial_dict['supply2_count'] = len(supply2)
-    trial_dict['total_supply_count'] = len(supply1) + len(supply2)
+    rec.first_supply_time = first_supply_time
+    rec.first_supply_port = first_supply_port
+    rec.first_supply_odor_identity = first_supply_odor
+    rec.supply1_count = len(supply1)
+    rec.supply2_count = len(supply2)
+    rec.total_supply_count = len(supply1) + len(supply2)
 
 
-def _record_first_reward_poke(trial_dict, tagged_pokes):
+def _record_first_reward_poke(rec, tagged_pokes):
     """Write the first reward-port poke onto a trial record, if there was one."""
     if not tagged_pokes:
         return
-    (trial_dict['first_reward_poke_time'],
-     trial_dict['first_reward_poke_port'],
-     trial_dict['first_reward_poke_odor_identity']) = tagged_pokes[0]
+    (rec.first_reward_poke_time,
+     rec.first_reward_poke_port,
+     rec.first_reward_poke_odor_identity) = tagged_pokes[0]
 
 
-def _score_odourdisc_outcome(trial_dict, *, await_time, reward_window_end, supply_port1_times,
+def _score_odourdisc_outcome(rec, *, await_time, reward_window_end, supply_port1_times,
                              supply_port2_times, port1_pokes, port2_pokes):
     """Outcome of one odour-discrimination trial. Returns ``'rewarded' | 'unrewarded' | 'timeout'``.
 
@@ -484,16 +487,16 @@ def _score_odourdisc_outcome(trial_dict, *, await_time, reward_window_end, suppl
         has_await_reward=True)
 
     if outcome == 'rewarded':
-        _record_supply_outcome(trial_dict, supply1, supply2, tagged_supply)
+        _record_supply_outcome(rec, supply1, supply2, tagged_supply)
     elif outcome == 'unrewarded':
-        _record_first_reward_poke(trial_dict, tagged_pokes)
-        trial_dict['port1_pokes_count'] = len(pokes1)
-        trial_dict['port2_pokes_count'] = len(pokes2)
-        trial_dict['total_reward_pokes'] = len(tagged_pokes)
+        _record_first_reward_poke(rec, tagged_pokes)
+        rec.port1_pokes_count = len(pokes1)
+        rec.port2_pokes_count = len(pokes2)
+        rec.total_reward_pokes = len(tagged_pokes)
     return outcome
 
 
-def _score_standard_outcome(trial_dict, *, await_reward_time, trial_end, supply_port1_times,
+def _score_standard_outcome(rec, *, await_reward_time, trial_end, supply_port1_times,
                             supply_port2_times, port1_pokes, port2_pokes, response_time_sec):
     """Outcome of one standard completed trial. Returns ``'rewarded' | 'unrewarded' | 'timeout'``.
 
@@ -507,7 +510,7 @@ def _score_standard_outcome(trial_dict, *, await_reward_time, trial_end, supply_
         # The reward-poke columns are deliberately not written on a rewarded trial here, unlike
         # the odour-discrimination path -- that difference in what gets recorded is why the two
         # scorers stayed separate.
-        _record_supply_outcome(trial_dict, supply1, supply2, tagged_supply)
+        _record_supply_outcome(rec, supply1, supply2, tagged_supply)
         return classify_completed_trial(
             supply_count=len(tagged_supply), reward_poke_count=0, has_await_reward=True)
 
@@ -515,15 +518,15 @@ def _score_standard_outcome(trial_dict, *, await_reward_time, trial_end, supply_
     pokes1, pokes2, tagged_pokes = _reward_pokes_between(
         port1_pokes, port2_pokes, await_reward_time, poke_window_end)
 
-    trial_dict['poke_window_end'] = poke_window_end
-    trial_dict['port1_pokes_count'] = len(pokes1)
-    trial_dict['port2_pokes_count'] = len(pokes2)
-    trial_dict['total_reward_pokes'] = len(tagged_pokes)
+    rec.poke_window_end = poke_window_end
+    rec.port1_pokes_count = len(pokes1)
+    rec.port2_pokes_count = len(pokes2)
+    rec.total_reward_pokes = len(tagged_pokes)
 
     outcome = classify_completed_trial(
         supply_count=0, reward_poke_count=len(tagged_pokes), has_await_reward=True)
     if outcome == 'unrewarded':
-        _record_first_reward_poke(trial_dict, tagged_pokes)
+        _record_first_reward_poke(rec, tagged_pokes)
     return outcome
 
 
@@ -555,7 +558,7 @@ def _false_response_window_end(trial_end, await_reward_time, initiation_starts_s
     return max(fr_window_end, await_reward_time)
 
 
-def _score_false_response(trial_dict, *, await_reward_time, fr_window_end, port1_pokes,
+def _score_false_response(rec, *, await_reward_time, fr_window_end, port1_pokes,
                           port2_pokes, response_time_ms_window, cue_series):
     """Score a completed **non-rewarded** ("no-go") sequence, single-reward protocol only.
 
@@ -567,38 +570,38 @@ def _score_false_response(trial_dict, *, await_reward_time, fr_window_end, port1
     pokes1, pokes2, tagged_pokes = _reward_pokes_between(
         port1_pokes, port2_pokes, await_reward_time, fr_window_end)
 
-    trial_dict['fr_window_end'] = fr_window_end
-    trial_dict['port1_pokes_count'] = len(pokes1)
-    trial_dict['port2_pokes_count'] = len(pokes2)
-    trial_dict['total_reward_pokes'] = len(tagged_pokes)
+    rec.fr_window_end = fr_window_end
+    rec.port1_pokes_count = len(pokes1)
+    rec.port2_pokes_count = len(pokes2)
+    rec.total_reward_pokes = len(tagged_pokes)
 
     if not tagged_pokes:
-        trial_dict['false_response'] = False
-        trial_dict['fr_label'] = 'nFR'
-        trial_dict['fr_time'] = pd.NaT
-        trial_dict['fr_port'] = None
-        trial_dict['fr_odor_identity'] = None
-        trial_dict['fr_window_latency_ms'] = np.nan
-        trial_dict['fr_response_time_ms'] = np.nan
+        rec.false_response = False
+        rec.fr_label = 'nFR'
+        rec.fr_time = pd.NaT
+        rec.fr_port = None
+        rec.fr_odor_identity = None
+        rec.fr_window_latency_ms = np.nan
+        rec.fr_response_time_ms = np.nan
         return
 
     fr_time, fr_port, fr_odor = tagged_pokes[0]
     fr_window_latency_ms = (fr_time - await_reward_time).total_seconds() * 1000.0
-    trial_dict['false_response'] = True
-    trial_dict['fr_time'] = fr_time
-    trial_dict['fr_port'] = fr_port
-    trial_dict['fr_odor_identity'] = fr_odor
-    trial_dict['fr_window_latency_ms'] = float(fr_window_latency_ms)
+    rec.false_response = True
+    rec.fr_time = fr_time
+    rec.fr_port = fr_port
+    rec.fr_odor_identity = fr_odor
+    rec.fr_window_latency_ms = float(fr_window_latency_ms)
     # (b) how fast it travelled once it finally left the cue port. fr_window_latency_ms above is (a),
     # time since the sequence completed, and it is what fr_label buckets. DECISIONS section 16.
     _fr_anchor = windows.last_poke_end_before(cue_series, fr_time)
-    trial_dict['fr_response_time_ms'] = (
+    rec.fr_response_time_ms = (
         float((fr_time - _fr_anchor).total_seconds() * 1000.0) if _fr_anchor is not None else np.nan)
     # Parity with unrewarded rows so downstream poke-based logic stays consistent.
-    trial_dict['first_reward_poke_time'] = fr_time
-    trial_dict['first_reward_poke_port'] = fr_port
-    trial_dict['first_reward_poke_odor_identity'] = fr_odor
-    trial_dict['fr_label'] = latency_label(fr_window_latency_ms, response_time_ms_window, 'FR')
+    rec.first_reward_poke_time = fr_time
+    rec.first_reward_poke_port = fr_port
+    rec.first_reward_poke_odor_identity = fr_odor
+    rec.fr_label = latency_label(fr_window_latency_ms, response_time_ms_window, 'FR')
 
 
 def _label_non_initiated_odors(non_initiated_trials, odor_map):
@@ -644,6 +647,47 @@ def _label_non_initiated_odors(non_initiated_trials, odor_map):
     non_initiated_trials = non_initiated_trials.copy()
     non_initiated_trials['odor_name'] = odor_names
     return non_initiated_trials
+
+
+def _as_declared_datetime(col: pd.Series) -> pd.Series:
+    """Restore ``datetime64`` on a timestamp column pandas could only infer as ``object``.
+
+    A record declares every field, so a column no trial wrote is all-``None`` -- and a
+    column of nothing but ``None`` carries no type, so pandas gives it ``object``. On its
+    own that is harmless. It bites at the **concat in `merge`**: one run whose column is
+    entirely empty turns the whole merged column ``object``, and ``to_csv`` then writes
+    ``str(Timestamp)`` (``...806000``) where ``datetime64`` wrote ``...806``. Measured on
+    `sub-040 20251124`, a three-run session: 154 cells of ``await_reward_time`` and 135 of
+    ``first_supply_time`` changed representation, while every value stayed the same instant.
+
+    Before the records, such a run simply lacked the column and ``concat`` filled it,
+    preserving ``datetime64`` -- so this restores the old dtype rather than imposing a new
+    one, and the parquet keeps real timestamps instead of Python objects.
+
+    **Deliberately not `pd.to_datetime(..., errors="coerce")`**: that would turn anything
+    unparseable into ``NaT``, silently destroying a value to fix a dtype. This converts
+    only when it is provably lossless -- the column is `object` and holds nothing but
+    Timestamps and nulls -- and returns it untouched otherwise.
+    """
+    if col.dtype != object:
+        return col
+    non_null = col.dropna()
+    if len(non_null) and not all(isinstance(v, pd.Timestamp) for v in non_null):
+        return col
+    return pd.to_datetime(col)
+
+
+def _frame(records) -> pd.DataFrame:
+    """A DataFrame of trial records -- every declared column, in declaration order.
+
+    An empty list still yields a column-less frame, exactly as ``pd.DataFrame([])`` did:
+    `summary.py` tests ``"false_response" in comp_fr.columns`` to decide whether a session
+    has single-reward data, and that guard must keep meaning what it means.
+    """
+    df = pd.DataFrame([r.to_row() for r in records])
+    for name in DATETIME_FIELDS.intersection(df.columns):
+        df[name] = _as_declared_datetime(df[name])
+    return df
 
 
 def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=True, single_reward_info=None):
@@ -767,13 +811,15 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
     if single_reward_info is None:
         single_reward_info = _get_single_reward_info(root)
     is_single_reward, rewarded_sequences, all_sequences = single_reward_info
-    # Which of the three protocol modes this run follows. The two flags come from
-    # independent sources and nothing in the code makes them exclusive, so the impossible
-    # combination raises here rather than writing a file whose schema is undefined -- see
-    # `io/protocol_schema.resolve_mode`. Called for the check alone; the mode it returns is what
-    # decides the record's column set, and is threaded to the manifest in the next step.
-    resolve_mode(is_odour_discrimination=is_odour_discrimination,
-                 is_single_reward=is_single_reward)
+    # Which of the three protocol modes this run follows, and therefore which columns its
+    # trials carry. The two flags come from independent sources and nothing in the code
+    # makes them exclusive, so the impossible combination raises rather than writing a file
+    # whose schema is undefined -- see `io/protocol_schema.resolve_mode`. The mode is
+    # carried out on `result` so `save_results` can stamp it into the manifest, which is
+    # how a reader knows which field set to check the file against.
+    protocol_mode = resolve_mode(is_odour_discrimination=is_odour_discrimination,
+                                 is_single_reward=is_single_reward)
+    record_cls = record_class_for(protocol_mode)
     # The final position of a full sequence is always the reward position, so it can
     # never be a hidden-rule position -- drop it (single-reward left untouched).
     hidden_rule_indices = _drop_final_hidden_rule_index(hidden_rule_indices, schema_settings, is_single_reward)
@@ -867,10 +913,10 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
             if position_valve_times.get(pos) is not None
         ]
 
-        trial_dict = trial.to_dict()
-        trial_dict['odor_sequence'] = final_odor_sequence
-        trial_dict['num_odors'] = len(final_odor_sequence)
-        trial_dict['last_odor'] = final_odor_sequence[-1] if final_odor_sequence else None
+        trial_rec = record_cls(**trial.to_dict())
+        trial_rec.odor_sequence = final_odor_sequence
+        trial_rec.num_odors = len(final_odor_sequence)
+        trial_rec.last_odor = final_odor_sequence[-1] if final_odor_sequence else None
 
         # Single-reward protocol: is THIS trial's full presented sequence one of the rewarded
         # ones (exact match against the schema)? Only set in single-reward mode so the default
@@ -878,51 +924,51 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
         sequence_rewarded = None
         if is_single_reward:
             sequence_rewarded = tuple(final_odor_sequence) in rewarded_sequences
-            trial_dict['sequence_rewarded'] = sequence_rewarded
+            trial_rec.sequence_rewarded = sequence_rewarded
             reward_determinacy, determinacy_position, determined_final_odor = _classify_reward_determinacy(
                 final_odor_sequence, all_sequences, rewarded_sequences
             )
-            trial_dict['reward_determinacy'] = reward_determinacy
-            trial_dict['determinacy_position'] = determinacy_position
-            trial_dict['determined_final_odor'] = determined_final_odor
+            trial_rec.reward_determinacy = reward_determinacy
+            trial_rec.determinacy_position = determinacy_position
+            trial_rec.determined_final_odor = determined_final_odor
 
-        trial_dict['hidden_rule_location'] = hidden_rule_location
-        trial_dict['hidden_rule_locations'] = list(hidden_rule_indices)
-        trial_dict['hidden_rule_positions'] = list(hidden_rule_positions)
-        trial_dict['sequence_name'] = sequence_name
-        trial_dict['position_valve_times'] = position_valve_times
-        trial_dict['position_poke_times'] = position_poke_times
-        trial_dict['presentations'] = presentations
-        trial_dict['last_event_index'] = last_event_index
-        trial_dict['minimum_sampling_time_ms_by_odor'] = dict(minimum_sampling_time_ms_by_odor)
+        trial_rec.hidden_rule_location = hidden_rule_location
+        trial_rec.hidden_rule_locations = list(hidden_rule_indices)
+        trial_rec.hidden_rule_positions = list(hidden_rule_positions)
+        trial_rec.sequence_name = sequence_name
+        trial_rec.position_valve_times = position_valve_times
+        trial_rec.position_poke_times = position_poke_times
+        trial_rec.presentations = presentations
+        trial_rec.last_event_index = last_event_index
+        trial_rec.minimum_sampling_time_ms_by_odor = dict(minimum_sampling_time_ms_by_odor)
 
         pos1_poke = position_poke_times.get(1)
         if pos1_poke:
             corrected_start = pos1_poke.get('poke_first_in') or pos1_poke.get('poke_odor_start')
             if corrected_start is not None:
-                trial_dict['sequence_start_corrected'] = corrected_start
+                trial_rec.sequence_start_corrected = corrected_start
 
         enough_odors, hit_hidden_rule, hr_hit_indices = _check_hidden_rule(
             final_odor_sequence, hidden_rule_indices, hr_odor_set
         )
         hr_hit_positions = [idx + 1 for idx in hr_hit_indices]
-        trial_dict['enough_odors_for_hr'] = enough_odors
-        trial_dict['hit_hidden_rule'] = hit_hidden_rule
-        trial_dict['hidden_rule_hit_indices'] = hr_hit_indices
-        trial_dict['hidden_rule_hit_positions'] = hr_hit_positions
+        trial_rec.enough_odors_for_hr = enough_odors
+        trial_rec.hit_hidden_rule = hit_hidden_rule
+        trial_rec.hidden_rule_hit_indices = hr_hit_indices
+        trial_rec.hidden_rule_hit_positions = hr_hit_positions
         hr_success, hr_success_position = _hidden_rule_success(
             hr_hit_positions, len(final_odor_sequence), max_positions, bool(trial_await_rewards))
-        trial_dict['hidden_rule_success'] = hr_success
-        trial_dict['hidden_rule_success_position'] = hr_success_position
+        trial_rec.hidden_rule_success = hr_success
+        trial_rec.hidden_rule_success_position = hr_success_position
 
         if is_odour_discrimination:
-            trial_dict['odourdiscrimination_mode'] = True
-            trial_dict['last_valve_start'] = odourdisc_ctx['last_valve_start']
+            trial_rec.odourdiscrimination_mode = True
+            trial_rec.last_valve_start = odourdisc_ctx['last_valve_start']
 
             await_window_start = odourdisc_ctx['await_window_start']
             if await_window_start is None or pd.isna(await_window_start):
-                aborted_sequences.append(trial_dict.copy())
-                initiated_trials_list.append(trial_dict)
+                aborted_sequences.append(copy.copy(trial_rec))
+                initiated_trials_list.append(trial_rec)
                 continue
 
             next_init = odourdisc_ctx['next_init']
@@ -930,21 +976,21 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
 
             await_in_window = odourdisc_ctx['await_in_window']
             if not await_in_window:
-                trial_dict['abort_reason'] = 'no_await_reward'
-                aborted_sequences.append(trial_dict.copy())
-                initiated_trials_list.append(trial_dict)
+                trial_rec.abort_reason = 'no_await_reward'
+                aborted_sequences.append(copy.copy(trial_rec))
+                initiated_trials_list.append(trial_rec)
                 continue
 
             await_time = min(await_in_window)
-            trial_dict['await_reward_time'] = await_time
+            trial_rec.await_reward_time = await_time
 
             next_cue_after_next_init = _next_after(cue_poke_starts_sorted, next_init) if next_init is not None else None
             reward_window_end, next_cue_poke = _odourdisc_reward_window_end(
                 next_init, next_cue_after_next_init, await_time, cue_poke_starts_sorted, recording_end)
 
-            trial_dict['next_initiation_time'] = next_init
-            trial_dict['next_cue_poke_start'] = next_cue_poke
-            trial_dict['reward_window_end'] = reward_window_end
+            trial_rec.next_initiation_time = next_init
+            trial_rec.next_cue_poke_start = next_cue_poke
+            trial_rec.reward_window_end = reward_window_end
 
             if verbose:
                 supply1_dbg, supply2_dbg, _ = _supply_pulses_between(
@@ -968,20 +1014,20 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
                     print("[odourdisc] supply in window", (supply1_dbg + supply2_dbg)[:5])
 
             outcome = _score_odourdisc_outcome(
-                trial_dict, await_time=await_time, reward_window_end=reward_window_end,
+                trial_rec, await_time=await_time, reward_window_end=reward_window_end,
                 supply_port1_times=supply_port1_times, supply_port2_times=supply_port2_times,
                 port1_pokes=port1_pokes, port2_pokes=port2_pokes)
-            outcome_buckets[outcome][0].append(trial_dict.copy())
+            outcome_buckets[outcome][0].append(copy.copy(trial_rec))
 
-            completed_sequences.append(trial_dict.copy())
-            initiated_trials_list.append(trial_dict)
+            completed_sequences.append(copy.copy(trial_rec))
+            initiated_trials_list.append(trial_rec)
             continue
 
-        initiated_trials_list.append(trial_dict)
+        initiated_trials_list.append(trial_rec)
         if not trial_await_rewards:
-            aborted_sequences.append(trial_dict.copy())
+            aborted_sequences.append(copy.copy(trial_rec))
             if hit_hidden_rule:
-                aborted_sequences_hr.append(trial_dict.copy())
+                aborted_sequences_hr.append(copy.copy(trial_rec))
             continue
 
         for pos, v in (position_valve_times or {}).items():
@@ -998,14 +1044,14 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
                     agg_odor_poke_times[p['odor_name']].append(p['poke_time_ms'])
 
         await_reward_time = min(trial_await_rewards)
-        trial_dict['await_reward_time'] = await_reward_time
+        trial_rec.await_reward_time = await_reward_time
 
         if hit_hidden_rule:
             if hr_success:
-                completed_hr.append(trial_dict.copy())
+                completed_hr.append(copy.copy(trial_rec))
                 hr_category = 1
             else:
-                completed_hr_missed.append(trial_dict.copy())
+                completed_hr_missed.append(copy.copy(trial_rec))
                 hr_category = 2
         else:
             hr_category = 0
@@ -1015,53 +1061,53 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
                 trial_end, await_reward_time, initiation_starts_sorted, cue_poke_starts_sorted,
                 port1_pokes, port2_pokes)
             _score_false_response(
-                trial_dict, await_reward_time=await_reward_time, fr_window_end=fr_window_end,
+                trial_rec, await_reward_time=await_reward_time, fr_window_end=fr_window_end,
                 port1_pokes=port1_pokes, port2_pokes=port2_pokes,
                 response_time_ms_window=response_time_ms_window, cue_series=poke_series_full)
-            completed_false_response.append(trial_dict.copy())
+            completed_false_response.append(copy.copy(trial_rec))
         else:
             outcome = _score_standard_outcome(
-                trial_dict, await_reward_time=await_reward_time, trial_end=trial_end,
+                trial_rec, await_reward_time=await_reward_time, trial_end=trial_end,
                 supply_port1_times=supply_port1_times, supply_port2_times=supply_port2_times,
                 port1_pokes=port1_pokes, port2_pokes=port2_pokes,
                 response_time_sec=response_time_sec)
             buckets = outcome_buckets[outcome]
-            buckets[0].append(trial_dict.copy())
+            buckets[0].append(copy.copy(trial_rec))
             if hr_category:
-                buckets[hr_category].append(trial_dict.copy())
+                buckets[hr_category].append(copy.copy(trial_rec))
 
-        completed_sequences.append(trial_dict.copy())
+        completed_sequences.append(copy.copy(trial_rec))
 
     non_initiated_trials = _label_non_initiated_odors(non_initiated_trials, odor_map)
-    initiated_trials = pd.DataFrame(initiated_trials_list)
+    initiated_trials = _frame(initiated_trials_list)
 
     result = {
         'non_initiated_sequences': non_initiated_trials,
         'initiated_sequences': initiated_trials,
-        'completed_sequences': pd.DataFrame(completed_sequences),
-        'aborted_sequences': pd.DataFrame(aborted_sequences),
+        'completed_sequences': _frame(completed_sequences),
+        'aborted_sequences': _frame(aborted_sequences),
         'non_initiated_odor1_attempts': pd.DataFrame(non_initiated_odor1_attempts),
         'minimum_sampling_time_ms_by_odor': dict(minimum_sampling_time_ms_by_odor),
         'default_minimum_sampling_time_ms': float(default_minimum_sampling_time_ms),
         'minimum_sampling_time_ms': float(default_minimum_sampling_time_ms),
 
-        'aborted_sequences_HR': pd.DataFrame(aborted_sequences_hr),
-        'completed_sequences_HR': pd.DataFrame(completed_hr),
-        'completed_sequences_HR_missed': pd.DataFrame(completed_hr_missed),
+        'aborted_sequences_HR': _frame(aborted_sequences_hr),
+        'completed_sequences_HR': _frame(completed_hr),
+        'completed_sequences_HR_missed': _frame(completed_hr_missed),
 
-        'completed_sequence_rewarded': pd.DataFrame(completed_rewarded),
-        'completed_sequence_unrewarded': pd.DataFrame(completed_unrewarded),
-        'completed_sequence_reward_timeout': pd.DataFrame(completed_timeout),
+        'completed_sequence_rewarded': _frame(completed_rewarded),
+        'completed_sequence_unrewarded': _frame(completed_unrewarded),
+        'completed_sequence_reward_timeout': _frame(completed_timeout),
 
         # Single-reward protocol only: completed non-rewarded ("no-go") sequences. Empty otherwise.
-        'completed_sequence_false_response': pd.DataFrame(completed_false_response),
+        'completed_sequence_false_response': _frame(completed_false_response),
 
-        'completed_sequence_HR_rewarded': pd.DataFrame(completed_hr_rewarded),
-        'completed_sequence_HR_unrewarded': pd.DataFrame(completed_hr_unrewarded),
-        'completed_sequence_HR_reward_timeout': pd.DataFrame(completed_hr_timeout),
-        'completed_sequence_HR_missed_rewarded': pd.DataFrame(completed_hr_missed_rewarded),
-        'completed_sequence_HR_missed_unrewarded': pd.DataFrame(completed_hr_missed_unrewarded),
-        'completed_sequence_HR_missed_reward_timeout': pd.DataFrame(completed_hr_missed_timeout),
+        'completed_sequence_HR_rewarded': _frame(completed_hr_rewarded),
+        'completed_sequence_HR_unrewarded': _frame(completed_hr_unrewarded),
+        'completed_sequence_HR_reward_timeout': _frame(completed_hr_timeout),
+        'completed_sequence_HR_missed_rewarded': _frame(completed_hr_missed_rewarded),
+        'completed_sequence_HR_missed_unrewarded': _frame(completed_hr_missed_unrewarded),
+        'completed_sequence_HR_missed_reward_timeout': _frame(completed_hr_missed_timeout),
     }
 
     if isinstance(result['non_initiated_sequences'], pd.DataFrame) and not result['non_initiated_sequences'].empty:
@@ -1075,6 +1121,7 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
                 'HR_missed_rewarded', 'HR_missed_unrewarded', 'HR_missed_reward_timeout'):
         result[f'completed_sequences_{key}'] = result[f'completed_sequence_{key}']
 
+    result['protocol_mode'] = protocol_mode
     result['hidden_rule_location'] = hidden_rule_location
     result['hidden_rule_positions'] = list(hidden_rule_positions)
     result['hidden_rule_locations'] = list(hidden_rule_indices)

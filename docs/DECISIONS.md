@@ -1104,3 +1104,76 @@ only ever exercise the path where it does *not* fire:
 
 Verified end to end: raises through the real pipeline, **0** derivative files written for the
 broken session, and the batch loop prints the reason and carries on.
+
+---
+
+## 21. `trial_data` has one declaration, and it is mode-dependent *(Phase 7b.1, 2026-08-12)*
+
+**Intended output change: 8 columns, fixtures regenerated 2026-08-12.**
+
+`classify_trials` builds a `@dataclass(slots=True)` record per trial instead of a free-form
+dict. `slots` makes `rec.fr_laency_ms = ...` an `AttributeError` at the assignment site,
+where the dict silently invented a column of NaNs.
+
+### Three classes, because the modes are mutually exclusive
+
+`StandardTrialRecord` (43 fields), `SingleRewardTrialRecord` (55) and
+`OdourDiscriminationTrialRecord` (48); with the merged columns, 61 / 73 / 66. A session is
+exactly one mode -- odour discrimination presents a sequence of length 1, single-reward
+needs >=2 positions -- and §20 raises if both flags ever hold.
+
+> **One uniform record would have added 26 columns, 13-19 per session. Per-mode adds 8, one
+> per session for eight of the nine.** Measured over the 9 fixtures before writing any code.
+
+`SingleRewardTrialRecord` extends `StandardTrialRecord`, not the base: a single-reward
+session uses *both* scorers, so its rewarded trials write `poke_window_end`. Odour
+discrimination does not extend it -- that column belongs to the standard scorer's fixed
+response deadline, which the protocol has no equivalent of. `slots` then enforces the mode
+boundary: an odour-discrimination record physically cannot be given `poke_window_end`.
+
+The 8 added columns are all-null and irreducible -- they are *data*-determined, not
+mode-determined, so no honest mode gates them: `fallback_reason` (7 sessions; written only
+on a pending-attempt fallback), `abort_reason` (2), and six reward-poke columns on sub-056
+alone, where no odour-discrimination trial ever scored `unrewarded` while sub-061, same
+mode, carries all six.
+
+### What the record does **not** declare, and why it matters
+
+`run_id`, `is_aborted` and `global_trial_id` are `trial_data` columns assigned during
+assembly (`ASSEMBLED_COLUMNS`). Declaring them looks harmless and is not:
+
+- **`run_id` -> a phantom `run_id_original` column.** `merge._with_run_id` copies any
+  *existing* `run_id` to `run_id_original` before overwriting. Emitting `run_id` from every
+  record would give every merged session an all-null column that exists on no session today.
+- **They must also be excluded from `save_results`' conform.** `run_id`'s fallback is guarded
+  on the column being *absent*, so pre-creating it as NaN leaves it null; and
+  `global_trial_id` would be appended at the end rather than inserted at the front.
+
+### The `datetime64` -> `object` trap, which only multi-run sessions show
+
+A record declares every field, so a column no trial writes is all-`None` -- and a column of
+nothing but `None` carries no type, so pandas infers `object`. Harmless in one frame. At
+**`merge`'s concat it is not**: one run whose column is entirely empty turns the whole merged
+column `object`, and `to_csv` then writes `str(Timestamp)` (`...806000`) where `datetime64`
+wrote `...806`.
+
+Measured on `sub-040 20251124`, a three-run session: **154 cells of `await_reward_time` and
+135 of `first_supply_time`** changed representation while every value stayed the same
+instant. The three single-run sessions checked at that point were clean, which is exactly how
+it hid.
+
+`DATETIME_FIELDS` (15 fields, **measured from the reference tree's parquet dtypes**, not
+assumed) is cast in `_frame` by `_as_declared_datetime`. It is deliberately **not**
+`pd.to_datetime(..., errors="coerce")`, which would turn anything unparseable into `NaT` --
+destroying a value to fix a dtype. It converts only when provably lossless (column is
+`object`, holds nothing but Timestamps and nulls) and returns it untouched otherwise. This
+*restores* the dtype the old code got by accident, and keeps the parquet holding real
+timestamps rather than Python objects.
+
+### Evidence
+
+`regression.py` reported **only `+ added column` lines on all 9 sessions -- zero `~ changed`,
+zero `- removed`** -- and all 9 **metrics md5s identical**. A per-column md5 moves if one cell
+moves, so that is cell-complete: no value changed anywhere. Cell-level diffs on 5 sessions
+(including both the worst case and the multi-run one) independently showed 0 of 59-72 shared
+columns differing. `verbose_diff` 16,944 lines identical; `verify_scripts` green.

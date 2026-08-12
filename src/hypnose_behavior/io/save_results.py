@@ -20,6 +20,10 @@ from hypnose_behavior.utils.helpers import vprint
 # Provenance is hypnose-helpers' (restructure_2 Phase 2c), so the stamp in a saved
 # manifest and the one embedded in a saved figure cannot drift apart.
 from hypnose_helpers.provenance import provenance
+# The single declaration of what `trial_data` holds -- see `io/protocol_schema.py`.
+from hypnose_behavior.io.protocol_schema import (
+    ABORT_COLUMNS, ASSEMBLED_COLUMNS, RESPONSE_TIME_COLUMNS, trial_data_columns,
+)
 # One rule for rewarded/unrewarded/timeout, shared with trial_classification. That module is a
 # leaf importing nothing from the package, so this is not a cycle -- DECISIONS section 3.
 from hypnose_behavior.trial_classification.outcome import classify_completed_trial, TIMEOUT
@@ -143,11 +147,21 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     out_dir, info = resolve_derivatives_output_dir(root)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Which record the classifier built, and therefore which columns this session should
+    # carry. Absent only if `classification` did not come through `classify_trials`, in
+    # which case nothing is conformed and no mode is stamped -- guessing one would put a
+    # wrong schema in the manifest, which is worse than an absent key (section 2).
+    protocol_mode = classification.get("protocol_mode") if isinstance(classification, dict) else None
+
     manifest = {
         "created_at": datetime.now().isoformat(),
         # Manifest only. The regression fingerprints `trial_data` and the metrics dict
         # and never reads this file, so the stamp cannot cause a spurious RED.
         **_analysis_provenance(),
+        # Which schema this file follows, so a reader checks it against the right field
+        # set instead of guessing from the columns it happens to find. Absent on every
+        # file written before Phase 7b, which is how the loader knows to skip the check.
+        "protocol_mode": protocol_mode,
         "session": _json_safe(session_metadata or {}),
         "paths": info,
         "tables": {},
@@ -158,26 +172,12 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     saved_any = False
     saved_names: set[str] = set()
 
-    # Build comprehensive per-trial table (includes aborted + response-time extras)
-    extra_abort_cols = [
-        "last_odor_position",
-        "last_odor_name",
-        "last_odor_valve_duration_ms",
-        "last_odor_poke_time_ms",
-        "last_required_min_sampling_time_ms",
-        "abortion_type",
-        "abortion_time",
-        "fa_label",
-        "fa_time",
-        "fa_window_latency_ms",
-        "fa_port",
-        "fa_response_time_ms",
-    ]
-    extra_rt_cols = [
-        "response_time_ms",
-        "response_time_category",
-        "completed_window_latency_ms",
-    ]
+    # Build comprehensive per-trial table (includes aborted + response-time extras).
+    # The two column lists live in `io/protocol_schema.py` alongside the trial record, so
+    # there is one declaration of what `trial_data` holds rather than a copy here that can
+    # drift from the one the loader checks against.
+    extra_abort_cols = list(ABORT_COLUMNS)
+    extra_rt_cols = list(RESPONSE_TIME_COLUMNS)
 
     base_trials = classification.get("initiated_sequences") if isinstance(classification, dict) else None
     if isinstance(base_trials, pd.DataFrame) and not base_trials.empty and "trial_id" in base_trials.columns:
@@ -210,25 +210,24 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
         derived_outcomes = trial_df.apply(_derive_outcome, axis=1)
         trial_df["response_time_category"] = derived_outcomes.where(derived_outcomes.notna(), trial_df.get("response_time_category"))
 
-        # Ensure all expected columns exist
-        for col in extra_abort_cols + extra_rt_cols:
+        # Ensure every column this protocol's schema declares exists, so the table's shape
+        # is a function of the protocol rather than of which branches this session's trials
+        # happened to take. Replaces two hand-maintained lists: the abort/response-time
+        # columns above, and a single-reward block that added twelve `fr_*` columns as soon
+        # as any one of them was present.
+        #
+        # Columns are added, never reordered: the fingerprint sorts columns, but the CSV on
+        # disk is read by people, and moving `global_trial_id` off the front buys nothing.
+        #
+        # `ASSEMBLED_COLUMNS` are excluded because the three lines below own them, and
+        # creating them here as NaN would break both: `run_id`'s fallback is guarded on the
+        # column being *absent*, so it would stay null, and `global_trial_id` would be
+        # appended at the end instead of inserted at the front.
+        expected = [c for c in trial_data_columns(protocol_mode) if c not in ASSEMBLED_COLUMNS] \
+            if protocol_mode else extra_abort_cols + extra_rt_cols
+        for col in expected:
             if col not in trial_df.columns:
                 trial_df[col] = np.nan
-
-        # Single-reward protocol only: ensure the false-response columns appear together (they are
-        # produced upstream only for single-reward sessions, so nothing is added for the default
-        # protocol and legacy output is unchanged).
-        fr_cols = [
-            "sequence_rewarded", "reward_determinacy", "determinacy_position",
-            "determined_final_odor",
-            "false_response", "fr_label",
-            "fr_window_latency_ms", "fr_response_time_ms",
-            "fr_time", "fr_port", "fr_odor_identity", "fr_window_end",
-        ]
-        if any(col in trial_df.columns for col in fr_cols):
-            for col in fr_cols:
-                if col not in trial_df.columns:
-                    trial_df[col] = np.nan
 
         # Convenience flag: mark aborted trials (any abortion info present)
         trial_df["is_aborted"] = trial_df[["abortion_type", "abortion_time"]].notna().any(axis=1)
