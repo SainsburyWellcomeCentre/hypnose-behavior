@@ -25,6 +25,7 @@ from hypnose_behavior.io.loaders import (
 )
 from hypnose_behavior.io.save_results import save_session_analysis_results
 from hypnose_behavior.io.layout import rawdata
+from hypnose_behavior.io.protocol_schema import ConflictingProtocolError
 from hypnose_behavior.trial_classification.aborted_trials import (
     abortion_classification, classify_noninitiated_FA,
 )
@@ -372,6 +373,14 @@ def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verb
             roots.append(root)
             stages.append(stage)
 
+        except ConflictingProtocolError:
+            # Session-level, not run-level: every run of a session shares the task schema,
+            # so skipping to the next one can only re-raise. Propagate, so the message
+            # reaches `batch_analyze_sessions`, which names the subject and date. The
+            # generic handler below is `vprint`-gated and would swallow it outright at
+            # `verbose=False` -- the batch default -- leaving only a misleading
+            # "No runs analyzed" with no hint that the session is misconfigured.
+            raise
         except Exception as e:
             vprint(verbose, f"[analyze_session_multi_run] Skipping run index {i} due to error: {e}")
             #import traceback #--> Will print where inidvidual run failed, useful, but cluttering. Commented out for now.

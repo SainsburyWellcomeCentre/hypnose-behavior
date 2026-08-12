@@ -32,6 +32,10 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
+# The saved schema's declaration of the protocol modes. `io/protocol_schema.py` is a leaf
+# (standard library only) and both package `__init__`s are docstring-only, so this is a
+# one-way edge and not the cycle it looks like -- `docs/DECISIONS.md` section 3.
+from hypnose_behavior.io.protocol_schema import resolve_mode
 import hypnose_behavior.trial_classification.windows as windows
 from hypnose_behavior.trial_classification.hidden_rule import (
     _check_hidden_rule, _drop_final_hidden_rule_index,
@@ -763,6 +767,13 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
     if single_reward_info is None:
         single_reward_info = _get_single_reward_info(root)
     is_single_reward, rewarded_sequences, all_sequences = single_reward_info
+    # Which of the three protocol modes this run follows. The two flags come from
+    # independent sources and nothing in the code makes them exclusive, so the impossible
+    # combination raises here rather than writing a file whose schema is undefined -- see
+    # `io/protocol_schema.resolve_mode`. Called for the check alone; the mode it returns is what
+    # decides the record's column set, and is threaded to the manifest in the next step.
+    resolve_mode(is_odour_discrimination=is_odour_discrimination,
+                 is_single_reward=is_single_reward)
     # The final position of a full sequence is always the reward position, so it can
     # never be a hidden-rule position -- drop it (single-reward left untouched).
     hidden_rule_indices = _drop_final_hidden_rule_index(hidden_rule_indices, schema_settings, is_single_reward)

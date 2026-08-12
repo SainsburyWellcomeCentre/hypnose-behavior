@@ -1042,3 +1042,65 @@ provenance existed" (no key) from "written by code whose commit could not be res
 (`None`) — §2's rule about absent markers, applied to the manifest. Cached per process with
 `lru_cache`: it shells out to `git`, and the answer describes the code as *imported*, which
 cannot change while the process runs.
+
+---
+
+## 20. The protocol mode is part of the saved schema, and the impossible one raises *(Phase 7b, 2026-08-12)*
+
+`io/protocol_schema.py` owns the vocabulary: `STANDARD`, `SINGLE_REWARD`,
+`ODOUR_DISCRIMINATION`, and `resolve_mode(...)` which returns one of them.
+
+**Named `protocol_schema.py`, not `schema.py`.** "Schema" already means the *task* schema in
+this code-base (`schema_settings`, `*_SCHEMA_PATH`, `resources/device_schemas/`,
+`sequence_schema`). A module named `schema.py` meaning the *output* schema is a collision
+waiting to mislead.
+
+**A leaf — standard library only.** `trial_classification -> io.protocol_schema` and
+`io.save_results -> io.protocol_schema` both hold only because of that, exactly as with
+`frames.py` (§3). Every layer imports it; the day it imports back, they become real cycles.
+
+### Why the mode is in the schema at all
+
+A session's columns depend on which branch of `classify_trials` ran, and the three branches
+write different families. Measured over the 9 fixture sessions: one uniform record adds **26
+columns**, 13-19 per session. One record per mode adds **7**, 1 per session for eight of the
+nine. The mode is therefore part of what the file *is*, and is written to `manifest.json` so a
+reader checks against the right field set instead of guessing from the columns present.
+
+### `ConflictingProtocolError` raises, and that is the safe choice
+
+The two flags come from **independent sources** — `is_odour_discrimination` from the stage's
+protocol name, `is_single_reward` from the schema's `isSingleRewardProtocol`
+(`trial_classification/params.py`). Nothing in the code makes them exclusive; the experiment
+does, by construction: odour discrimination presents a sequence of length 1, single-reward
+needs ≥2 positions for a sequence to be rewarded-or-not at its end.
+
+> Raising beats warning **because `batch_analyze_sessions` already catches per session**. The
+> broken session names itself, writes no derivative, and the batch completes. A warning does
+> the opposite: it writes a `trial_data` whose schema is undefined — today's control flow hits
+> the odour-discrimination branch first and `continue`s past the false-response scoring, so
+> the four determinacy columns would be **silently absent from a file that still looked
+> complete** — and buries the notice in thousands of lines of batch output.
+
+This is **not** Phase 9. Phase 9 validates data *values*; this is a contradiction between two
+schema-derived flags that leaves the output schema undecidable.
+
+### The probe found two defects the gates could not
+
+Per §17 ("a checker that has never been seen to fail is not evidence"), the guard was forced
+to fire before being trusted. Both failures were invisible to every gate, because the gates
+only ever exercise the path where it does *not* fire:
+
+1. **A false pass.** Patching `classify_trials._get_single_reward_info` had no effect: `run.py`
+   resolves it itself and passes `single_reward_info=` in, so `classify_trials` only calls its
+   own copy when the argument is `None`. The flag stayed `False`, nothing conflicted, and the
+   probe reported success.
+2. **The message was swallowed where it mattered.** `run.py`'s per-run handler is
+   `vprint`-gated, and `batch_analyze_sessions` defaults to `verbose=False`, so a structurally
+   broken session surfaced only as `No runs analyzed for subject=... date=...`.
+   `ConflictingProtocolError` is now re-raised ahead of that handler: the condition is
+   session-level, every run shares the task schema, so skipping to the next run can only
+   re-raise.
+
+Verified end to end: raises through the real pipeline, **0** derivative files written for the
+broken session, and the batch loop prints the reason and carries on.
