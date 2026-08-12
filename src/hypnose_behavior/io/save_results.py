@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 import zoneinfo
+from functools import lru_cache
 from pathlib import Path
 from datetime import datetime, timezone, date
 
@@ -16,6 +17,9 @@ import pandas as pd
 
 from hypnose_behavior.io.paths import get_rawdata_root, get_derivatives_root
 from hypnose_behavior.utils.helpers import vprint
+# Provenance is hypnose-helpers' (restructure_2 Phase 2c), so the stamp in a saved
+# manifest and the one embedded in a saved figure cannot drift apart.
+from hypnose_helpers.provenance import provenance
 # One rule for rewarded/unrewarded/timeout, shared with trial_classification. That module is a
 # leaf importing nothing from the package, so this is not a cycle -- DECISIONS section 3.
 from hypnose_behavior.trial_classification.outcome import classify_completed_trial, TIMEOUT
@@ -63,6 +67,41 @@ def _derive_outcome(row):
     return "timeout_delayed" if outcome == TIMEOUT else outcome
 
 
+@lru_cache(maxsize=1)
+def _analysis_provenance() -> dict:
+    """``{"commit": ..., "version": ...}`` for the code writing these results.
+
+    **What it is for: auditing.** "Which sessions were produced before commit X, and
+    should I re-run them?" It catches the case a schema check cannot -- Phase 6's
+    close-out moved a *value* on one trial while adding and removing no column at all,
+    so comparing field sets would have been silent on it.
+
+    **This does not re-open ``DECISIONS.md`` section 5.** That rejected provenance as a
+    *metrics-cache key*, because a commit stamp invalidates on every unrelated commit --
+    a docstring fix would force re-analysing the whole server. Stamping for audit is a
+    different job; plotters still compute through the registry.
+
+    Both arguments are passed explicitly rather than letting `provenance()` inspect the
+    calling frame, and that is deliberate:
+
+    * ``anchor=__file__`` names *this* repo. `hypnose-helpers` is installed as a
+      library, so an anchor resolved there would stamp every repo with the helpers
+      commit -- plausible-looking and wrong.
+    * ``call={"module": __name__}`` fixes the distribution whose version is reported.
+      Captured from the frame instead, a call from a notebook resolves to ``__main__``
+      and `package_version` returns ``None``. It also sidesteps the section 9 wrapper
+      hazard entirely, since nothing is being captured.
+
+    Cached: it shells out to ``git``, and the answer describes the code as *imported*,
+    which cannot change while the process runs. Both keys are always present, so a
+    reader can tell "written before provenance existed" (no key) from "written by code
+    whose commit could not be resolved" (``None``) -- the section 2 rule about absent
+    markers, applied to the manifest.
+    """
+    prov = provenance(anchor=__file__, call={"module": __name__})
+    return {"commit": prov.get("commit"), "version": prov.get("version")}
+
+
 def _find_parent_named(start: Path, prefix: str) -> Path | None:
     for p in [Path(start)] + list(Path(start).parents):
         if p.name.startswith(prefix):
@@ -106,6 +145,9 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
 
     manifest = {
         "created_at": datetime.now().isoformat(),
+        # Manifest only. The regression fingerprints `trial_data` and the metrics dict
+        # and never reads this file, so the stamp cannot cause a spurious RED.
+        **_analysis_provenance(),
         "session": _json_safe(session_metadata or {}),
         "paths": info,
         "tables": {},

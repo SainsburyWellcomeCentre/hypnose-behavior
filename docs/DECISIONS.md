@@ -995,3 +995,50 @@ cell-level diff, invisible to an md5.
 `presentations` while `last_odor_position` is a **1-based position**, and the two were being
 returned interchangeably. A latent off-by-one that never fired, because `last_odor_position` is
 a column on every session this pipeline writes.
+
+---
+
+## 19. The manifest provenance stamp is for audit, and lives in the manifest only *(Phase 7a, 2026-08-12)*
+
+`manifest.json` carries `commit` and `version` alongside `created_at`, from
+`hypnose_helpers.provenance.provenance()` — the same implementation that stamps saved
+figures (Phase 2c), so the two cannot drift.
+
+**What it is for: auditing.** "Which sessions were produced before commit X, and should I
+re-run them?" It catches what a schema check cannot — Phase 6's close-out moved a *value* on
+one trial while adding and removing no column at all, so comparing field sets would have been
+silent on it. The two are complementary: **the stamp catches changed values, §20's field set
+catches changed schema.**
+
+> **This does not re-open §5.** §5 rejected provenance as a *metrics-cache key*, because a
+> commit stamp invalidates on every unrelated commit — a docstring fix would force
+> re-analysing the whole server. Same word, different job. Stamping to decide whether to
+> **trust a cached metric** stays rejected, and plotters keep computing through the registry.
+
+**Manifest only, and that is load-bearing.** The regression fingerprints `trial_data` and the
+metrics dict; it never reads the manifest, so a per-run commit stamp cannot cause a spurious
+RED. Anything that enters the fingerprint and changes per commit would make the golden master
+useless. Verified: all five gates GREEN with no regeneration.
+
+### Both `provenance()` arguments are passed explicitly, and neither is optional here
+
+`provenance(anchor=__file__, call={"module": __name__})`, rather than letting it inspect the
+calling frame. Two distinct silent-resolution failures, each of which produces a
+plausible-looking wrong answer rather than an error:
+
+- **`anchor`** — `hypnose-helpers` is installed as a library, so an anchor resolved there
+  stamps every repo with the *helpers* commit. The same failure `io/paths` hit in Phase 2a and
+  `io/layout` in 2b.
+- **`call`** — captured from the frame, a call from a notebook resolves to `__main__`, and
+  `package_version` returns `None`. Passing `__name__` also sidesteps the §9 wrapper hazard
+  entirely, because nothing is being captured.
+
+`package_version` maps the import package to the distribution via `packages_distributions()`;
+the naive underscore-to-hyphen guess returns `None` here, since `hypnose_behavior` ships from
+`hypnose-behavior-analysis`. Measured: `{'commit': 'b3f2497-dirty', 'version': '1.0.0'}`.
+
+**Both keys are always written, even as `null`.** A reader can then tell "written before
+provenance existed" (no key) from "written by code whose commit could not be resolved"
+(`None`) — §2's rule about absent markers, applied to the manifest. Cached per process with
+`lru_cache`: it shells out to `git`, and the answer describes the code as *imported*, which
+cannot change while the process runs.
