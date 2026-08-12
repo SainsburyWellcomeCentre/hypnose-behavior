@@ -708,7 +708,12 @@ right is a scientific decision, not a refactoring one** — bring the numbers an
 
 ---
 
-## Phase 7 — Schema, save formats & manifest provenance
+## Phase 7 — Schema, save formats & provenance
+
+**Revised 2026-08-12, with the phase's owner.** Phase 7 has *two* goals and they are the same
+work seen from two sides: make the saved data **easy to query** (typed columns, tidy tables, no
+JSON smuggled into cells) and **easy to trust** (know what produced a file, and be told when it
+is too old to use). The declaration that gives you the first is what makes the second checkable.
 
 ### 7a. Manifest provenance  *(quick win, ~½ day)*
 
@@ -722,95 +727,153 @@ underscore-to-hyphen guess return `None`.
 Keep these **in the manifest only** — the regression already ignores it, so they never enter
 the fingerprint and never cause spurious RED.
 
+**What it is for: auditing.** "Which sessions were produced before commit X, and should I
+re-run them?" It catches the case a schema check cannot — Phase 6's close-out moved a *value* on
+one trial while adding and removing no column at all, so a field-set comparison would have been
+silent on it and a commit stamp would not.
+
+> **This does not re-open `DECISIONS.md` §5.** §5 rejected provenance as a *metrics-cache key*,
+> because a commit stamp invalidates on every unrelated commit — a docstring fix would force
+> re-analysing the whole server. Same word, different job: stamping for **audit** is this
+> phase's job; stamping to decide whether to **trust a cached metric** stays rejected, and
+> plotters keep computing through the registry.
+
 **Risk:** low. **Progress:** ~40%. **Done:** manifest carries commit + version + date;
 regression unaffected.
 
 ### 7b. Schema & save formats
 
-`trial_data` already saves parquet + CSV. Decisions:
+**Do these in order** — each step is the previous one's enabling piece.
 
-- Standardise on **parquet for tables, JSON for metadata**. **No pickle** for saved outputs
-  (version-fragile — the somnotate work is a live example of pickle/version coupling biting).
-  Keep a CSV of `trial_data` only for human-readability; if dropped, update `qc/_common.py` to
-  read parquet → canonical form.
-- **Typed `@dataclass TrialRecord`** for the flat trial table: replace the free-form ~60-key
-  dict (with its singular/plural aliases) with explicit typed fields, validation in
-  `__post_init__`, and `.to_row()` for the DataFrame.
+#### 1. Typed `@dataclass TrialRecord` — the declaration everything else hangs off
 
-  > **Split the dataclass from the validation.** The conversion (typed fields, `.to_row()`,
-  > killing the aliases) is a pure restructure and `regression.py` GREEN is a hard invariant on
-  > it. Raising checks in `__post_init__` are new *failure behaviour* and belong with Phase 9:
-  > a green golden master proves none of those branches fire, so it cannot tell "validation is
-  > correct" from "validation is dead code". Landing both together repeats the mistake 6a/6b
-  > were split to avoid — a RED that cannot be attributed.
+Replace the free-form per-trial dict with explicit typed fields and `.to_row()` for the
+DataFrame. Measured 2026-08-12: `save_results` names **27** columns while `trial_data` has
+**60** — the other 33 exist only because some line assigned them, so *nothing currently declares
+what a trial is*.
 
-  > **Then make the dataclass the schema check the loader has been missing** *(agreed
-  > 2026-08-12)*. Once `TrialRecord` exists it is the single declaration of what `trial_data`
-  > should contain, so `io/load_results.py` can say:
-  >
-  > ```python
-  > missing = set(TrialRecord.__dataclass_fields__) - set(trial_data.columns)
-  > if missing:
-  >     warn(f"{session}: saved before {missing} existed -- re-run trial classification")
-  > ```
-  >
-  > **Why this and not 7a's version stamp:** a git SHA says *something* changed between the
-  > saved file and now, not whether *this file* is affected — a one-line plotter fix and a
-  > trial-classification restructure look identical to it, and only one needs a re-run.
-  > Comparing field sets answers the question actually being asked, and costs no maintenance
-  > because the dataclass is already the source of truth.
-  >
-  > **The concrete case this exists for:** the Phase 6 latency rename (`fa_latency_ms` →
-  > `fa_window_latency_ms` and the three others). Every derivative saved before it carries the
-  > old names, so `FA_avg_response_times` and `sing_rew`'s `FR_latency` find no column, hit
-  > their `if col not in trials.columns` guard and return **empty — a blank figure with no
-  > error**. Measured on the archive: `plot_regression`'s `FR_latency` lost all 35 lines and
-  > `plot_response_times_completed_vs_fa` all 12. Silent staleness is the failure mode; this
-  > check is what makes it speak. Deliberately **not** patched with a legacy-name map in
-  > Phase 6 — that would have been a special case to unpick here.
-  >
-  > **Re-analyse the server's derivatives at the end of 7b, not before** *(agreed 2026-08-12)*.
-  > 7b is the last phase that changes the saved schema, so re-running earlier means running
-  > twice. Note the two gates differ here and only one is affected: `regression.py` recomputes
-  > from **rawdata** into a temp dir and never reads the archive, so it is unaffected;
-  > `plot_regression.py` reads the **saved derivatives**, so it is.
-  >
-  > **Until that re-run, two `plot_regression` cases are vacuously green** — `FR_latency`
-  > (`sub-057 20260709`) and `plot_response_times_completed_vs_fa` (`sub-040 20251124`,
-  > `20251229`). Both trees look for the renamed columns, neither finds them in the stale
-  > files, and both draw nothing, so the diff is empty *because both sides are broken*. A
-  > two-tree diff cannot see that; do not read those two greens as coverage, and re-run those
-  > three sessions first. **Phase 10 depends on `plot_regression`, so this must be cleared
-  > before it starts.**
-- **Flatten the JSON-blob columns** (`position_valve_times`, `position_poke_times`,
-  `presentations`) into a tidy long-format side-table `position_data` — one row per
-  `trial_id × position` with odor / valve_start / valve_end / poke_time_ms. `frames.build_position_data`
-  already derives exactly this shape at load time; 7b is where it becomes a written artifact,
-  and where the loader can stop expanding blobs. **Carry its provenance flags across —
-  `DECISIONS.md` §2.**
-- **Decide where the per-trial metric tables live.** Nine registered metrics return per-trial or
-  per-poke tables rather than session values — the latencies, `inter_trial_interval`,
-  `trial_poke_span` / `_total`, `hr_abort_poke_gap`, and `poke_durations` (739 rows for one
-  session). They are deliberately absent from `metrics_*.json`, which is a summary; they are the
-  same shape as the `position_data` side-table and should ride with it if they are to be saved
-  at all. See `DECISIONS.md` §5, item 3.
-- **Write the 0 ms positions and add `poke_source`.** Two data-writing bugs make the position
-  record incomplete and ambiguous; both surface as per-position metrics that cannot be defined
-  consistently. **The full specification, the measurements, and the one-line `sequence_depth`
-  change it unblocks are in `DECISIONS.md` §10.** The writing happens in `classify_trials`, so
-  it lands naturally with Phase 6's trial-loop cleanup; `position_data` is where `poke_source`
-  becomes a column. Alters `trial_data` ⇒ deliberate fixture regeneration.
+Use **`@dataclass(slots=True)`**, so assigning a field that is not declared raises at the
+assignment site instead of silently inventing a column of NaNs (`trial_dict['fr_laency_ms']`
+is valid Python today).
 
-The dataclass and the side-table are complementary, not alternatives: the dataclass governs the
-flat per-trial table, the side-table replaces the per-position blobs that don't belong in it.
-Queryable, type-safe, smaller/faster parquet, kills the alias hacks.
+> **Pure restructure: `regression.py` GREEN is a hard invariant.** Split the *conversion* from
+> any **raising validation** in `__post_init__` — that is new failure behaviour and belongs with
+> **Phase 9**. A green golden master proves none of those branches fire, so it cannot tell
+> "validation is correct" from "validation is dead code". Landing both together repeats the
+> mistake 6a/6b were split to avoid: a RED that cannot be attributed.
 
-**Intended schema change → regenerate fixtures deliberately.** Phase it: add the side-table
-additively, keep blobs during transition, drop blobs last. Couples tightly with Phase 6.
+**One intended output change to expect:** a uniform record means every session carries the
+`fr_*` family as NaN where the protocol does not produce them. Today they are written only for
+single-reward sessions — `fr_window_latency_ms` is in `sub-057`'s fixture and in none of the
+other eight. All-NaN columns are ignored downstream, so this is a column-set change only.
 
-**Risk:** med (touches downstream readers). **Done:** no pickle outputs; `position_data`
-side-table exists; blobs removed; `poke_source` written; fixtures regenerated with only the
-intended diff.
+#### 2. Make the dataclass the loader's schema check
+
+Once `TrialRecord` exists it *is* the single declaration of what `trial_data` should contain, so
+`io/load_results.py` can say:
+
+```python
+missing = set(TrialRecord.__dataclass_fields__) - set(trial_data.columns)
+if missing:
+    warn(f"{session}: saved before {missing} existed -- re-run trial classification")
+```
+
+**Why this rather than 7a's version stamp:** a git SHA says *something* changed between the file
+and now, not whether *this file* is affected — a one-line plotter fix and a trial-classification
+restructure look identical to it. Comparing field sets answers the question actually asked, and
+costs no maintenance because the dataclass is already the source of truth. The two are
+complementary: **the stamp catches changed values, the field set catches changed schema.**
+
+**The concrete case this exists for** is Phase 6's latency rename. Every derivative saved before
+it carries `fa_latency_ms` etc., so `FA_avg_response_times` and `sing_rew`'s `FR_latency` find no
+column, hit their `if col not in trials.columns` guard and return **empty — a blank figure with
+no error**. Measured on the archive: `plot_regression`'s `FR_latency` lost all 35 lines and
+`plot_response_times_completed_vs_fa` all 12. Silent staleness is the failure mode; this check is
+what makes it speak. Deliberately **not** patched with a legacy-name map in Phase 6 — that would
+have been a special case to unpick here.
+
+#### 3. CSV becomes an option, defaulting off
+
+Keep a human-readable CSV of `trial_data`, but behind `save_csv=` — `True` when investigating,
+**`False` by default** once the parquet path is trusted.
+
+**Audit the readers before flipping the default.** `load_results_dir` already prefers parquet
+and falls back, but `qc/_common`'s canonical form and ad-hoc diff scripts read
+`trial_data.csv` directly. **The QC harness must set `save_csv=True` explicitly** rather than
+relying on the default, so a later default change cannot quietly break the gate.
+
+#### 4. `position_data.parquet` — the measured per-position table
+
+Flatten `position_valve_times` / `position_poke_times` / `presentations` into one tidy table,
+**one row per `trial × position`**, with `poke_source` and §2's provenance flags
+(`in_poke_times` / `in_presentations` / `in_valve_times`) as real columns.
+
+Today these are **JSON strings inside a cell** — a table smuggled into a column, equally awkward
+in CSV and parquet. Flattening removes the parse at load (`build_position_data` costs ~21.9 ms
+per session, every time), gives typed filterable columns, and shrinks the parquet.
+
+`frames.build_position_data` already derives exactly this shape, so this promotes an existing
+derivation to a written artifact rather than inventing a format. **Carry its provenance flags
+across — `DECISIONS.md` §2.** Parquet's native nested types were considered and rejected: you
+would explode a list-of-structs to a long frame for nearly every query anyway, and it cannot
+round-trip to the human-readable CSV.
+
+**Phase it:** add the side-table additively, keep the blobs during transition, drop the blobs
+last. `trial_data` then holds **only one row per trial, scalar columns**.
+
+#### 5. Per-trial metric tables — separate files, keyed by grain
+
+Nine registered metrics return tables rather than session values and are deliberately absent
+from `metrics_*.json`. **They do not go in `position_data`** — that table is what was
+*measured*, and these are *derived*; mixing them makes it impossible to tell one from the other.
+They also do not share one grain, so name the files by grain:
+
+| file | grain | metrics |
+|---|---|---|
+| `metrics_by_trial.parquet` | `global_trial_id` | `inter_trial_interval`, `trial_poke_span`, `trial_poke_total`, `hr_abort_poke_gap`, `valve_to_reward_latency`, `reward_delivery_latency`, `fa_latency_from_pokeout` |
+| `metrics_by_poke.parquet` | trial + poke index | `poke_durations` (739 rows for one session) |
+
+**Not everything unreported is savable**, and that is not a gap to close:
+
+- **by-odor / by-position aggregates** (`poke_duration_by_odor`, `fa_rate_by_odor`,
+  `presentation_counts_by_odor`, …) are session-level summaries — they belong in the JSON.
+- **figure-parameterised metrics** cannot be saved at all: three take a `window` and two take an
+  `fa_types` filter, which are properties of the **figure**, not of the session (§5). This is
+  why "save everything and only load" is unreachable.
+
+**Session-level metrics stay JSON.** They are ~25 scalars plus numerator/denominator
+contributions — metadata-shaped, and parquet buys nothing for a flat dict.
+
+> **Saved metrics are an export and a record, never an input.** `DECISIONS.md` §5 settled that
+> plotters compute through the registry, and it caught a real defect: `decision_accuracy`,
+> `avg_response_time` and `FA_avg_response_times` were each obtainable *both* ways, so two
+> figures could show one quantity and disagree. Measured, the cache is worth **25 ms** against a
+> mount walk costing **seconds** (14.6 s for a cold `find_session`) — and flattening the blobs
+> makes computing cheaper still. **Do not "optimise" a plotter by reading these back.**
+
+#### 6. Re-analyse the server's derivatives — at the **end** of 7b
+
+7b is the last phase that changes the saved schema, so re-running earlier means running twice.
+
+The two gates differ here and only one is affected: **`regression.py` recomputes from rawdata
+into a temp dir and never reads the archive**, so it is unaffected; **`plot_regression.py` reads
+the saved derivatives**, so it is.
+
+> **Until the re-run, two `plot_regression` cases are *vacuously* green** — `FR_latency`
+> (`sub-057 20260709`) and `plot_response_times_completed_vs_fa` (`sub-040 20251124`,
+> `20251229`). Both trees look for the renamed columns, neither finds them, both draw nothing,
+> so the diff is empty **because both sides are broken**. A two-tree diff cannot see that. Do
+> not read those greens as coverage. **Phase 10 depends on `plot_regression`, so this must be
+> cleared before it starts.**
+
+**Standardise on parquet for tables, JSON for metadata. No pickle** for saved outputs
+(version-fragile — the somnotate work is a live example of pickle/version coupling biting).
+
+**Risk:** med (touches downstream readers). **Intended schema change ⇒ regenerate fixtures
+deliberately, with the +/−/~ diff confirming only the intended fields moved.**
+**Done:** no pickle outputs; `TrialRecord` is the schema and the loader checks against it;
+`save_csv` optional; `position_data` and the two metric tables exist; blobs removed; manifest
+carries provenance; the server's derivatives re-analysed.
 
 ---
 
