@@ -29,11 +29,15 @@ the package this becomes a real cycle.
 """
 
 import json
+import warnings
 from pathlib import Path
 
 import pandas as pd
 
 from hypnose_behavior.io.layout import derivatives
+from hypnose_behavior.io.protocol_schema import (
+    mode_independent_columns, trial_data_columns,
+)
 from hypnose_behavior.metric_analysis.frames import build_position_data
 
 __all__ = ["SessionResults", "load_results_dir", "load_session_results"]
@@ -97,6 +101,77 @@ class SessionResults(dict):
         return SessionResults(dict.items(self))
 
 
+def _session_label(results_dir, manifest) -> str:
+    paths = manifest.get("paths") if isinstance(manifest, dict) else None
+    if isinstance(paths, dict) and paths.get("sub_folder") and paths.get("ses_folder"):
+        return f"{paths['sub_folder']} {paths['ses_folder']}"
+    return str(results_dir)
+
+
+def _warn_if_stale(results_dir, trial_df, manifest) -> None:
+    """Warn when a saved `trial_data` is missing columns the current schema declares.
+
+    **Why a field set rather than 7a's commit stamp.** A git SHA says *something* changed
+    between the file and now, not whether *this file* is affected -- a one-line plotter fix
+    and a trial-classification restructure look identical to it. Comparing field sets answers
+    the question actually asked, and costs no maintenance because the record is already the
+    source of truth. The two are complementary: the stamp catches changed *values*, this
+    catches a changed *schema*.
+
+    **The case it exists for is silent today.** Every derivative saved before Phase 6's
+    latency rename carries `fa_latency_ms` and friends, so `FA_avg_response_times` and
+    `sing_rew`'s `FR_latency` find no column, hit their `if col not in trials.columns` guard
+    and return empty -- a blank figure with no error. Measured on the archive:
+    `plot_regression`'s `FR_latency` lost all 35 lines and
+    `plot_response_times_completed_vs_fa` all 12. This is what makes that speak.
+
+    **An unknown mode is checked, not skipped.** Files written before 7b carry no
+    `protocol_mode`, and guessing one from the columns present would be circular. But the
+    base record's fields are common to all three modes, and the merged and assembled columns
+    do not depend on the mode at all, so `mode_independent_columns()` can be compared with no
+    risk of a false alarm. That is not a weaker check where it counts: the three renamed
+    latency columns are merged ones, so an untagged `sub-040 20251124` reports all three,
+    where comparing the record's own fields alone would report only `fallback_reason`.
+
+    Emitted through `warnings`, so it lands on stderr and cannot disturb the stdout that
+    `verbose_diff.py` and `plot_regression.py` compare.
+    """
+    if trial_df is None or getattr(trial_df, "empty", True):
+        return
+
+    mode = manifest.get("protocol_mode") if isinstance(manifest, dict) else None
+    try:
+        expected = trial_data_columns(mode) if mode else mode_independent_columns()
+    except ValueError:
+        # An unrecognised mode is a file this code cannot reason about; say so rather than
+        # fall back to a check whose result would be meaningless.
+        warnings.warn(f"{_session_label(results_dir, manifest)}: manifest records an unknown "
+                      f"protocol_mode {mode!r}; schema not checked.", RuntimeWarning, stacklevel=3)
+        return
+
+    missing = [c for c in expected if c not in trial_df.columns]
+    label = _session_label(results_dir, manifest)
+
+    if mode:
+        if missing:
+            warnings.warn(
+                f"{label}: saved before {', '.join(missing)} existed -- re-run trial "
+                f"classification. Metrics and figures reading those columns will be empty.",
+                RuntimeWarning, stacklevel=3)
+        return
+
+    # No mode recorded: the file predates Phase 7b, so it is stale by construction -- the
+    # schema stamp is only one of the things it lacks. Warn either way, and name the columns
+    # when there are any, because those are the ones already breaking figures.
+    detail = (f" It is missing {', '.join(missing)}, so metrics and figures reading those "
+              f"columns will be empty.") if missing else ""
+    warnings.warn(
+        f"{label}: saved before the analysis recorded its protocol schema, so it cannot be "
+        f"fully checked and may be out of date -- consider re-running trial classification."
+        f"{detail}",
+        RuntimeWarning, stacklevel=3)
+
+
 def load_session_results(subjid, date):
     """
     Load saved analysis results for a given subject and date.
@@ -144,6 +219,7 @@ def load_results_dir(results_dir):
     if trial_df.empty and trial_csv.exists():
         trial_df = pd.read_csv(trial_csv)
     results["trial_data"] = trial_df
+    _warn_if_stale(results_dir, trial_df, manifest)
 
     # Long per-position frame, derived here rather than written by the classifier,
     # so metrics never parse a JSON blob and legacy sessions need no

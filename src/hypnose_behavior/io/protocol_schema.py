@@ -43,6 +43,7 @@ __all__ = [
     "RESPONSE_TIME_COLUMNS",
     "ASSEMBLED_COLUMNS",
     "trial_data_columns",
+    "mode_independent_columns",
 ]
 
 
@@ -325,6 +326,24 @@ RESPONSE_TIME_COLUMNS = (
 # Assigned during assembly rather than by any trial: `run_id` by `merge._with_run_id`,
 # the other two by `save_results`.
 ASSEMBLED_COLUMNS = ("run_id", "is_aborted", "global_trial_id")
+
+
+def mode_independent_columns() -> tuple:
+    """Columns a `trial_data` carries whatever protocol wrote it.
+
+    The base record's fields are common to all three modes by construction, and the merged
+    and assembled columns do not depend on the mode at all. So this is the largest set that
+    can be checked against a file whose mode is **unknown** -- every file written before
+    Phase 7b -- with no risk of a false alarm from guessing wrong.
+
+    It is not a lesser check for the case that matters. `fa_window_latency_ms`,
+    `fa_response_time_ms` and `completed_window_latency_ms` are merged columns, hence
+    mode-independent, and they are exactly the ones Phase 6's rename moved: measured on the
+    server's `sub-040 20251124`, this reports all three, while comparing against the record's
+    own fields alone reports only `fallback_reason` -- a column nothing reads.
+    """
+    return (tuple(f.name for f in fields(_TrialRecordBase))
+            + ABORT_COLUMNS + RESPONSE_TIME_COLUMNS + ASSEMBLED_COLUMNS)
 
 
 def trial_data_columns(mode: str) -> tuple:

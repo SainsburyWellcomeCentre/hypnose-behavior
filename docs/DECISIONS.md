@@ -1177,3 +1177,61 @@ zero `- removed`** -- and all 9 **metrics md5s identical**. A per-column md5 mov
 moves, so that is cell-complete: no value changed anywhere. Cell-level diffs on 5 sessions
 (including both the worst case and the multi-run one) independently showed 0 of 59-72 shared
 columns differing. `verbose_diff` 16,944 lines identical; `verify_scripts` green.
+
+---
+
+## 22. The loader checks a saved file against the schema, and says so when it cannot *(Phase 7b.2, 2026-08-12)*
+
+`load_results_dir` compares a saved `trial_data`'s columns against the current declaration and
+warns on anything missing. **The stamp catches changed values (§19); this catches a changed
+schema.** A git SHA says *something* changed between the file and now, not whether *this file*
+is affected -- a one-line plotter fix and a trial-classification restructure look identical to
+it.
+
+**The case it exists for is silent today.** Every derivative saved before Phase 6's latency
+rename carries the old names, so `FA_avg_response_times` and `sing_rew`'s `FR_latency` find no
+column, hit their `if col not in trials.columns` guard, and return empty -- a blank figure
+with no error.
+
+### An unknown mode is checked, not skipped
+
+Files written before 7b carry no `protocol_mode`, and inferring one from the columns present
+would be circular. But `_TrialRecordBase`'s fields are common to all three modes, and the
+merged and assembled columns do not depend on mode at all, so `mode_independent_columns()`
+(60 columns, verified a strict subset of all three declarations) can be compared with no risk
+of a false alarm.
+
+> **That is not the weaker check where it counts.** The renamed columns are *merged* ones,
+> hence mode-independent. Measured on the server's `sub-040 20251124`: this reports
+> `fa_window_latency_ms`, `fa_response_time_ms` and `completed_window_latency_ms`, while
+> comparing against the record's own fields alone -- the form the plan originally
+> sketched -- reports only `fallback_reason`, a column nothing reads. A check that looks
+> like it ran and found something trivial is worse than none.
+
+Emitted via `warnings`, not `print`, so it lands on stderr and cannot disturb the stdout that
+`verbose_diff.py` and `plot_regression.py` compare.
+
+**Proved on all four paths, not assumed (§17):** real pre-7b server files warn and name the
+three columns; a session written by the current code records `protocol_mode` and warns *not at
+all*; dropping two columns from a *tagged* file names exactly those two; an unrecognised mode
+reports that the schema was not checked.
+
+### Trap: `plot_regression`'s banner is not its result -- count the cases
+
+A dropped mount makes `plot_regression` print **`GREEN: 35 plotters draw identically`** off a
+run that only attempted **31**. The sessions are not found, the cases are skipped, both trees
+draw nothing, and the diff is empty because both sides are broken -- §18's "a two-tree diff
+cannot see both sides being equally broken", in the gate §17 documented only for
+`verbose_diff`.
+
+> **Read the case count, the way `verbose_diff` needs its line count read.** A full run lists
+> **35**. The four that vanish first are the movement plotters
+> (`plot_epoch_speeds_by_condition`, `plot_tortuosity_lines_overlay`,
+> `plot_traces_with_speed_threshold`, `plot_trial_traces_by_mode`), because they need tracking
+> data. Caught here only by comparing against an earlier run's listing.
+
+Corollary for `regression.py`: a mount failure shows as `[ERROR] ... No experiment runs found`,
+which is counted in the same total as a real `[RED]` mismatch. **`REGRESSION RED: 9
+mismatch(es)` with no `[RED]` lines above it is a mount, not a regression.** Never filter gate
+output -- grepping for `RED` hides `[ERROR]`, and grepping for the summary hides the
+`+/-/~` lines that say what actually moved.
