@@ -143,7 +143,16 @@ def resolve_derivatives_output_dir(root) -> tuple[Path, dict]:
         "ses_folder": ses_dir.name,
     }
 
-def save_session_analysis_results(classification: dict, root, session_metadata: dict | None = None, data=None, events=None, verbose: bool = True) -> Path:
+def save_session_analysis_results(classification: dict, root, session_metadata: dict | None = None, data=None, events=None, verbose: bool = True, save_csv: bool = False) -> Path:
+    """Write a session's analysis results to the derivatives tree.
+
+    ``save_csv`` adds a human-readable CSV of every table alongside the parquet. It is
+    **off by default**: parquet is the format that round-trips dtypes and blobs, and a
+    second copy of every table is worth writing only when someone is going to read it by
+    eye. Anything that needs the CSV must ask for it explicitly rather than rely on the
+    default -- the QC harness does, so a later change to the default cannot quietly break
+    the gate.
+    """
     out_dir, info = resolve_derivatives_output_dir(root)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -287,7 +296,19 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     else:
         classification["trial_data"] = pd.DataFrame()
 
-    def _save_df(name: str, df, *, save_parquet: bool = False) -> bool:
+    def _save_df(name: str, df) -> bool:
+        """Write one table: parquet always, CSV only when asked for.
+
+        **Parquet is the format; CSV is a convenience.** It is written for every table, not
+        just `trial_data`, because `save_csv=False` would otherwise make a table unreadable
+        rather than merely unreadable-by-eye -- `loaders._load_trial_views` could load the
+        three `non_initiated_*` tables from CSV *only*, and would have returned an empty
+        frame with no error.
+
+        The `.schema.json` sidecar goes with the CSV, not the parquet: it records which
+        object columns were JSON-encoded to survive a flat text file, which parquet does not
+        need because it stores them as real values.
+        """
         if not isinstance(df, pd.DataFrame) or df.empty:
             return False
         if name in saved_names:
@@ -297,31 +318,27 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
         f_parquet = out_dir / f"{name}.parquet"
         try:
             df_norm, json_cols = _normalize_df_for_io(df)
-            df_norm.to_csv(f_csv, index=False)
-            with open(f_schema, "w", encoding="utf-8") as sf:
-                json.dump({"jsonified_columns": json_cols}, sf, indent=2)
-            manifest["tables"][name] = f_csv.name
-            if save_parquet:
-                try:
-                    df_norm.to_parquet(f_parquet, index=False)
-                    manifest.setdefault("tables_parquet", {})[name] = f_parquet.name
-                except Exception as e:
-                    print(f"[save] WARNING: failed writing parquet for {name}: {e}")
+            try:
+                df_norm.to_parquet(f_parquet, index=False)
+                manifest.setdefault("tables_parquet", {})[name] = f_parquet.name
+            except Exception as e:
+                print(f"[save] WARNING: failed writing parquet for {name}: {e}")
+            if save_csv:
+                df_norm.to_csv(f_csv, index=False)
+                with open(f_schema, "w", encoding="utf-8") as sf:
+                    json.dump({"jsonified_columns": json_cols}, sf, indent=2)
+                manifest["tables"][name] = f_csv.name
             saved_names.add(name)
             return True
         except Exception as e:
             vprint(verbose, f"[save] WARNING: failed writing {name}: {e}")
             return False
 
-    # Save only the streamlined set: trial_data (csv+parquet) plus non-initiated tables
-    for k, save_parquet in [
-        ("trial_data", True),
-        ("non_initiated_sequences", False),
-        ("non_initiated_odor1_attempts", False),
-        ("non_initiated_FA", False),
-    ]:
+    # Save only the streamlined set: trial_data plus the non-initiated tables.
+    for k in ("trial_data", "non_initiated_sequences",
+              "non_initiated_odor1_attempts", "non_initiated_FA"):
         df = classification.get(k) if isinstance(classification, dict) else None
-        if _save_df(k, df, save_parquet=save_parquet):
+        if _save_df(k, df):
             saved_any = True
 
     # 3) Extract run start and end times

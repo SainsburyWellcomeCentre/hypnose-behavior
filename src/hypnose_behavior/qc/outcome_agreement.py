@@ -118,7 +118,8 @@ def measure_session(subjid, date) -> pd.DataFrame:
         _common._redirect_derivatives(Path(tmp))
         with contextlib.redirect_stdout(io.StringIO()):
             payload = analyze_session_multi_run_by_id_date(
-                str(subjid), str(date), verbose=False, save=True, print_summary=False)
+                str(subjid), str(date), verbose=False, save=True, print_summary=False,
+                save_csv=True)   # reads trial_data.csv below; ask for it explicitly
 
         matches = list(Path(tmp).glob(f"**/ses-*_date-{date}/saved_analysis_results/trial_data.csv"))
         if not matches:

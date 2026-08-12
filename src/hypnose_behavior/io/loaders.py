@@ -686,15 +686,19 @@ def _load_table_with_trial_data(results_dir: Path, name: str) -> pd.DataFrame:
             _update_cache(subjid, [date], {date: df}, kind="trial_data")
         return df
 
-    # Only allow the three non-initiated tables to be loaded from CSV
-    allowed_csv = {"non_initiated_sequences", "non_initiated_odor1_attempts", "non_initiated_FA"}
-    if name in allowed_csv:
-        csv_path = results_dir / f"{name}.csv"
-        if csv_path.exists():
-            try:
-                return pd.read_csv(csv_path)
-            except Exception:
-                pass
+    # Only these three non-initiated tables are loadable here. Parquet first, CSV second:
+    # since Phase 7b.3 the CSV is written only when `save_csv=True`, so a CSV-only reader
+    # would return an empty frame -- with no error -- for every session saved with the
+    # default. Parquet is always written.
+    allowed = {"non_initiated_sequences", "non_initiated_odor1_attempts", "non_initiated_FA"}
+    if name in allowed:
+        for path, reader in ((results_dir / f"{name}.parquet", pd.read_parquet),
+                             (results_dir / f"{name}.csv", pd.read_csv)):
+            if path.exists():
+                try:
+                    return reader(path)
+                except Exception:
+                    continue
     return pd.DataFrame()
 
 

@@ -1235,3 +1235,36 @@ which is counted in the same total as a real `[RED]` mismatch. **`REGRESSION RED
 mismatch(es)` with no `[RED]` lines above it is a mount, not a regression.** Never filter gate
 output -- grepping for `RED` hides `[ERROR]`, and grepping for the summary hides the
 `+/-/~` lines that say what actually moved.
+
+---
+
+## 23. Parquet is the format; CSV is a convenience, off by default *(Phase 7b.3, 2026-08-12)*
+
+`save_session_analysis_results(..., save_csv=False)`. Parquet round-trips dtypes and blobs; a
+second copy of every table is worth writing only when someone will read it by eye.
+
+### The flag could not gate CSV without parquet for *every* table
+
+`loaders._load_table_with_trial_data` could load the three `non_initiated_*` tables from **CSV
+only** -- no parquet was ever written for them. Gating CSV alone would have made them return
+an **empty frame with no error** for every session saved with the default: not "unreadable by
+eye", but unreadable.
+
+So parquet is now written for every table, the reader prefers parquet and falls back to CSV,
+and `save_csv` is purely additive. Verified both ways on `sub-053 20260520`: with
+`save_csv=False` **no CSV exists at all**, and `trial_data` / `non_initiated_sequences` /
+`non_initiated_FA` still load 195 / 1 / 1 rows -- identical to `save_csv=True`. A CSV-only
+reader could not have returned those, so the fallback is not dead code.
+
+The `.schema.json` sidecar follows the **CSV**, not the parquet: it records which object
+columns were JSON-encoded to survive flat text, which parquet does not need.
+
+### Every QC entry point asks for CSV explicitly
+
+`qc/_common.fingerprint_session`, `verify_scripts` (for both `run_trial_classification.py` and
+`batch_process.py`, via `--save-csv`) and `outcome_agreement.py` all pass it, because all three
+read `trial_data.csv` directly -- `_common` fingerprints the *canonical CSV*.
+
+> **Never rely on the default in the harness.** The gate would then change meaning whenever
+> the default did, and the failure is not a mismatch but a `FileNotFoundError` on a file
+> nobody decided to stop writing.

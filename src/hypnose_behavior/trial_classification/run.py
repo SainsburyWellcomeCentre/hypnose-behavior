@@ -201,7 +201,7 @@ def classify_and_analyze_with_response_times(data, events, trial_counts, odor_ma
     }
 
 
-def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verbose: bool = True, max_runs: int = 32, save: bool = True, print_summary: bool = True):
+def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verbose: bool = True, max_runs: int = 32, save: bool = True, print_summary: bool = True, save_csv: bool = False):
     """
     Analyze all experiment files for a subject on a given date, then merge and (optionally) save.
     Now passes full per-run stage/parameter info to save_session_analysis_results.
@@ -430,7 +430,7 @@ def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verb
         }
         
         try:
-            save_dir = save_session_analysis_results(merged, first_root, session_meta, data, events, verbose=verbose)
+            save_dir = save_session_analysis_results(merged, first_root, session_meta, data, events, verbose=verbose, save_csv=save_csv)
         except Exception as e:
             save_err = e
             vprint(verbose, f"[save] WARNING: {e}")
@@ -617,7 +617,8 @@ def batch_analyze_sessions(
     save=True,
     verbose=False,
     print_summary=True,
-    max_runs=200
+    max_runs=200,
+    save_csv=False,
 ):
     """
     Analyze all sessions for given subject(s) and/or date(s).
@@ -667,7 +668,8 @@ def batch_analyze_sessions(
                     save=save,
                     verbose=verbose,
                     print_summary=print_summary,
-                    max_runs=max_runs
+                    max_runs=max_runs,
+                    save_csv=save_csv,
                 )
                 results[(subjid, date)] = res
             except Exception as e:

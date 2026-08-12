@@ -124,8 +124,11 @@ def fingerprint_session(subjid, date) -> dict:
 
         sink = io.StringIO()
         with contextlib.redirect_stdout(sink):
+            # `save_csv=True` explicitly, never by default: this harness fingerprints the
+            # *canonical CSV* of trial_data, so relying on `save_csv`'s default would let a
+            # later change to it break the gate silently (Phase 7b.3).
             analyze_session_multi_run_by_id_date(
-                subjid, date, verbose=False, save=True, print_summary=False
+                subjid, date, verbose=False, save=True, print_summary=False, save_csv=True
             )
 
         matches = list(tmp.glob(f"**/ses-*_date-{date}/saved_analysis_results/trial_data.csv"))

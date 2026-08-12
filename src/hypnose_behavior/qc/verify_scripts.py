@@ -94,7 +94,7 @@ def main() -> int:
         with tempfile.TemporaryDirectory(prefix="hyp_vscripts_") as tmp:
             deriv = Path(tmp)
             # 1) run_trial_classification.py -> trial_data md5
-            r = _run_cli("run_trial_classification.py", subjid, date, deriv, ["--no-summary"])
+            r = _run_cli("run_trial_classification.py", subjid, date, deriv, ["--no-summary", "--save-csv"])
             if r.returncode != 0:
                 print(f"  [ERROR] run_trial_classification {tag}: exit {r.returncode}\n{r.stderr[-500:]}"); red += 1; continue
             td = _trial_data_md5(deriv, date)
@@ -118,7 +118,7 @@ def main() -> int:
             batch_done = True
             with tempfile.TemporaryDirectory(prefix="hyp_vbatch_") as tmp:
                 deriv = Path(tmp)
-                r = _run_cli("batch_process.py", subjid, date, deriv)
+                r = _run_cli("batch_process.py", subjid, date, deriv, ["--save-csv"])
                 if r.returncode != 0:
                     print(f"  [ERROR] batch_process {tag}: exit {r.returncode}\n{r.stderr[-500:]}"); red += 1
                 else:

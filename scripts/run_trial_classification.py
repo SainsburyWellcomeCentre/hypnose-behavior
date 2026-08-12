@@ -36,6 +36,8 @@ def main() -> int:
     g.add_argument("--dates", nargs="*", type=int, default=None, help="specific date(s) YYYYMMDD")
     g.add_argument("--date-range", nargs=2, type=int, metavar=("START", "END"), help="inclusive YYYYMMDD range")
     ap.add_argument("--no-save", action="store_true", help="do not write derivatives")
+    ap.add_argument("--save-csv", action="store_true",
+                    help="also write a human-readable CSV of every table (parquet is always written)")
     ap.add_argument("--no-summary", action="store_true", help="suppress merged summary")
     ap.add_argument("--verbose", action="store_true", help="verbose per-run logging")
     args = ap.parse_args()
@@ -55,6 +57,7 @@ def main() -> int:
         subjids=subjids,
         dates=dates,
         save=not args.no_save,
+        save_csv=args.save_csv,
         print_summary=not args.no_summary,
         verbose=args.verbose,
     )

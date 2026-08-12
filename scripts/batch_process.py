@@ -37,6 +37,8 @@ def main() -> int:
     g.add_argument("--date-range", nargs=2, type=int, metavar=("START", "END"), help="inclusive YYYYMMDD range")
     ap.add_argument("--protocol", default=None, help="metrics: only sessions whose stage name contains this string")
     ap.add_argument("--no-save", action="store_true", help="do not write derivatives / metrics")
+    ap.add_argument("--save-csv", action="store_true",
+                    help="also write a human-readable CSV of every table (parquet is always written)")
     ap.add_argument("--verbose", action="store_true", help="verbose per-run logging (classification)")
     args = ap.parse_args()
 
@@ -53,7 +55,7 @@ def main() -> int:
     print("=== Trial classification ===")
     batch_analyze_sessions(
         subjids=subjids, dates=dates,
-        save=not args.no_save, print_summary=True, verbose=args.verbose,
+        save=not args.no_save, save_csv=args.save_csv, print_summary=True, verbose=args.verbose,
     )
     print("\n=== Metric analysis ===")
     batch_run_all_metrics_with_merge(
