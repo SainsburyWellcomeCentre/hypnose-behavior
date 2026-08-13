@@ -26,9 +26,14 @@ from aeon.io.reader import Reader, Csv
 import aeon.io.api as api
 
 import hypnose_behavior.trial_classification.detect_settings as detect_settings
-# `hypnose_behavior.frames` imports nothing from the package (standard library and
-# pandas only), so this is a one-way edge into a leaf -- `DECISIONS.md` section 3.
-from hypnose_behavior.frames import build_position_data
+# One definition of "where the per-position facts come from", in `load_results.py` --
+# the read side of `save_results.py`, which is where it belongs. Re-exported here under
+# the private name the `visualization/` and `metric_analysis/` readers import, the same
+# arrangement (and for the same reason) as the `readers.py` primitives above:
+# `load_results` imports nothing from this module, so the edge is one-way.
+from hypnose_behavior.io.load_results import (  # noqa: F401
+    load_position_data as _load_position_data,
+)
 from hypnose_behavior.io.paths import get_rawdata_root, get_derivatives_root, get_server_root
 from hypnose_behavior.io.layout import rawdata
 from hypnose_behavior.utils.helpers import vprint, _get_from_cache, _update_cache
@@ -703,25 +708,6 @@ def _load_table_with_trial_data(results_dir: Path, name: str) -> pd.DataFrame:
                 except Exception:
                     continue
     return pd.DataFrame()
-
-
-def _load_position_data(results_dir: Path, trials: pd.DataFrame) -> pd.DataFrame:
-    """One row per ``trial x position`` for `trials`, from this session's directory.
-
-    **The single seam between "where the per-position facts live" and everything in
-    `visualization/` that reads them.** Phase 7b.4b moved a dozen call sites off the
-    per-trial JSON blobs and onto this; 7b.4b step 4 then changes *this function* to
-    prefer the written `position_data.parquet`, so the switch is one edit rather than
-    one per call site.
-
-    Takes `trials` rather than deriving the whole session, because callers do not all
-    pass the whole session: `sing_rew._session_reward_rts` passes the rewarded trials
-    only. A reader of the saved table must therefore filter back to the frame it was
-    handed, or the metric silently widens to every trial in the session.
-    """
-    # Step 4 replaces this with a read of `position_data.parquet`, falling back to the
-    # derivation for files saved before it existed (`DECISIONS.md` section 2).
-    return build_position_data(trials)
 
 
 def _load_trial_views(results_dir: Path) -> dict[str, pd.DataFrame]:

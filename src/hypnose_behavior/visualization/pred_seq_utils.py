@@ -17,7 +17,7 @@ from hypnose_behavior.utils.helpers import (
 	_iter_subject_dirs,
 	session_selectors,
 )
-from hypnose_behavior.frames import build_position_data, position_entries_by_trial
+from hypnose_behavior.frames import position_entries_by_trial
 from hypnose_behavior.io.loaders import _load_position_data
 from hypnose_behavior.visualization.prep import (
 	_collect_sessions,
@@ -418,7 +418,7 @@ def trial_poke_duration(
 				continue
 			n_trials = len(df)
 			completed = df[df.get("is_aborted") == False]
-			spans = trial_poke_span(build_position_data(df))
+			spans = trial_poke_span(_load_position_data(results_dir, df))
 			for cat in categories:
 				session_groups = {}
 				cat_df = completed[completed.get("response_time_category") == cat]
@@ -751,7 +751,7 @@ def response_time(
 			completed = completed[completed.get("response_time_category") != "timeout_delayed"]
 			# Raw: the 10x-group-mean outlier rule below is a display filter, and
 			# deliberately stays out of the metric (judgement call 4 of the audit).
-			latencies = reward_delivery_latency(df, build_position_data(df))
+			latencies = reward_delivery_latency(df, _load_position_data(results_dir, df))
 			records = []
 			for _, row in completed.iterrows():
 				seq = _parse_json_value(row.get("odor_sequence"))
@@ -1205,7 +1205,7 @@ def valve_to_reward(
 				continue
 			n_trials = len(df)
 			completed = df[df.get("is_aborted") == False]
-			valve_latencies = valve_to_reward_latency(df, build_position_data(df))
+			valve_latencies = valve_to_reward_latency(df, _load_position_data(results_dir, df))
 			for cat in categories:
 				session_groups = {}
 				cat_df = completed[completed.get("response_time_category") == cat]
@@ -1565,7 +1565,7 @@ def cummulative_poke_time(
 				continue
 			n_trials = len(df)
 			completed = df[df.get("is_aborted") == False]
-			poke_totals = trial_poke_total(build_position_data(df))
+			poke_totals = trial_poke_total(_load_position_data(results_dir, df))
 			for cat in categories:
 				session_groups = {}
 				cat_df = completed[completed.get("response_time_category") == cat]

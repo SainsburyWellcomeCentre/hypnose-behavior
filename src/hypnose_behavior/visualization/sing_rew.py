@@ -25,7 +25,7 @@ from matplotlib.ticker import MaxNLocator
 
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.utils.helpers import session_selectors
-from hypnose_behavior.frames import build_position_data
+from hypnose_behavior.io.loaders import _load_position_data
 from hypnose_behavior.visualization.prep import (
     _collect_sessions,
     _count_to_marker_size,
@@ -421,7 +421,7 @@ def _session_fr_latencies(completed, fr_labels):
     return all_vals, by_port
 
 
-def _session_reward_rts(completed):
+def _session_reward_rts(completed, results_dir):
     """Reward response times for one session: (all_values, {"A": [...], "B": [...]}).
 
     `reward_delivery_latency` is the same quantity `pred_seq_utils.response_time`
@@ -429,7 +429,7 @@ def _session_reward_rts(completed):
     `trial_data.response_time_ms`, which is measured from the reward-port poke.
     """
     rew_df = completed[completed.get("response_time_category") == "rewarded"]
-    latencies = reward_delivery_latency(rew_df, build_position_data(rew_df))
+    latencies = reward_delivery_latency(rew_df, _load_position_data(results_dir, rew_df))
     all_vals = []
     by_port = {"A": [], "B": []}
     for _, row in rew_df.iterrows():
@@ -501,7 +501,7 @@ def FR_latency(
                 sessions.append(None)
                 continue
             fr_vals, fr_port = _session_fr_latencies(completed, fr_labels)
-            rew_vals, rew_port = _session_reward_rts(completed)
+            rew_vals, rew_port = _session_reward_rts(completed, results_dir)
             sessions.append(
                 {"fr_vals": fr_vals, "fr_port": fr_port, "rew_vals": rew_vals, "rew_port": rew_port}
             )

@@ -42,9 +42,58 @@ from hypnose_behavior.io.protocol_schema import (
 )
 from hypnose_behavior.frames import build_position_data
 
-__all__ = ["SessionResults", "load_results_dir", "load_session_results"]
+__all__ = ["SessionResults", "load_position_data", "load_results_dir",
+           "load_session_results"]
 
 _UNBUILT = object()
+
+
+def load_position_data(results_dir, trials):
+    """One row per ``trial x position`` for `trials` -- read if saved, derived if not.
+
+    **The single place that decides where the per-position facts come from.** Phase
+    7b.4a began writing `position_data.parquet`; 7b.4b moved every reader onto this
+    frame and then removed the three JSON blobs from `trial_data`, so from here on the
+    saved table is the source and the derivation is the compatibility path.
+
+    Prefers the file, falls back to `build_position_data`, and the fallback is not a
+    formality: sessions saved before 7b.4a have no such file, and `DECISIONS.md`
+    section 2's rule is that an absent source means *unknown*, never "there were no
+    positions". Those sessions still carry the blobs, so the derivation answers
+    correctly for exactly the files the file is missing from.
+
+    **Filtered back to `trials`, always.** The saved table holds the whole session,
+    while callers do not all pass the whole session -- `sing_rew._session_reward_rts`
+    passes the rewarded trials only. Returning the file unfiltered would silently widen
+    such a caller from its subset to every trial in the session, which is a changed
+    metric with no error. When the two frames cannot be keyed on `global_trial_id` the
+    derivation is used instead, because it is defined by whatever frame it is handed
+    and so cannot make that mistake.
+    """
+    trials_empty = trials is None or getattr(trials, "empty", True)
+    path = Path(results_dir) / "position_data.parquet"
+    if not trials_empty and path.exists() and "global_trial_id" in trials.columns:
+        try:
+            saved = pd.read_parquet(path)
+        except Exception as e:
+            warnings.warn(f"failed to read {path}: {e} -- deriving from trial_data instead.",
+                          RuntimeWarning, stacklevel=2)
+        else:
+            if not saved.empty and "global_trial_id" in saved.columns:
+                return saved[saved["global_trial_id"].isin(trials["global_trial_id"])].copy()
+
+    derived = build_position_data(trials)
+    if not trials_empty and getattr(derived, "empty", True):
+        # Neither source answered: no saved table, and no blobs to expand. Warn rather
+        # than hand back an empty frame, which every per-position metric would read as
+        # "this session had no positions" and silently report nothing (section 27's
+        # failure, one level up from the field lists).
+        warnings.warn(
+            f"{results_dir}: no position_data.parquet and no position blobs in "
+            "trial_data, so every per-position metric and figure will be empty -- "
+            "re-run trial classification for this session.",
+            RuntimeWarning, stacklevel=2)
+    return derived
 
 
 class SessionResults(dict):
@@ -85,7 +134,14 @@ class SessionResults(dict):
     def __getitem__(self, key):
         value = dict.__getitem__(self, key)
         if value is _UNBUILT:
-            value = build_position_data(dict.__getitem__(self, "trial_data"))
+            trials = dict.__getitem__(self, "trial_data")
+            # `results_dir` is already a key of this mapping, so the saved table can be
+            # preferred without a second attribute to keep in step through `copy()`.
+            # `from_trials` sets no such key -- a caller holding only a frame has no
+            # directory to read, and the derivation is the right answer for it.
+            results_dir = dict.get(self, "results_dir")
+            value = (load_position_data(results_dir, trials) if results_dir
+                     else build_position_data(trials))
             dict.__setitem__(self, key, value)
         return value
 

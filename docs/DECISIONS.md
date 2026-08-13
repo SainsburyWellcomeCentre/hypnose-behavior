@@ -1802,6 +1802,48 @@ load-time derivation alike.
 whose whitelist is wider than the behaviour it guards" in a second costume. Validate a
 check by perturbing *the value the code under test returns*, not merely a value it can see.
 
+### The saved table becomes the source, and the derivation the compatibility path *(step 4)*
+
+`io/load_results.load_position_data(results_dir, trials)` is now the **one** place that
+decides where the per-position facts come from: prefer `position_data.parquet`, fall back
+to `build_position_data`. It lives in `load_results.py` -- the read side of
+`save_results.py` -- and `io/loaders.py` **re-exports** it under the private name the
+readers already import, the same arrangement (and reason) as the `readers.py` primitives:
+one definition site, and `loaders`' heavy `harp`/`aeon` imports stay out of `load_results`.
+
+**The fallback is not a formality.** Sections 2's rule is that an absent source means
+*unknown*; sessions saved before 7b.4a have no such file and still carry the blobs, so the
+derivation answers correctly for exactly the files the read is missing from.
+
+**Filtered back to `trials`, always.** The saved table holds the whole session and callers
+do not all pass the whole session -- `sing_rew._session_reward_rts` passes the rewarded
+trials only. An unfiltered read would widen it from its subset to every trial in the
+session: a changed metric, no error. When the two frames cannot be keyed on
+`global_trial_id` the derivation is used instead, since it is defined by whatever frame it
+is handed and therefore cannot make that mistake.
+
+`SessionResults` keys off the `results_dir` **already in the mapping**, so laziness (the 22
+of 29 ms, section 5) survives and there is no second attribute to keep in step through
+`copy()`. `from_trials` sets no such key: a caller holding only a frame has no directory
+to read, and the derivation is the right answer for it.
+
+> **The case with neither source now speaks.** Blobs gone *and* no saved table -- a session
+> that missed the re-analysis -- used to yield an empty frame, which every per-position
+> metric reads as "this session had no positions". It now warns, naming the session and
+> the remedy. That is section 27's failure one level up from the field lists: the silence
+> was the bug, not the emptiness.
+
+**Verified on all three paths before gating**, on `sub-040 20251124`: file present -> read
+taken (`poke_odor_start` is `datetime64[ns]`, against the derivation's `str`, so the switch
+is demonstrably real and not a no-op); file absent, blobs present -> fallback, 1,019 rows;
+neither -> 0 rows and one `RuntimeWarning`. A 20-trial subset returns 59 rows spanning
+exactly 20 trials, so the filter works.
+
+**And the dtype change moved nothing drawn.** Section 24 measured that all 14 evaluable
+`position_data` metrics normalise through `metrics.common._tz_naive`; the seven viz readers
+ported in step 3 are *not* metrics and parse timestamps themselves, so they were the open
+question here. `plot_regression` GREEN 38/38 answers it.
+
 ### Two `presentations` guards that never read the blob
 
 `odorx_abortion_rate` and `plot_false_alarm_rate_by_position` both began

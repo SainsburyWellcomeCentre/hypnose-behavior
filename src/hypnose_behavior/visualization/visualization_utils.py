@@ -18,7 +18,6 @@ import contextlib
 import io
 from hypnose_behavior.io.load_results import load_results_dir, load_session_results
 from hypnose_behavior.frames import (
-    build_position_data,
     odor_letter,
     parse_json_column,
 )
@@ -89,7 +88,9 @@ from hypnose_behavior.visualization.panels import (
     _clean_graph,
 )
 from hypnose_behavior.visualization.primitives import mean_sem, rolling_windows
-from hypnose_behavior.io.loaders import _load_table_with_trial_data, _load_trial_views, _odor_to_letter
+from hypnose_behavior.io.loaders import (
+    _load_position_data, _load_table_with_trial_data, _load_trial_views, _odor_to_letter,
+)
 
 
     # Utility function to print current cache keys
@@ -1641,7 +1642,7 @@ def plot_sampling_times_analysis(
                 continue
 
             td = _load_trial_views(results_dir)["trial_data"]
-            position_data = build_position_data(td)
+            position_data = _load_position_data(results_dir, td)
             if position_data.empty:
                 continue
             pooled_positions.append(position_data)
@@ -4077,7 +4078,7 @@ def plot_position_completion_rate(
             if td.empty:
                 continue
 
-            abortion = abortion_rate_positionX(td, build_position_data(td))
+            abortion = abortion_rate_positionX(td, _load_position_data(results_dir, td))
 
             for p in positions:
                 if p not in abortion.index:
@@ -4356,7 +4357,7 @@ def plot_false_alarm_rate_by_position(
             if td.empty:
                 continue
 
-            rates = fa_rate_by_position(td, build_position_data(td), fa_types=fa_set)
+            rates = fa_rate_by_position(td, _load_position_data(results_dir, td), fa_types=fa_set)
 
             for p in positions:
                 if p not in rates.index:
@@ -4597,8 +4598,8 @@ def plot_poke_duration_by_position(
             results_dir = ses_dir / "saved_analysis_results"
             if not results_dir.exists():
                 continue
-            position_data = build_position_data(
-                _load_trial_views(results_dir)["trial_data"])
+            position_data = _load_position_data(
+                results_dir, _load_trial_views(results_dir)["trial_data"])
 
             # Collapse each session to one mean per position per trial type.
             for trial_type, aborted in (("completed", False), ("aborted", True)):
@@ -5212,7 +5213,7 @@ def plot_poke_duration_by_odor(
         except Exception:
             return []
 
-    def _extract_odor_poke_ms(td):
+    def _extract_odor_poke_ms(td, results_dir):
         """``{odor_letter: [poke_ms, ...]}`` for the requested odors, completed trials.
 
         VARIANT 9 of the metric audit: this used to walk ``presentations`` with a
@@ -5222,7 +5223,7 @@ def plot_poke_duration_by_odor(
         series below is a display grouping, and stays here.
         """
         out: dict = {}
-        pokes = poke_durations(build_position_data(td), aborted=False)
+        pokes = poke_durations(_load_position_data(results_dir, td), aborted=False)
         for odor, poke_ms in zip(pokes["odor_name"], pokes["poke_time_ms"]):
             if odor is None:
                 continue
@@ -5272,7 +5273,7 @@ def plot_poke_duration_by_odor(
             if not results_dir.exists():
                 continue
             td = _load_trial_views(results_dir)["trial_data"]
-            raw = _extract_odor_poke_ms(td)
+            raw = _extract_odor_poke_ms(td, results_dir)
             if not started:
                 if not raw:
                     continue  # sessions before the first with data don't count
@@ -6529,7 +6530,7 @@ def plot_hidden_rule_abort_poke_gap(
 
             # One session at a time: the metric keys on `global_trial_id`, which
             # repeats across sessions.
-            gaps = hr_abort_poke_gap(td, build_position_data(td))
+            gaps = hr_abort_poke_gap(td, _load_position_data(results_dir, td))
             if gaps.empty:
                 continue
             trial_cols = [c for c in ("global_trial_id", "sequence_start", "fa_label")
