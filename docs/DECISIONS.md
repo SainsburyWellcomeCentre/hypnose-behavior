@@ -1701,3 +1701,59 @@ mean **both** loaders or those nine break silently. One of them,
 `sing_rew._session_reward_rts`, passes a *filtered* subset (rewarded trials only), so for
 it a file read is not a substitution and needs an explicit filter back to the frame's own
 trials.
+
+### `sequence_depth` moved grain, and the rule did not *(step 2)*
+
+`sequence_depth(trial)` read the blobs off a **trial row**; it is now
+`sequence_depths(trials, position_data)`, returning an `Int64` Series over the frame, with
+`reached_counts(trials, position_data)` on top. Sections 10 and 18 state the rule as a
+property of *a trial* -- that is still exactly the rule, and this changes only where it
+reads the per-position facts from.
+
+**The per-trial signature was retired rather than kept.** Its only consumer was
+`reached_counts`' own loop, so keeping it would have meant slicing the long frame once per
+trial (1,731 slices a session) *and* handing every caller the job of passing the right
+slice -- silent and wrong if they pass the wrong one.
+
+**The two precedences are opposite, and that is the whole subtlety.** Presented reads
+`in_poke_times` then `in_presentations`; sampled reads `in_presentations` then
+`in_poke_times` -- which is also the opposite of the merge inside `build_position_data`,
+where `position_poke_times` wins. Reconstructing the per-blob order from section 2's
+provenance flags is exact **only because** section 24's inventory measured the blobs never
+to disagree on a shared field. That is a measurement about the data, not a property of the
+code, so it was measured directly rather than argued from:
+
+- **1,731 of 1,731 trials equal** to the blob form, on the written `position_data.parquet`
+  *and* on the load-time `build_position_data` derivation -- compared against HEAD's
+  `frames.py` extracted with `git show`, not a re-typed copy of the old rule.
+- `reached_counts` identical position-for-position on all nine sessions.
+- **Sensitivity proved (section 17):** forcing the two single-meaning rules section 18
+  rejected moves **84** and **32** trials -- exactly the counts section 18 recorded when it
+  measured them off the blobs. A probe that cannot tell those apart would prove nothing.
+
+### The key is `global_trial_id` alone, so counting is per row
+
+`trial_data` carries no `subjid` / `date` column: measured on all nine fixtures, the only
+ids the two frames share are `trial_id` and `global_trial_id`, and `trial_id` restarts per
+run. So a pooled frame -- `merge.pool_results_dicts` concatenates sessions, and
+`run_all_metrics` is called on one for `merged_metrics` -- has **no key that separates two
+sessions' trials**.
+
+> Hence a per-row `.map`, never a `groupby` on the trial frame. A groupby would collapse
+> colliding ids into one row and **change the number of trials in a denominator**; a map
+> yields one value per trial row whatever the ids do. Where ids do collide the depth is the
+> maximum across them, and `sequence_depths` **warns saying so** rather than presenting a
+> resolved-looking number -- section 2's "absent means unknown", applied to "ambiguous".
+
+This is the same pooled ambiguity section 25 recorded for every other `position_data`
+metric; it is not newly introduced here, and the fix is to compute per-position metrics one
+session at a time.
+
+### Two `presentations` guards that never read the blob
+
+`odorx_abortion_rate` and `plot_false_alarm_rate_by_position` both began
+`if ... "presentations" not in columns: return empty` -- yet neither reads that blob; both
+take their denominator from `position_data`. Left in place, the drop would have turned a
+**reported metric** and a **figure** silently empty. Removed with the re-plumb, which is
+also why they are worth naming: a guard on a column the function does not use is invisible
+until the column goes.

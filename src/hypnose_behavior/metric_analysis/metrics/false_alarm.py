@@ -293,8 +293,8 @@ def _fa_abortion_frames_missing(trials):
     return None
 
 
-@metric(frame="trials", title="FA Abortion Stats")
-def fa_abortion_stats(trials):
+@metric(frame="trials+position_data", title="FA Abortion Stats")
+def fa_abortion_stats(trials, position_data):
     """FA abortion breakdown by odor / position / odor x position.
 
     Returns three DataFrames, empty when the frame lacks what they need. Counts
@@ -364,7 +364,7 @@ def fa_abortion_stats(trials):
     df_odor = pd.DataFrame(odor_rows)
 
     # Compute reached counts per position (denominator for overall abortion rate)
-    reached = _reached_counts(df)
+    reached = _reached_counts(df, position_data)
 
     # Per-position table (add overall abortion rate using reached counts)
     pos_rows = []
@@ -395,7 +395,7 @@ def fa_abortion_stats_session(results, return_df=False):
         print(missing)
         return None if not return_df else (pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
 
-    df_odor, df_pos, df_out = fa_abortion_stats(trials)
+    df_odor, df_pos, df_out = fa_abortion_stats(trials, results.get("position_data"))
 
     if not return_df:
         # Readable form for a human at a notebook; the metric stays numeric.
@@ -663,8 +663,8 @@ def fa_rate_by_odor(trials, *, fa_types=None, odors=None):
     return pd.Series(rates, dtype=float)
 
 
-@metric(frame="trials")
-def fa_rate_by_position(trials, *, fa_types=None):
+@metric(frame="trials+position_data")
+def fa_rate_by_position(trials, position_data, *, fa_types=None):
     """FA aborts at position *p* / trials that reached *p*.
 
     Checklist 5. The denominator is `frames.reached_counts`, the package's single
@@ -675,7 +675,7 @@ def fa_rate_by_position(trials, *, fa_types=None):
     """
     if trials.empty:
         return pd.Series(dtype=float)
-    reached = _reached_counts(trials)
+    reached = _reached_counts(trials, position_data)
     aborted = trials[_aborted_mask(trials)]
     fa = aborted[_fa_filter_mask(aborted, fa_types)]
     fa_counts: dict = {}

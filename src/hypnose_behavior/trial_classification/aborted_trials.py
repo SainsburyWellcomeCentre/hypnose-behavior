@@ -44,7 +44,7 @@ def _abort_positioned_events(evs_raw, max_positions):
     distinct, i.e. all but the experiment-faulted ones.
 
     It must be the same rule ``classify_trials`` uses, not merely a similar one: this function
-    produces ``last_odor_position``, and ``frames.sequence_depth`` falls back to it when a
+    produces ``last_odor_position``, and ``frames.sequence_depths`` falls back to it when a
     session carries no ``poke_source``. The two agree on 486 of 486 aborted trials, and that
     agreement is only meaningful while both number positions the same way.
 

@@ -9,11 +9,13 @@ from __future__ import annotations
 restricted to the hidden-rule odors.
 
 The per-position denominators are ``frames.reached_counts`` -- the package's
-single definition of "reached" (audit Q5). ``frames.sequence_depth``
-deliberately reproduces *today's* rule rather than the ``presentations``-sourced
-target the audit specifies: the two disagree on 10 of 1731 fixture trials, and
-adopting the other one now would bake the grace artifact into these
-denominators. It becomes a one-line change once Phase 7b writes ``poke_source``.
+single definition of "reached" (audit Q5), over ``frames.sequence_depths``. The
+audit's ``presentations``-sourced target and today's rule disagreed on 10 of
+1731 fixture trials; Phase 6b's ``poke_source`` closed that gap (the two sources
+now agree) and the rule was settled in ``DECISIONS.md`` section 10, then stated
+as one expression in section 18. Phase 7b.4b moved where it is *read from* --
+``position_data`` rather than the trial row's JSON blobs -- which is why these
+cores take a second frame.
 """
 
 import numpy as np
@@ -86,7 +88,11 @@ def presentation_counts_by_odor(position_data):
 def odorx_abortion_rate(trials, position_data, *, with_counts=False):
     """aborts@odor / presentations@odor."""
     empty = ({}, {}, {}) if with_counts else pd.Series(dtype=float)
-    if trials.empty or "presentations" not in trials.columns:
+    # Guarded on `presentations` until Phase 7b.4b, though it never read the blob: its
+    # denominator comes from `position_data`. Left in place the guard would have made a
+    # REPORTED metric return empty for every session once the column went, which is the
+    # section 27 failure with no error to notice it.
+    if trials.empty:
         return empty
     odor_col = "last_odor_name" if "last_odor_name" in trials.columns else "last_odor"
     if odor_col not in trials.columns:
@@ -119,13 +125,14 @@ def odorx_abortion_rate_session(results):
     return pd.Series(rates, dtype=float).sort_index()
 
 
-@metric(frame="trials", title="Abortion Rate by Position", adapter=as_dict)
-def abortion_rate_positionX(trials, *, with_counts=False):
+@metric(frame="trials+position_data", title="Abortion Rate by Position", adapter=as_dict)
+def abortion_rate_positionX(trials, position_data, *, with_counts=False):
     """aborts@position / trials that reached it.
 
     The denominator is `frames.reached_counts` -- the single definition of
-    "reached" for the package (audit Q5), which is why this core needs only the
-    trial frame even though it is a per-position metric.
+    "reached" for the package (audit Q5). It takes `position_data` since Phase
+    7b.4b: "reached" is measured from the per-position rows, which used to be
+    JSON blobs inside the trial row and are now their own table.
     """
     empty = ({}, {}, {}) if with_counts else pd.Series(dtype=float)
     if trials.empty:
@@ -136,7 +143,7 @@ def abortion_rate_positionX(trials, *, with_counts=False):
 
     aborted = trials[_aborted_mask(trials)]
     abortions = aborted[position_col].dropna().value_counts().to_dict()
-    reached = _reached_counts(trials)
+    reached = _reached_counts(trials, position_data)
 
     rates = {}
     for pos in sorted(set(list(abortions.keys()) + list(reached.keys()))):
@@ -150,6 +157,7 @@ def abortion_rate_positionX(trials, *, with_counts=False):
 @session_metric(abortion_rate_positionX)
 def abortion_rate_positionX_session(results):
     parts = abortion_rate_positionX(results.get("trial_data", pd.DataFrame()),
+                                    results.get("position_data"),
                                     with_counts=True)
     if not isinstance(parts, tuple):
         return parts

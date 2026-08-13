@@ -4077,7 +4077,7 @@ def plot_position_completion_rate(
             if td.empty:
                 continue
 
-            abortion = abortion_rate_positionX(td)
+            abortion = abortion_rate_positionX(td, build_position_data(td))
 
             for p in positions:
                 if p not in abortion.index:
@@ -4350,10 +4350,13 @@ def plot_false_alarm_rate_by_position(
                 continue
             views = _load_trial_views(results_dir)
             td = views["trial_data"]
-            if td.empty or "presentations" not in td.columns:
+            # Guarded on `presentations` until Phase 7b.4b, though the metric never read
+            # that blob -- its denominator is `position_data`. Kept, it would have made
+            # this figure silently blank once the column went.
+            if td.empty:
                 continue
 
-            rates = fa_rate_by_position(td, fa_types=fa_set)
+            rates = fa_rate_by_position(td, build_position_data(td), fa_types=fa_set)
 
             for p in positions:
                 if p not in rates.index:

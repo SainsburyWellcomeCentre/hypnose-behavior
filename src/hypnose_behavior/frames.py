@@ -17,9 +17,12 @@ There are two frames:
     and carry no legacy-session branch. Pairs with Phase 7b's ``position_data``
     side-table, which will make the expansion a read rather than a derivation.
 
-This module also owns the two "how far did the sequence get" helpers that the
-Phase 4a audit's Q5 resolution mandates. See ``sequence_depth`` for the one
-place where today's behaviour and the eventual definition differ, and why.
+This module also owns "how far did the sequence get", which the Phase 4a audit's
+Q5 resolution mandates as a single definition. Since Phase 7b.4b it reads
+``position_data`` rather than a trial row's blobs, and it is stated at the
+**frame** grain -- ``sequence_depths(trials, position_data)`` -- because the
+per-trial form's only consumer was ``reached_counts``' own loop, and a per-trial
+signature over a long frame invites being handed the wrong trial's rows.
 """
 
 import json
@@ -33,9 +36,7 @@ __all__ = [
     "parse_json_column",
     "odor_letter",
     "odor_sequence_tokens",
-    "presented_positions",
-    "sequence_depth",
-    "sampled_positions",
+    "sequence_depths",
     "reached_counts",
     "build_position_data",
 ]
@@ -111,8 +112,30 @@ def _as_int(val) -> Optional[int]:
         return None
 
 
-def _last_position(trial) -> Optional[int]:
-    """Last counted **position** (1-based).
+# The one column that identifies a trial row in both frames. `trial_data` carries no
+# `subjid` / `date` column -- measured on all nine fixtures, the only ids the two frames
+# share are `trial_id` and `global_trial_id` -- and `trial_id` restarts per run, so on a
+# multi-run session it is not a key at all. `global_trial_id` is unique within a session
+# (verified on all nine, including the 3-run `sub-040 20251124`).
+_TRIAL_KEY = "global_trial_id"
+
+# The provenance flags the depth rule reads, and the marker it filters on.
+_DEPTH_COLUMNS = ("position", _TRIAL_KEY, "in_poke_times", "in_presentations")
+
+
+def _aborted_flags(trials):
+    """`is_aborted == True` per row -- the vectorised form of the old `_is_aborted`.
+
+    `== True` rather than `.astype(bool)`, so a stringy "True" is not silently
+    promoted and a missing column yields all-False, exactly as before.
+    """
+    if "is_aborted" in trials.columns:
+        return trials["is_aborted"] == True  # noqa: E712
+    return pd.Series(False, index=trials.index)
+
+
+def _fallback_depths(trials):
+    """``last_odor_position`` as a depth, per trial row.
 
     ``last_odor_position`` is already a position. ``last_event_index`` is a
     0-based index into ``presentations``, so it needs ``+1`` to be the same
@@ -120,74 +143,53 @@ def _last_position(trial) -> Optional[int]:
     off-by-one that never fired because ``last_odor_position`` is a column on
     every session written by this pipeline.
     """
-    if "last_odor_position" in trial:
-        return _as_int(trial.get("last_odor_position"))
-    idx = _as_int(trial.get("last_event_index"))
-    return None if idx is None else idx + 1
+    if "last_odor_position" in trials.columns:
+        vals = pd.to_numeric(trials["last_odor_position"], errors="coerce")
+    elif "last_event_index" in trials.columns:
+        vals = pd.to_numeric(trials["last_event_index"], errors="coerce") + 1
+    else:
+        return pd.Series(pd.NA, index=trials.index, dtype="Int64")
+    return vals.astype("Float64").astype("Int64")
 
 
-def _presented_max(trial) -> Optional[int]:
-    """Deepest position the **rig presented** -- every position whose valve opened.
+def _deepest_by_trial(position_data, mask):
+    """``{global_trial_id: max position}`` over the rows `mask` selects."""
+    rows = position_data[mask]
+    if rows.empty:
+        return pd.Series(dtype="Int64")
+    positions = pd.to_numeric(rows["position"], errors="coerce")
+    return positions.groupby(rows[_TRIAL_KEY]).max().astype("Float64").astype("Int64")
 
-    ``position_poke_times`` is read **first** even though ``presentations`` is
-    the more natural name for "what was presented". On sessions written by this
-    pipeline the two carry the same position set -- verified, their maxima agree
-    on 1,730 of 1,730 trials -- so the order cannot matter there. It matters for
-    sessions saved earlier, where the blobs did *not* agree (section 2): reading
-    ``position_poke_times`` first reproduces exactly what this function returned
-    before, so a re-analysis of old derivatives cannot move.
+
+def _per_trial(by_id, trials):
+    """A `{trial_key: value}` mapping projected onto `trials`' own rows.
+
+    A `.map` rather than a merge, deliberately: it yields exactly one value per
+    trial row, so the number of trials counted never depends on the join. That
+    matters because `merge.pool_results_dicts` concatenates sessions and
+    `global_trial_id` repeats across them -- with a groupby, colliding ids would
+    silently *merge trials*, changing a denominator. `sequence_depths` warns on
+    that collision rather than pretending it resolved it.
     """
-    for col in ("position_poke_times", "presentations"):
-        entries = _entries_by_position(trial.get(col))
-        if entries:
-            return max(entries)
-    return _last_position(trial)
+    if by_id.empty or _TRIAL_KEY not in trials.columns:
+        return pd.Series(pd.NA, index=trials.index, dtype="Int64")
+    return trials[_TRIAL_KEY].map(by_id).astype("Float64").astype("Int64")
 
 
-def _sampled_max(trial) -> Optional[int]:
-    """Deepest position the **animal sampled** (``poke_source == 'poke'``), or None.
+def sequence_depths(trials, position_data):
+    """How far each sequence got, as a contiguous depth ``1..n``. Never filtered.
 
-    Returns None when no entry carries the marker -- which includes every
-    session saved before Phase 6b, none of which has ``poke_source`` at all.
-    Callers must fall back rather than read "no marker" as "all real pokes"
-    (``DECISIONS.md`` sections 2 and 10).
-    """
-    poked = [pos for pos, entry in _entries_by_position(trial.get("presentations")).items()
-             if entry.get("poke_source") == "poke"]
-    if not poked:
-        poked = [pos for pos, entry in _entries_by_position(trial.get("position_poke_times")).items()
-                 if entry.get("poke_source") == "poke"]
-    return max(poked) if poked else None
+    Returns an ``Int64`` Series aligned to ``trials.index``. This is the
+    denominator of every per-position rate ("of the trials that reached position
+    *p*, how many aborted there"), so it must be **monotonic**: a trial that
+    reached position 5 reached positions 1-4 as well. That is why it is a depth
+    to be filled contiguously rather than a set of positions -- a gap is
+    meaningless for *reached* and perfectly natural for *sampled*, which is a
+    different question (``metrics.sampling._real_pokes``) and must not be
+    substituted here.
 
-
-def _max_poke_time_position(trial) -> Optional[int]:
-    """Deepest position with a poke entry, or None.
-
-    All-or-nothing on the key cast, matching the walk this replaced: one
-    unparseable key discards the whole blob and defers to ``_last_position``.
-    """
-    ppt = parse_json_column(trial.get("position_poke_times", {}))
-    if isinstance(ppt, dict) and ppt:
-        try:
-            return max(int(k) for k in ppt.keys())
-        except Exception:
-            return None
-    return None
-
-
-def sequence_depth(trial) -> Optional[int]:
-    """How far the sequence got, as a contiguous depth ``1..n``. Never filtered.
-
-    This is the denominator of every per-position rate ("of the trials that
-    reached position *p*, how many aborted there"), so it must be **monotonic**:
-    a trial that reached position 5 reached positions 1-4 as well. That is why
-    it returns a depth to be filled contiguously rather than a set of positions
-    -- see ``sampled_positions`` for the filterable, possibly-gappy counterpart,
-    which answers a different question and must not be substituted here.
-
-    The depth is what the trial is **credited** with, and that is
-    ``max(presentations)`` filtered by ``poke_source`` only where the filter is
-    required:
+    The depth is what the trial is **credited** with, filtered by ``poke_source``
+    only where the filter is required:
 
     - **completed** -- every presented position counts. The rig advanced through
       all of them, including a final one our DIPort0 reconstruction scores as
@@ -199,37 +201,72 @@ def sequence_depth(trial) -> Optional[int]:
 
     That split is ``DECISIONS.md`` section 10's rule, and it is why neither
     single-meaning form may be substituted. Measured on the 9 fixture sessions
-    (1,731 trials):
+    (1,731 trials): ``max(presentations)`` unfiltered moves **84** trials and
+    ``max(poke_source == 'poke')`` everywhere moves **32**; this rule is the
+    current values.
 
-    ==========================================  ==========================
-    ``max(presentations)`` unfiltered            moves **84** trials
-    this rule                                    the current values
-    ``max(poke_source == 'poke')`` everywhere    moves **32** trials
-    ==========================================  ==========================
+    **Read off ``position_data``, not off the trial row** (Phase 7b.4b). The
+    per-blob precedence the old per-trial form had is reproduced through section
+    2's provenance flags, and the two are *not* in the same order:
 
-    The first re-credits the trailing positions the abort trim removed; the last
-    drops a completed trial's trailing presented position.
-
-    It must also stay **monotonic** -- a trial that reached position 5 reached
-    1-4 as well -- which is why it returns a depth to be filled contiguously
-    rather than a set. See ``sampled_positions`` for the filterable,
-    possibly-gappy counterpart, which answers a different question and must not
-    be substituted here.
+    - presented: ``in_poke_times`` first, ``in_presentations`` second. On
+      sessions written by this pipeline the two carry the same position set --
+      their maxima agree on 1,730 of 1,730 trials -- so the order cannot matter
+      there. It matters for sessions saved earlier, where the blobs did *not*
+      agree, and this order reproduces exactly what the blob form returned.
+    - sampled: ``in_presentations`` first, ``in_poke_times`` second -- **the
+      opposite order**, and the opposite of the merge inside
+      ``build_position_data``, where ``position_poke_times`` wins. That
+      reconstruction is exact only because section 24's inventory measured the
+      blobs never to disagree on a shared field (``differs: 0`` on all 4,791
+      rows). It is a measurement, not a property of this code, so it was
+      re-measured directly against the blob form before the switch landed:
+      1,731 of 1,731 trials equal, on both the written ``position_data.parquet``
+      and the load-time derivation.
 
     Warns when neither the filtered maximum nor ``last_odor_position`` resolves
     an aborted trial: that is a trial with no sampled position at all, and it
     drops out of every per-position denominator, so it is worth investigating
     rather than silently counting as nothing.
     """
-    if not _is_aborted(trial):
-        return _presented_max(trial)
+    if trials is None or len(trials) == 0:
+        return pd.Series(dtype="Int64")
 
-    sampled = _sampled_max(trial)
-    if sampled is not None:
-        return sampled
-    # Sessions saved before `poke_source` existed carry no marker to filter on.
-    fallback = _last_position(trial)
-    if fallback is None:
+    aborted = _aborted_flags(trials)
+    fallback = _fallback_depths(trials)
+
+    usable = (position_data is not None and len(position_data) > 0
+              and all(c in position_data.columns for c in _DEPTH_COLUMNS))
+    if not usable:
+        # No position rows resolves every depth to `last_odor_position`, which is
+        # what the blob form returned when both blobs were empty. Section 2: an
+        # absent source is unknown, never "all of them".
+        presented = sampled = pd.Series(pd.NA, index=trials.index, dtype="Int64")
+    else:
+        if _TRIAL_KEY in trials.columns and not trials[_TRIAL_KEY].is_unique:
+            warnings.warn(
+                f"{_TRIAL_KEY} repeats in this trial frame, so `position_data` rows "
+                "cannot be attributed to a single trial -- depths for the colliding "
+                "trials are the maximum across them. This is a pooled frame "
+                "(`merge.pool_results_dicts` concatenates sessions); compute "
+                "per-position metrics one session at a time.",
+                RuntimeWarning, stacklevel=2,
+            )
+        in_poke = position_data["in_poke_times"].astype(bool)
+        in_pres = position_data["in_presentations"].astype(bool)
+        real_poke = (position_data["poke_source"] == "poke"
+                     if "poke_source" in position_data.columns
+                     else pd.Series(False, index=position_data.index))
+
+        presented = _per_trial(_deepest_by_trial(position_data, in_poke), trials)
+        presented = presented.fillna(_per_trial(_deepest_by_trial(position_data, in_pres),
+                                                trials))
+        sampled = _per_trial(_deepest_by_trial(position_data, in_pres & real_poke), trials)
+        sampled = sampled.fillna(_per_trial(_deepest_by_trial(position_data,
+                                                              in_poke & real_poke), trials))
+
+    unresolved = aborted & sampled.isna() & fallback.isna()
+    for _, trial in trials[unresolved].iterrows():
         warnings.warn(
             "aborted trial has no sampled position: neither a `poke_source == 'poke'` "
             "entry nor `last_odor_position` resolves its depth, so it contributes to no "
@@ -237,70 +274,27 @@ def sequence_depth(trial) -> Optional[int]:
             f"trial_id={trial.get('trial_id')} run_id={trial.get('run_id')}.",
             RuntimeWarning, stacklevel=2,
         )
-    return fallback
+
+    return sampled.fillna(fallback).where(aborted, presented.fillna(fallback))
 
 
-def presented_positions(trial) -> list[int]:
-    """``sequence_depth`` as the contiguous position list ``[1..depth]``."""
-    depth = sequence_depth(trial)
-    return list(range(1, depth + 1)) if depth else []
-
-
-def reached_counts(trials) -> dict[int, int]:
+def reached_counts(trials, position_data) -> dict[int, int]:
     """``{position: n trials that reached it}`` -- the per-position denominator.
 
     The single definition of "reached" for the whole package. Before Phase 4a
     this walk was written out four times: twice identically in ``metrics_utils``
     (``abortion_rate_positionX`` and ``fa_abortion_stats``) and twice more in
     ``visualization/`` under two *different* definitions.
+
+    Counts **per trial row**, so a depth of *n* fills positions 1..n. A null or
+    zero depth contributes nothing, exactly as the old `presented_positions`
+    returned `[]` for it.
     """
     reached: dict[int, int] = {}
-    for _, trial in trials.iterrows():
-        for pos in presented_positions(trial):
+    for depth in sequence_depths(trials, position_data).dropna():
+        for pos in range(1, int(depth) + 1):
             reached[pos] = reached.get(pos, 0) + 1
     return reached
-
-
-def sampled_positions(trial, *, only_true_pokes: bool = False) -> Optional[list[int]]:
-    """Positions with a recorded poke on this trial. May be gappy; filterable.
-
-    "Was this position sampled" -- the counterpart to ``sequence_depth``'s "how
-    far did the sequence get". A gap is meaningless for the latter and perfectly
-    natural here ("no sample at position 3 on this trial"), which is why they are
-    two helpers rather than one with a flag.
-
-    ``only_true_pokes=True`` keeps only entries marked ``poke_source == "poke"``,
-    excluding grace-synthesised and ``outside_grace`` entries. That field will
-    never exist on sessions saved before Phase 6b, so when it is **absent this
-    returns None** -- callers must omit the filtered variant rather than fall
-    back to the unfiltered value, which would make old and new sessions look
-    comparable when they are not.
-    """
-    ppt = parse_json_column(trial.get("position_poke_times", {}))
-    entries = ppt if isinstance(ppt, dict) else {}
-    if not entries:
-        pres = parse_json_column(trial.get("presentations", []))
-        if isinstance(pres, list):
-            entries = {
-                p.get("position"): p for p in pres
-                if isinstance(p, dict) and p.get("position") is not None
-            }
-
-    if only_true_pokes:
-        if not entries:
-            # No positions recorded at all is an *empty* answer, not an
-            # unanswerable one. Only an absent `poke_source` yields None, so a
-            # caller testing `is None` to decide whether to emit the filtered
-            # variant does not also silently skip position-less trials.
-            return []
-        if not any(isinstance(v, dict) and v.get("poke_source") is not None
-                   for v in entries.values()):
-            return None
-        entries = {k: v for k, v in entries.items()
-                   if isinstance(v, dict) and v.get("poke_source") == "poke"}
-
-    out = [_as_int(k) for k in entries.keys()]
-    return sorted(p for p in out if p is not None)
 
 
 # ---------------------------------------------------------------- position_data
