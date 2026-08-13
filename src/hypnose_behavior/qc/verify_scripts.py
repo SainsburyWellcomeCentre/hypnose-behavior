@@ -75,7 +75,7 @@ def _metrics_md5_from_derivatives(subjid: str, date: str, deriv: Path):
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         results = load_session_results(str(subjid).zfill(3), str(date))
-        metrics = run_all_metrics(results, save_txt=False, save_json=False)
+        metrics = run_all_metrics(results, save_txt=False, save_json=False, save_tables=False)
     return _common._md5(_common._canonical_metrics(metrics))
 
 

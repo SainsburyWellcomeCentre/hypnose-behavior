@@ -212,8 +212,16 @@ def poke_durations(position_data, *, aborted=False):
     would exclude them but still average in the grace entries, whose durations are
     synthesised rather than measured. `_real_pokes` excludes both, and leaves a
     pre-marker session's value untouched.
+
+    **Carries `global_trial_id`** (Phase 7b.5), so a poke can be joined back to the
+    trial it belongs to -- without it `metrics_by_poke.parquet` would be a table of
+    anonymous observations, which is most of the point of writing it. Emitted via
+    `reindex` so the column set is the same four whether or not the frame carries
+    the id, rather than a function of what this session happened to have. Every
+    consumer selects by name (`_mean_sd_by` groups on `position`/`odor_name`), so
+    the extra column is additive for them.
     """
-    empty = pd.DataFrame(columns=["position", "odor_name", "poke_time_ms"])
+    empty = pd.DataFrame(columns=["global_trial_id", "position", "odor_name", "poke_time_ms"])
     if aborted:
         rows = _position_rows(position_data, "in_presentations", aborted=True)
         if rows is None or rows.empty:
@@ -228,7 +236,9 @@ def poke_durations(position_data, *, aborted=False):
     rows = rows[rows["poke_time_ms"].notna()]
     if rows.empty:
         return empty
-    return rows.loc[:, ["position", "odor_name", "poke_time_ms"]].reset_index(drop=True)
+    return rows.reindex(
+        columns=["global_trial_id", "position", "odor_name", "poke_time_ms"]
+    ).reset_index(drop=True)
 
 
 def _mean_sd_by(frame, key):

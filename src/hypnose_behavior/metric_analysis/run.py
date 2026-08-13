@@ -18,6 +18,8 @@ import io
 import json
 from pathlib import Path
 
+import pandas as pd
+
 from hypnose_behavior.io.layout import derivatives
 from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.io.load_results import load_session_results
@@ -107,13 +109,136 @@ def _report_fa_abortion_stats(results):
     print(shown[2].to_string(index=False) if hasattr(shown[2], 'to_string') else shown[2])
     return payload
 
-__all__ = ["run_all_metrics", "batch_run_all_metrics_with_merge"]
+
+# --------------------------------------------------------------------------------------
+# The per-trial and per-poke metric tables (restructure_2 Phase 7b.5)
+# --------------------------------------------------------------------------------------
+#
+# Nine registered metrics return a *table* rather than a session value, so they are
+# deliberately absent from `metrics_*.json` -- a flat dict is the wrong shape for them.
+# They do not share one grain, so they are written as two files named by grain rather
+# than one file with a mixed key.
+#
+# **They do not belong in `position_data`.** That table records what was *measured*;
+# these are *derived*, and mixing them makes it impossible to tell one from the other.
+#
+# > **An export and a record, never an input** (`docs/DECISIONS.md` section 5). Nothing
+# > reads these back, and no plotter may be "optimised" by doing so: measured, the cache
+# > is worth 25 ms against a mount walk costing seconds, and two ways to obtain one
+# > quantity is how two figures come to disagree.
+#
+# **Not everything unreported is savable, and that is not a gap.** Three metrics take a
+# `window` and two take an `fa_types` filter -- properties of the *figure*, not of the
+# session -- so they have no single correct value to write.
+
+# One value per trial: each contributes one column, named after the metric.
+_BY_TRIAL_SERIES = (
+    "inter_trial_interval",
+    "trial_poke_span",
+    "trial_poke_total",
+    "valve_to_reward_latency",
+    "reward_delivery_latency",
+    # `fa_types=None` is genuinely "unfiltered" rather than a figure default, so this
+    # one *does* have a saveable value; the filtered variants stay figure-side.
+    "fa_latency_from_pokeout",
+)
+
+# `hr_abort_poke_gap` returns a frame keyed by `global_trial_id`, not a Series, so it
+# contributes one column per value column, prefixed with the metric name so a reader of
+# the wide table can tell which metric produced `delta_seconds`.
+_BY_TRIAL_FRAMES = {
+    "hr_abort_poke_gap": ("hidden_rule_position", "delta_seconds", "delta_start_end_seconds"),
+}
 
 
-def run_all_metrics(results, save_txt=True, save_json=True):
+def _build_metrics_by_trial(results):
+    """Wide table, one row per `global_trial_id`, one column per per-trial metric.
+
+    Indexed on **every** trial in `trial_data`, not on the union of the metrics' own
+    keys, so the file left-joins onto `trial_data` one-to-one and a trial a metric is
+    undefined for reads as null rather than as a missing row. The metrics are defined on
+    very different subsets -- measured on `sub-057`: 339 / 299 / 337 / 54 / 54 / 69 of
+    339 trials -- so most columns are legitimately sparse.
+
+    Every value column is forced numeric, which is not cosmetic: `hr_abort_poke_gap`
+    returns **shape (0, 4) with all four dtypes `object`** on a session with no hidden
+    rule, because an empty frame carries no type. Left alone that would make the file's
+    schema a function of whether the session happened to have a hidden rule -- the same
+    trap section 21 hit with the `datetime64` -> `object` concat. `pd.to_numeric` is left
+    at its default `errors="raise"` rather than `"coerce"`, so an unexpected non-numeric
+    is loud instead of silently null.
+    """
+    trials = results.get("trial_data")
+    if trials is None or getattr(trials, "empty", True) or "global_trial_id" not in trials.columns:
+        return pd.DataFrame()
+
+    key = pd.Index(sorted(trials["global_trial_id"].dropna().unique()), name="global_trial_id")
+    out = pd.DataFrame(index=key)
+
+    # Metric wrappers print; this is building a file, not reporting.
+    with contextlib.redirect_stdout(io.StringIO()):
+        for name in _BY_TRIAL_SERIES:
+            spec = REGISTRY.get(name)
+            value = spec.call(results) if spec is not None else None
+            series = value if isinstance(value, pd.Series) else pd.Series(dtype=float)
+            out[name] = pd.to_numeric(series.reindex(key))
+
+        for name, cols in _BY_TRIAL_FRAMES.items():
+            spec = REGISTRY.get(name)
+            frame = spec.call(results) if spec is not None else None
+            if (isinstance(frame, pd.DataFrame) and not frame.empty
+                    and "global_trial_id" in frame.columns):
+                indexed = frame.drop_duplicates(subset="global_trial_id").set_index("global_trial_id")
+            else:
+                indexed = pd.DataFrame(columns=list(cols))
+            for col in cols:
+                source = indexed[col] if col in indexed.columns else pd.Series(dtype=float)
+                out[f"{name}_{col}"] = pd.to_numeric(source.reindex(key))
+
+    return out.reset_index()
+
+
+def _build_metrics_by_poke(results):
+    """Long table, one row per recorded poke: trial, position, odor, duration, outcome class.
+
+    `poke_durations` is called for **both** outcome classes and the results concatenated
+    with an `aborted` column. `aborted` is not a figure parameter like `window` or
+    `fa_types` -- it partitions completed from aborted trials, and both are equally a
+    record of the session, so saving only the default would drop half the data (measured
+    on `sub-057`: 629 completed + 45 aborted).
+
+    The grain is `global_trial_id` + position, which 7b.5 had to add to `poke_durations`
+    to make real -- it previously returned anonymous observations that could not be joined
+    back to a trial.
+    """
+    position_data = results.get("position_data")
+    spec = REGISTRY.get("poke_durations")
+    if spec is None or position_data is None or len(position_data) == 0:
+        return pd.DataFrame()
+
+    parts = []
+    with contextlib.redirect_stdout(io.StringIO()):
+        for aborted in (False, True):
+            frame = spec.core(position_data, aborted=aborted)
+            if isinstance(frame, pd.DataFrame) and not frame.empty:
+                parts.append(frame.assign(aborted=aborted))
+    if not parts:
+        return pd.DataFrame()
+
+    out = pd.concat(parts, ignore_index=True)
+    out["aborted"] = out["aborted"].astype(bool)
+    return out
+
+
+def run_all_metrics(results, save_txt=True, save_json=True, save_tables=True):
     """
     Run all metrics, print results, and save to txt and json in the session's results directory.
     Returns a dict of all metric values.
+
+    ``save_tables`` writes the two per-grain metric tables described above,
+    ``metrics_by_trial.parquet`` and ``metrics_by_poke.parquet``. The QC harness passes
+    it **explicitly** rather than relying on the default, for the section 23 reason: a
+    gate that relies on a default changes meaning whenever the default does.
     """
     derivatives_dir = get_derivatives_root()
     manifest = results.get("manifest", {}) or {}
@@ -213,7 +338,7 @@ def run_all_metrics(results, save_txt=True, save_json=True):
             "Ensure manifest contains valid paths or run load_session_results() before run_all_metrics()."
         )
 
-    need_output = bool(save_txt or save_json)
+    need_output = bool(save_txt or save_json or save_tables)
     out_dir: Path | None = None
     if need_output:
         out_dir = _determine_output_dir()
@@ -287,6 +412,22 @@ def run_all_metrics(results, save_txt=True, save_json=True):
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(metrics, f, indent=2, default=str)
         print(f"Saved metrics values to {json_path}")
+
+    # --- Save the per-grain metric tables ---
+    # Session-level metrics stay in the JSON above: ~25 scalars plus numerator/denominator
+    # contributions, which is metadata-shaped, and parquet buys nothing for a flat dict.
+    # These two are tables, and they are written as tables.
+    if save_tables:
+        for name, table in (("metrics_by_trial", _build_metrics_by_trial(results)),
+                            ("metrics_by_poke", _build_metrics_by_poke(results))):
+            if not isinstance(table, pd.DataFrame) or table.empty:
+                continue
+            table_path = out_dir / f"{name}.parquet"
+            try:
+                table.to_parquet(table_path, index=False)
+                print(f"Saved {name} ({len(table)} rows) to {table_path}")
+            except Exception as e:
+                print(f"[metrics] WARNING: failed writing {name}: {e}")
 
     return metrics
 
@@ -401,7 +542,7 @@ def batch_run_all_metrics_with_merge(
             # --- Capture pretty print output ---
             buffer = io.StringIO()
             with contextlib.redirect_stdout(buffer):
-                merged_metrics = run_all_metrics(pooled_results, save_txt=False, save_json=False)
+                merged_metrics = run_all_metrics(pooled_results, save_txt=False, save_json=False, save_tables=False)
             pretty_print_str = buffer.getvalue()
             if len(subj_results) > 1:
                 banner_range = _range_str(subj_dates)
@@ -441,7 +582,7 @@ def batch_run_all_metrics_with_merge(
         # --- Capture pretty print output ---
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            merged_metrics = run_all_metrics(pooled_results, save_txt=False, save_json=False)
+            merged_metrics = run_all_metrics(pooled_results, save_txt=False, save_json=False, save_tables=False)
         pretty_print_str = buffer.getvalue()
         # Prepare header
         subjids_merged = pooled_results["manifest"]["merged_subjects"]

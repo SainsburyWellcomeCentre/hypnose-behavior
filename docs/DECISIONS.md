@@ -1375,3 +1375,89 @@ Dropping the blobs. Measured separately: **15 live reads across 7 modules** read
 after 7b.6 because `plot_regression` cannot see the switch until the server carries both
 representations: before the re-analysis no saved file has a `position_data.parquet`, so the
 fallback fires on both trees and a green diff would mean nothing.
+
+---
+
+## 25. The per-grain metric tables, and the grain that had to be created *(Phase 7b.5, 2026-08-13)*
+
+`run_all_metrics` writes two files beside `metrics_<subj>_<date>.json`, named by **grain**
+because the table-returning metrics do not share one:
+
+| file | grain | contents |
+|---|---|---|
+| `metrics_by_trial.parquet` | `global_trial_id` | 6 per-trial Series + `hr_abort_poke_gap`'s 3 value columns = 10 columns |
+| `metrics_by_poke.parquet` | `global_trial_id` + position | `poke_durations` for **both** outcome classes, with an `aborted` column |
+
+Session-level metrics stay in the JSON: ~25 scalars plus numerator/denominator
+contributions, which is metadata-shaped, and parquet buys nothing for a flat dict.
+
+> **An export and a record, never an input** (section 5). Nothing reads these back, and no
+> plotter may be "optimised" by doing so -- the cache is worth 25 ms against a mount walk
+> costing seconds, and two ways to obtain one quantity is how two figures come to disagree.
+
+### The plan's grain for `metrics_by_poke` did not exist, and had to be made
+
+The plan specified grain "trial + poke index". Measured, `poke_durations` returned
+`["position", "odor_name", "poke_time_ms"]` -- **no trial identifier at all**, so its rows
+were anonymous observations and that grain was not constructible.
+
+`poke_durations` now carries `global_trial_id`. That is a deliberate change to a metric's
+output, chosen over the two alternatives: saving the frame as-is ships a table nobody can
+join back to a trial, which is most of the point of writing it; and rebuilding the table
+from `position_data` in the writer would duplicate `_real_pokes` and the abort-event
+exclusion, i.e. a second derivation of one quantity, which is what section 14 exists to
+prevent.
+
+**Safe because every consumer selects by name**, verified at all four call sites:
+`_mean_sd_by` groups on `position` / `odor_name` and reads `poke_time_ms`;
+`visualization_utils.py:5218` zips two named columns. The one site where the extra column
+rides along is `visualization_utils.py:1651`, which renames, `.assign()`s and concatenates
+-- and `plot_regression` covers it through `plot_sampling_times_analysis`. Emitted via
+`reindex` so the column set is the same four whether or not the frame carries the id.
+
+### `aborted` is not a figure parameter; `fa_types=None` is not a figure default
+
+Two parameterised metrics are nonetheless saveable, and the distinction matters:
+
+- **`poke_durations(aborted=)`** partitions **outcome classes**, not figure options. Both
+  values are equally a record of the session, so the file carries both with an `aborted`
+  column. Saving only the default would have dropped half the rows -- measured on
+  `sub-057`, 629 completed against 45 aborted.
+- **`fa_latency_from_pokeout(fa_types=None)`** means *unfiltered*, so the default is a
+  well-defined value. The filtered variants stay figure-side.
+
+That is the line: **three metrics taking a `window` and two taking an `fa_types` filter
+have no single correct value to write**, and that is why "save everything and only load"
+stays unreachable (section 5).
+
+### The empty frame carries no type -- section 21's trap, in a new place
+
+`hr_abort_poke_gap` returns **shape (0, 4) with all four dtypes `object`** on a session
+with no hidden rule. Joined blind, that would make the file's schema a function of whether
+the session happened to have a hidden rule -- exactly what 7b.1 spent its budget
+eliminating. Every value column is therefore forced numeric, and `pd.to_numeric` is left at
+its default `errors="raise"` rather than `"coerce"`, so an unexpected non-numeric is loud
+instead of silently null. Verified: `sub-057` (no hidden rule) and `sub-040 20251124`
+(hidden rule, multi-run) produce the **same 10 columns with the same dtypes**, differing
+only in that three columns are all-null on the former.
+
+`metrics_by_trial` is indexed on **every** trial in `trial_data`, not on the union of the
+metrics' own keys, so the file left-joins one-to-one and an undefined trial reads as null
+rather than as a missing row. The metrics are legitimately sparse -- on `sub-057`,
+339 / 299 / 337 / 54 / 54 / 69 of 339 trials.
+
+### The harness passes `save_tables` explicitly
+
+`run_all_metrics(..., save_tables=True)`, folded into `need_output`. `qc/_common` and
+`verify_scripts` pass `save_tables=False` **explicitly**, for section 23's reason: a gate
+that relies on a default changes meaning whenever the default does. The two internal
+`run_all_metrics(pooled_results, ...)` calls pass `False` too -- a pooled multi-session set
+has no single `global_trial_id` space, so a per-trial table keyed on one would be ambiguous.
+
+No CLI flag was added: the batch's per-session call picks up the default, which is what
+7b.6 needs, and nobody asked for a switch.
+
+**Gates:** `regression` GREEN 9/9 no regeneration; `plot_regression` GREEN, **35 cases
+counted** (not the banner -- section 22) with all four movement plotters present and all
+three `poke_durations` consumers exercised; `verify_scripts` GREEN, covering the
+`batch_process` path that writes the tables; `check_imports` PASS.

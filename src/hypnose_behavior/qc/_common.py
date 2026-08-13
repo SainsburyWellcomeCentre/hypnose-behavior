@@ -140,7 +140,7 @@ def fingerprint_session(subjid, date) -> dict:
 
         with contextlib.redirect_stdout(sink):
             results = load_session_results(subjid, date)
-            metrics = run_all_metrics(results, save_txt=False, save_json=False)
+            metrics = run_all_metrics(results, save_txt=False, save_json=False, save_tables=False)
         metrics_md5, metrics_keys = _metrics_fingerprint(metrics)
 
     return {
