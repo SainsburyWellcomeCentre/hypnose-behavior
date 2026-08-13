@@ -2,7 +2,7 @@
   "subjid": "040",
   "date": "20251124",
   "label": "hidden_rule_pos12345_finalpos_bug",
-  "trial_data": "2a20426fd9af65a33b59368d75423216",
+  "trial_data": "39f87c124ba77d4a7cf4f5ba909cddfb",
   "trial_data_columns": {
     "abortion_time": "8c1bc4ec2d8603e408cfe87e8f94ea8e",
     "abortion_type": "50dc52dfdedf73667301c4ed407da464",
@@ -48,9 +48,6 @@
     "poke_window_end": "111d34e215af25e88a62163dd723a590",
     "port1_pokes_count": "5bbf605d500d6718c8ce666cf50f7784",
     "port2_pokes_count": "76016f99dd5587d8dbdcad60a7177ece",
-    "position_poke_times": "97a869bcec50dacd39359d1fce1b41c6",
-    "position_valve_times": "019147920bad6454e232dc9c4123caf1",
-    "presentations": "fa053f2849b7683bd37ee5584669c234",
     "required_min_sampling_time_ms": "d90046fc18adfd599f4cb24eeb6088df",
     "response_time_category": "0f63281cf561c7daf7cffb129d0f5acf",
     "response_time_ms": "dc58494df001334bfd04b7546682ff70",

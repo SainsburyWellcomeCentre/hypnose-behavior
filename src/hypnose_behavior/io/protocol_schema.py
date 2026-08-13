@@ -42,9 +42,22 @@ __all__ = [
     "ABORT_COLUMNS",
     "RESPONSE_TIME_COLUMNS",
     "ASSEMBLED_COLUMNS",
+    "POSITION_BLOB_COLUMNS",
     "trial_data_columns",
     "mode_independent_columns",
 ]
+
+
+# The three per-position JSON blobs: declared fields, built by `classify_trials`, and
+# **never written to `trial_data`** since Phase 7b.4b. `save_results` expands them into
+# `position_data.parquet` -- one row per `trial x position`, with typed columns and
+# section 2's provenance flags -- and then drops them from the frame it saves.
+#
+# They stay *fields* because the expansion reads them off the in-memory trial frame, and
+# `@dataclass(slots=True)` would refuse the assignment in `classify_trials` if they were
+# removed. So this constant is the single statement of "in memory, not on disk", read by
+# `columns()` (hence by the conform and the loader's schema check) and by `save_results`.
+POSITION_BLOB_COLUMNS = ("position_valve_times", "position_poke_times", "presentations")
 
 
 class ConflictingProtocolError(Exception):
@@ -169,7 +182,11 @@ class _TrialRecordBase:
     sequence_name: str | None = None
     minimum_sampling_time_ms_by_odor: object = None
 
-    # --- per-position blobs (Phase 7b.4 moves these to position_data.parquet) ---
+    # --- per-position blobs: IN MEMORY ONLY since Phase 7b.4b ---
+    # `classify_trials` still builds them and `save_results` still expands them into
+    # `position_data.parquet` -- but they are no longer *written* to `trial_data`. See
+    # `POSITION_BLOB_COLUMNS`; they are excluded from `columns()`, so the loader's schema
+    # check does not demand a column nothing saves any more.
     position_valve_times: object = None
     position_poke_times: object = None
     presentations: object = None
@@ -210,8 +227,16 @@ class _TrialRecordBase:
 
     @classmethod
     def columns(cls) -> tuple:
-        """The column names this record writes, in declaration order."""
-        return tuple(f.name for f in fields(cls))
+        """The column names this record **writes**, in declaration order.
+
+        `POSITION_BLOB_COLUMNS` are declared fields but not written columns: since Phase
+        7b.4b they exist only in memory, long enough for `save_results` to expand them
+        into `position_data.parquet`. Excluding them here is what keeps the declaration
+        honest in both directions -- `save_results` conforms to it, and the loader checks
+        a saved file against it, so leaving them in would make every newly written file
+        report itself as missing three columns.
+        """
+        return tuple(f.name for f in fields(cls) if f.name not in POSITION_BLOB_COLUMNS)
 
 
 @dataclass(slots=True)
@@ -342,7 +367,7 @@ def mode_independent_columns() -> tuple:
     server's `sub-040 20251124`, this reports all three, while comparing against the record's
     own fields alone reports only `fallback_reason` -- a column nothing reads.
     """
-    return (tuple(f.name for f in fields(_TrialRecordBase))
+    return (_TrialRecordBase.columns()
             + ABORT_COLUMNS + RESPONSE_TIME_COLUMNS + ASSEMBLED_COLUMNS)
 
 

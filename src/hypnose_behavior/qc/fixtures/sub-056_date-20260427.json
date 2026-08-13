@@ -2,7 +2,7 @@
   "subjid": "056",
   "date": "20260427",
   "label": "odourdiscrimination_stage2_schema_path",
-  "trial_data": "ee00b06488bbb98575378446d21d1dbe",
+  "trial_data": "9425c0004eb5c306bb528c1cd46daf7b",
   "trial_data_columns": {
     "abort_reason": "df101f363bd9522ed3335979bb698630",
     "abortion_time": "df101f363bd9522ed3335979bb698630",
@@ -52,9 +52,6 @@
     "odourdiscrimination_mode": "fc4c6ff54b2b02b8f876cf07f12aa433",
     "port1_pokes_count": "df101f363bd9522ed3335979bb698630",
     "port2_pokes_count": "df101f363bd9522ed3335979bb698630",
-    "position_poke_times": "b302400667ed198dd4650f790cdff8e1",
-    "position_valve_times": "aaace504d79accdc933b7b127fae8261",
-    "presentations": "bbe92dad9bf8303934ce26ce811b73c4",
     "required_min_sampling_time_ms": "eda6666e72ba125ad14380d1976e6e04",
     "response_time_category": "f1aba42519e0be973a356fca390504c3",
     "response_time_ms": "c34d1817d2bcdc0d2596e133a388e5cf",

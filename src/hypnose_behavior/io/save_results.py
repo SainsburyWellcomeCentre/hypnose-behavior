@@ -22,7 +22,8 @@ from hypnose_behavior.utils.helpers import vprint
 from hypnose_helpers.provenance import provenance
 # The single declaration of what `trial_data` holds -- see `io/protocol_schema.py`.
 from hypnose_behavior.io.protocol_schema import (
-    ABORT_COLUMNS, ASSEMBLED_COLUMNS, RESPONSE_TIME_COLUMNS, trial_data_columns,
+    ABORT_COLUMNS, ASSEMBLED_COLUMNS, POSITION_BLOB_COLUMNS, RESPONSE_TIME_COLUMNS,
+    trial_data_columns,
 )
 # The one derivation of the long per-position frame, shared with `io/load_results.py`,
 # so the table written here and the one the loader falls back to deriving cannot drift
@@ -306,9 +307,11 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     # and section 2's three provenance flags (`in_poke_times` / `in_presentations` /
     # `in_valve_times`) as real typed columns instead of a table smuggled into a cell.
     #
-    # **Additive for now.** The three blobs stay in `trial_data` and the loader still
-    # derives this frame; Phase 7b.4b makes the loader read the file and then drops them.
-    # So this changes no existing column and no metric value.
+    # **This is now the only saved form of the per-position record.** The three blobs are
+    # dropped from `trial_data` immediately below; every reader was moved onto this table
+    # first, and `qc/position_data_lossless.py` asserts the precondition that licenses the
+    # drop -- every blob field recoverable here with an equal value, bar one allow-listed
+    # key that is already saved as its own table (section 24).
     #
     # Built from the **in-memory** `trial_df`, deliberately, and that is the whole reason
     # this is worth writing: the blobs are JSON-encoded on their way into
@@ -377,6 +380,21 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     for k in ("trial_data", "position_data", "non_initiated_sequences",
               "non_initiated_odor1_attempts", "non_initiated_FA"):
         df = classification.get(k) if isinstance(classification, dict) else None
+        if k == "trial_data" and isinstance(df, pd.DataFrame) and not df.empty:
+            # **Phase 7b.4b: the blobs do not go to disk.** `trial_data` is now one row
+            # per trial, scalar columns only -- no table smuggled into a cell. They were
+            # expanded into `position_data` above, and `qc/position_data_lossless.py`
+            # asserts every field is recoverable from it before this is allowed.
+            #
+            # Dropped **here, on the way to the file, not from `classification`**, and
+            # that distinction is load-bearing: this dict is *returned* to the caller and
+            # two things read the blobs off it afterwards -- `print_merged_session_summary`
+            # (called by `run.py` after this function) for its per-position poke/valve
+            # stats, and `qc/position_data_lossless.py`, whose whole job is comparing them
+            # against `position_data`. Mutating the dict would have emptied the first
+            # silently and made the second vacuously green -- a gate that passes by having
+            # nothing left to check.
+            df = df.drop(columns=list(POSITION_BLOB_COLUMNS), errors="ignore")
         if _save_df(k, df):
             saved_any = True
 

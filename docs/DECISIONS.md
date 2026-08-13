@@ -1844,6 +1844,45 @@ exactly 20 trials, so the filter works.
 ported in step 3 are *not* metrics and parse timestamps themselves, so they were the open
 question here. `plot_regression` GREEN 38/38 answers it.
 
+### The drop itself, and the one line that decides whether the gate means anything *(step 5)*
+
+`trial_data` is now **one row per trial, scalar columns only** -- no table smuggled into a
+cell. The three blobs remain declared `TrialRecord` fields, because `@dataclass(slots=True)`
+would refuse `classify_trials`' assignment otherwise and `save_results` still expands them
+into `position_data.parquet`. What changed is that they are no longer *written*:
+`POSITION_BLOB_COLUMNS` states "in memory, not on disk" once, and `columns()` excludes them,
+so the conform and the loader's schema check both stop demanding a column nothing saves.
+
+> **`mode_independent_columns()` had to be fixed with it.** It built its list from
+> `fields(_TrialRecordBase)` directly rather than from `columns()`, so it still required the
+> three -- meaning an untagged file written by current code would report itself missing
+> three columns. Two spellings of one declaration is the section 27 trap again; it now calls
+> `columns()`. Section 22's strict-subset invariant re-verified: 57 columns, a strict subset
+> of all three modes (58 / 70 / 63).
+
+**Dropped on the way to the file, never from `classification`.** The first implementation
+did the obvious thing and dropped the columns from `classification["trial_data"]`. That dict
+is *returned* to the caller, and two things read the blobs off it **after** the save:
+
+- `print_merged_session_summary`, which `run.py` calls after `save_session_analysis_results`
+  -- its per-position poke and valve statistics would have gone silently empty;
+- **`qc/position_data_lossless.py` itself**, which takes `out["classification"]["trial_data"]`
+  and walks its blobs against `position_data`. With no blobs it would have found nothing to
+  compare and reported GREEN.
+
+> **The acceptance gate for the drop would have passed by having nothing left to check.**
+> That is the sharpest form of this phase's recurring lesson -- a green that means "I did not
+> look". Verified afterwards from the counts, which is what makes the pass legible: the gate
+> still reports **4,791 `(blob,key)` occurrences per pair**, unchanged from before the drop.
+> A vacuous run would have said zero.
+
+**Acceptance, exactly as the phase specified it:** nine `[RED]` on `trial_data`, each the
+identical `- removed column: position_poke_times, position_valve_times, presentations`;
+**zero `+ added column`, zero `~ changed`**, zero `[ERROR]`; the other 45 fingerprints green,
+so every metric md5 -- including the two reported ones re-plumbed in step 2 -- and all three
+side tables are untouched. `plot_regression` GREEN 38/38. Fixtures regenerated deliberately
+in the same commit, each losing exactly three column keys and its `trial_data` md5.
+
 ### Two `presentations` guards that never read the blob
 
 `odorx_abortion_rate` and `plot_false_alarm_rate_by_position` both began

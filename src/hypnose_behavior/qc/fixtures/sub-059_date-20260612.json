@@ -2,7 +2,7 @@
   "subjid": "059",
   "date": "20260612",
   "label": "preseq_triples_stage1",
-  "trial_data": "d2d86e04f8a317072da82814e91e72e7",
+  "trial_data": "c926daa881019beb1f6c4822315b9f73",
   "trial_data_columns": {
     "abortion_time": "e791e2522f6d683185276aa932ded3ca",
     "abortion_type": "1d496e3ee45bc9c6577f7f23bf117d23",
@@ -48,9 +48,6 @@
     "poke_window_end": "5ea9fff2b30d7c2e4364b90c8c611ab5",
     "port1_pokes_count": "bfe33a2d2cb1cad5c01e43cf2ea5615a",
     "port2_pokes_count": "15d2d8347af4d69b409f76e5ca5b5d4b",
-    "position_poke_times": "03270865a2d9b2224a91c7659c8d9ad6",
-    "position_valve_times": "e492db330b448071a9d35a2747f7ac27",
-    "presentations": "edb2a6e2eec53ac25faabaa2d0a3e4ab",
     "required_min_sampling_time_ms": "548c24cf196a35fd22725176090217ef",
     "response_time_category": "7ccced7d0adb64817868168e91d1d116",
     "response_time_ms": "33569f1f43d6428b4ab760cb893a9d94",
