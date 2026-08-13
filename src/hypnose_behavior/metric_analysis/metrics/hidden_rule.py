@@ -30,7 +30,7 @@ import pandas as pd
 
 from hypnose_behavior.io.layout import list_sessions
 from hypnose_behavior.io.loaders import _load_trial_views, _odor_to_letter
-from hypnose_behavior.metric_analysis.frames import parse_json_column
+from hypnose_behavior.frames import parse_json_column
 from hypnose_behavior.metric_analysis.metrics.common import (
     _aborted_mask,
     _flag,

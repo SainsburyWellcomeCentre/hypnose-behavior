@@ -25,7 +25,7 @@ from matplotlib.ticker import MaxNLocator
 
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.utils.helpers import session_selectors
-from hypnose_behavior.metric_analysis.frames import build_position_data
+from hypnose_behavior.frames import build_position_data
 from hypnose_behavior.visualization.prep import (
     _collect_sessions,
     _count_to_marker_size,

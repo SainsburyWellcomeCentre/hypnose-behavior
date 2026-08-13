@@ -19,7 +19,7 @@ denominators. It becomes a one-line change once Phase 7b writes ``poke_source``.
 import numpy as np
 import pandas as pd
 
-from hypnose_behavior.metric_analysis.frames import reached_counts as _reached_counts
+from hypnose_behavior.frames import reached_counts as _reached_counts
 from hypnose_behavior.metric_analysis.metrics.common import (
     _aborted_mask,
     _initiated,

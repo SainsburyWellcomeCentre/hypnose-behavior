@@ -89,7 +89,7 @@ def _ab_letter(value):
 
     Named for what it returns, not for its input: this is an A/B *side* resolver
     and returns None for any other odor, where the canonical
-    `metric_analysis.frames.odor_letter` would return that odor's letter. It was
+    `frames.odor_letter` would return that odor's letter. It was
     called `_odor_letter` and read as a copy of that normaliser; it is not one."""
     if value is None:
         return None

@@ -17,7 +17,7 @@ from hypnose_behavior.utils.helpers import (
 	_iter_subject_dirs,
 	session_selectors,
 )
-from hypnose_behavior.metric_analysis.frames import build_position_data
+from hypnose_behavior.frames import build_position_data
 from hypnose_behavior.visualization.prep import (
 	_collect_sessions,
 	_count_to_marker_size,

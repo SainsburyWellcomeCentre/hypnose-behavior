@@ -27,7 +27,7 @@ from IPython.display import display
 
 from hypnose_behavior.io.loaders import _load_trial_views
 from hypnose_behavior.io.paths import get_derivatives_root
-from hypnose_behavior.metric_analysis.frames import (
+from hypnose_behavior.frames import (
     odor_letter,
     odor_sequence_tokens,
     reached_counts as _reached_counts,

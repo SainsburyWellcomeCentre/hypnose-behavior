@@ -17,7 +17,7 @@ from typing import Iterable, Optional, Union, Tuple
 import contextlib
 import io
 from hypnose_behavior.io.load_results import load_results_dir, load_session_results
-from hypnose_behavior.metric_analysis.frames import (
+from hypnose_behavior.frames import (
     build_position_data,
     odor_letter,
     parse_json_column,

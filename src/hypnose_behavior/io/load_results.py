@@ -16,16 +16,18 @@ plotters compute through the registry, so it is an export and the record of an
 analysis run, never an input (`docs/DECISIONS.md` section 5).
 
 Deliberately its own module rather than part of `io/loaders.py`, which reads the
-same directory via `_load_trial_views`: `loaders` is imported by
-`trial_classification`, and folding this in would make classification depend on
-`metric_analysis` for `build_position_data`.
+same directory via `_load_trial_views`. The original reason was that `loaders` is
+imported by `trial_classification`, so folding this in would have made
+classification depend on `metric_analysis` for `build_position_data`. **That reason
+no longer applies** -- Phase 7b.4 promoted the module to `hypnose_behavior.frames`,
+a leaf below both packages -- but the two stay split, because they serve different
+consumers off the same directory.
 
-`load_session_results` calls `metric_analysis.frames.build_position_data`. That
-edge is deliberate and was checked, not assumed: `frames.py` is a leaf (standard
-library and pandas only) and both package `__init__`s are docstring-only, so
-`io -> metric_analysis.frames` is one-way with no cycle. See `docs/DECISIONS.md`
-section 3. **Keep `frames.py` a leaf** -- the day it imports anything else in
-the package this becomes a real cycle.
+`load_session_results` calls `frames.build_position_data`. `hypnose_behavior.frames`
+imports nothing from the package (standard library and pandas only), so this is a
+one-way edge into a leaf, and `io/` no longer imports `metric_analysis` at all. See
+`docs/DECISIONS.md` section 3. **Keep `frames.py` a leaf** -- the day it imports
+anything else in the package, every layer standing on it inherits that dependency.
 """
 
 import json
@@ -38,7 +40,7 @@ from hypnose_behavior.io.layout import derivatives
 from hypnose_behavior.io.protocol_schema import (
     mode_independent_columns, trial_data_columns,
 )
-from hypnose_behavior.metric_analysis.frames import build_position_data
+from hypnose_behavior.frames import build_position_data
 
 __all__ = ["SessionResults", "load_results_dir", "load_session_results"]
 

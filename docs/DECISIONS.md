@@ -84,24 +84,56 @@ marker" as "all real pokes" would make old and new sessions look comparable when
 
 ---
 
-## 3. `frames.py` must stay a leaf
+## 3. `frames.py` must stay a leaf — and it was promoted to one *(Phase 7b.4, 2026-08-13)*
 
-`io/load_results.py` calls `build_position_data`, which lives in `metric_analysis/frames.py`.
-That looks like `io/ → metric_analysis/` and therefore like a cycle. It is not, for one reason
-only:
+**`hypnose_behavior/frames.py`, at the package root.** It is a leaf below both `io/` and
+`metric_analysis/`, and the rule that made it safe there is the rule that keeps it safe here:
 
-> **`frames.py` imports nothing from the package** — only `json`, `re`, `typing` and `pandas`.
-> Both `io/__init__.py` and `metric_analysis/__init__.py` are docstring-only, so importing a
-> submodule triggers no package-level side effects.
+> **`frames.py` imports nothing from the package** — only `json`, `re`, `warnings`, `typing`
+> and `pandas`. Every package `__init__.py` is docstring-only, so importing a submodule
+> triggers no package-level side effects.
 
-`io → metric_analysis.frames` is a one-way edge into a leaf. **The day a metric — or anything
-else in the package — is imported into `frames.py`, `io/load_results.py` becomes a real cycle.**
-Keep its imports to the standard library and pandas.
+**The day anything in the package is imported into `frames.py`, every layer standing on it
+inherits that dependency.** Keep its imports to the standard library and pandas.
 
-*(Settled 2026-08-06, do not re-open: `build_position_data` performs no I/O, so `io/` is the
-wrong home by the 0.2 "knows the data vs knows the layout" test, and it shares four helpers with
-`sequence_depth` / `reached_counts` / `sampled_positions`. Promoting `frames.py` to a schema
-layer below both is the honest fix — revisit only if it grows.)*
+### Why it moved, and what the move retired
+
+It previously lived at `metric_analysis/frames.py`, and `io/load_results.py` imported it —
+an `io → metric_analysis` edge that was safe only because of the leaf property above, and
+that had to be justified at length every time someone read it. Phase 7b.4 needed a *second*
+importer: `io/save_results.py`, which writes the `position_data` side-table, and which
+`trial_classification/run.py` imports. That would have given trial classification a
+`metric_analysis` dependency — the thing `load_results.py`'s docstring said had been
+deliberately avoided.
+
+So the edge was not doubled, it was removed. **`io/` no longer imports `metric_analysis`
+at all.** The one-way edge that §3 used to defend does not exist any more; what remains is
+`io/` and `metric_analysis/` both standing on a root-level leaf, which is the shape this
+section asked for in 2026-08-06's note: *"Promoting `frames.py` to a schema layer below both
+is the honest fix — revisit only if it grows."* It grew.
+
+**The whole file moved, not just `build_position_data`** — that same note gives the reason:
+the builder shares four helpers (`parse_json_column`, `_as_int`, `_is_aborted`,
+`_entries_by_position`) with `sequence_depth` / `reached_counts` / `sampled_positions`, so
+splitting it out would have duplicated them or made the two halves import each other.
+
+**Not `schema/`, and not `io/`.** `io/` is the wrong home because `build_position_data`
+performs no I/O — the 0.2 "knows the data vs knows the layout" test, unchanged. And a
+top-level `schema/` package would re-introduce exactly the ambiguity §20 avoided when it
+named its module `protocol_schema.py` rather than `schema.py`, *because "schema" already
+means the **task** schema in this code-base*.
+
+**Verified as a pure move**: `qc/ast_move_check.py` reports **15/15 definitions
+byte-identical**, and `git diff -M --stat` reports the rename with **0 insertions, 0
+deletions**. The eight in-repo import sites were rewritten and `metric_analysis/frames.py`
+deleted outright — no re-export shim, so nothing can keep importing the old path by
+accident. `check_imports` PASS (63 modules), `regression` GREEN 9/9, no regeneration.
+
+> **Two notebooks still import `hypnose_behavior.metric_analysis.frames`**
+> (`notebooks/trial_classification/metrics_analysis.ipynb`,
+> `notebooks/visualization/behavior_visualization.ipynb`) and will raise `ImportError`
+> until their import line is updated. Deliberately left: nothing gates notebooks, and an
+> `ImportError` is loud rather than silent.
 
 ---
 

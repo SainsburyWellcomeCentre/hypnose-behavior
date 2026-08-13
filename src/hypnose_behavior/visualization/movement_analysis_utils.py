@@ -14,7 +14,7 @@ from matplotlib.colors import Normalize
 from collections import defaultdict
 from typing import Iterable, Optional, Union, Tuple
 from hypnose_behavior.io.load_results import load_session_results
-from hypnose_behavior.metric_analysis.frames import parse_json_column, odor_letter
+from hypnose_behavior.frames import parse_json_column, odor_letter
 from hypnose_behavior.metric_analysis.run import run_all_metrics
 from datetime import timedelta, datetime
 from hypnose_behavior.io.loaders import load_all_streams, load_experiment
