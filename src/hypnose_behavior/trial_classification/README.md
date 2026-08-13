@@ -127,6 +127,16 @@ A field belongs in `KNOWN_UNCARRIED_FIELDS` only when the information is **not l
 — "nothing reads it today" is not a reason, because the point is the reader that does
 not exist yet.
 
+### Future note — per-position fields are not mode-dependent
+
+`TrialRecord` is per-mode, but `frames.py`'s field lists are global constants: there is no
+`position_data_columns(mode)`. So a per-position field that only one protocol writes still
+appears as an **all-null column on every other session** — harmless for one or two fields,
+but the same problem §21 solved for `trial_data` once it becomes a family. The fix, when a
+new protocol needs it, is to pass `mode=` into `build_position_data` and keep a small
+`{mode: extra_fields}` mapping — **not** to have `frames.py` import
+`io/protocol_schema.py`, which would break the leaf property §3 depends on.
+
 ---
 
 ## Either way: it is an intended output change
