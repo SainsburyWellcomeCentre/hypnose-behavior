@@ -1644,3 +1644,60 @@ and neither updates the other:
 Not `_PRES_FIELDS`. Either way it is an intended output change: `regression` RED on
 `+ added column` (in `trial_data_columns` or `position_data_columns`), regenerated
 deliberately.
+
+---
+
+## 28. Measure which call sites the gate reaches *before* porting them *(Phase 7b.4b, 2026-08-13)*
+
+Phase 7b.4b drops the three blobs, and the drop itself is three lines. The work is the
+readers, and the first question is not "how do I port them" but **"which of them would a
+green gate actually be talking about"** -- section 22 one level deeper. Measured before
+writing any code, by patching `Series.get` / `DataFrame.get` to record the caller's
+`file:line` whenever the key is one of the three blob columns, then running
+`plot_regression`'s full case list in one process.
+
+**`plot_regression` executed 4 of the 11 live per-trial blob reads. Seven were at zero.**
+
+| covered | reads | by |
+|---|---|---|
+| `pred_seq_utils.fa_analysis` | 35 | `fa_analysis` |
+| `movement_analysis_utils` (two `_last_poke_out*`) | 273 / 151 | `plot_trial_traces_by_mode`, `plot_traces_with_speed_threshold` |
+| `sing_rew_movement._last_poke_out` | 155 | `plot_category_traces` |
+
+| at zero | why |
+|---|---|
+| `pred_seq_utils.last_odor_poke_time` / `first_odor_poke_duration` / `poke_time_all_pos` | plotters simply not in `CASES` -- **now added**, 35 -> 38 |
+| `metric_analysis.movement` (`_last_poke_out`, `_last_valve_start`) | see below |
+| `debug.py` (two helpers, both reading a *loaded* `trial_data`) | not plotters; deliberately left unguarded |
+
+Each of the three added cases was checked to **draw real data before being added** --
+482 / 40 / 116 points, and each registers reads at exactly the site it was added for.
+A case that draws nothing is the section 26 trap in a new place: it would have gone green
+by drawing nothing in both trees.
+
+### `compute_speed_analysis` cannot be gated by `plot_regression`, and the reason is a write
+
+Its only caller is `run_speed_analysis_batch`, whose only caller in the repo is a
+notebook -- so no gate reaches it. It cannot simply be added as a case: it **writes
+`speed_analysis.parquet` into `results_dir`**, and `get_derivatives_root()` is
+`/Volumes/harris/hypnose/derivatives`, which is strictly read-only. The same is true of
+`plot_traces_with_speed_threshold` on a session *lacking* that file -- it recomputes and
+saves. The existing movement cases are safe only because both their sessions
+(`sub-040 20251124` / `20251229`, the only two fixtures that have it) already carry the
+file, so they read it.
+
+> **A gate case must not write into the data it reads.** Where that rules a gate out, the
+> control is a one-off equality probe against a *local copy*, recorded with the commit --
+> not a permanent gate, and not a silent gap either.
+
+### What the `build_position_data` call sites hid
+
+The inventory of "reads a blob column" misses a second, larger set: **nine sites pass an
+already-loaded trial frame to `build_position_data`**, which after the drop returns an
+**empty frame with no error**. They are well covered (4,374 reads from 11 cases), but they
+reach `trial_data` through `io/loaders._load_trial_views` / `_load_sorted_session`, *not*
+`io/load_results.load_results_dir` -- so "switch the loader to read the side-table" has to
+mean **both** loaders or those nine break silently. One of them,
+`sing_rew._session_reward_rts`, passes a *filtered* subset (rewarded trials only), so for
+it a file read is not a substitution and needs an explicit filter back to the frame's own
+trials.

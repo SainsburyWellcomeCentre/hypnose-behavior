@@ -108,6 +108,14 @@ CASES = [
     ("trial_poke_duration", [[40]], {"dates": [20251124, 20251229]}),
     ("response_time", [[40]], {"dates": [20251124, 20251229]}),
     ("fa_analysis", [[40]], {"dates": [20251124, 20251229]}),
+    # Added in Phase 7b.4b. Measured 2026-08-13: of the eleven live per-trial reads
+    # of the `position_poke_times` / `presentations` blobs, these three plotters were
+    # the only ones in `visualization/` that no case executed -- so porting them onto
+    # `position_data` would have been verified by nothing. `poke_time_all_pos` also
+    # carries the OdorG-C / OdorG-F preceding-odor split, which nothing else draws.
+    ("last_odor_poke_time", [[40]], {"dates": [20251124, 20251229]}),
+    ("first_odor_poke_duration", [[40]], {"dates": [20251124, 20251229]}),
+    ("poke_time_all_pos", [[40]], {"dates": [20251124, 20251229]}),
     ("valve_to_reward", [[40]], {"dates": [20251124, 20251229]}),
     ("cummulative_poke_time", [[40]], {"dates": [20251124, 20251229]}),
     ("performance", [[40]], {"dates": [20251124, 20251229]}),
