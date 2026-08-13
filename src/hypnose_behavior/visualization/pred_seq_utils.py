@@ -17,11 +17,11 @@ from hypnose_behavior.utils.helpers import (
 	_iter_subject_dirs,
 	session_selectors,
 )
-from hypnose_behavior.frames import build_position_data
+from hypnose_behavior.frames import build_position_data, position_entries_by_trial
+from hypnose_behavior.io.loaders import _load_position_data
 from hypnose_behavior.visualization.prep import (
 	_collect_sessions,
 	_count_to_marker_size,
-	_last_position_entry,
 	_load_sorted_session,
 	_ordered_groups,
 	_parse_json_value,
@@ -80,43 +80,6 @@ def _normalize_odor_name(value):
 		text = text.replace("Odor", "", 1)
 	text = text.strip()
 	return f"Odor{text}" if text else None
-
-
-def _extract_position_entry(pos_dict, position: int):
-	if not isinstance(pos_dict, dict):
-		return None
-	for key, entry in pos_dict.items():
-		if not isinstance(entry, dict):
-			continue
-		entry_pos = entry.get("position")
-		if entry_pos is None:
-			try:
-				entry_pos = int(key)
-			except Exception:
-				entry_pos = None
-		if entry_pos == position:
-			return entry
-	return None
-
-
-def _ordered_position_entries(pos_dict):
-	"""Return [(position, entry), ...] sorted by position. Entries without a
-	resolvable position are placed last in insertion order."""
-	if not isinstance(pos_dict, dict):
-		return []
-	resolved = []
-	for key, entry in pos_dict.items():
-		if not isinstance(entry, dict):
-			continue
-		position = entry.get("position")
-		if position is None:
-			try:
-				position = int(key)
-			except Exception:
-				position = None
-		resolved.append((position, entry))
-	resolved.sort(key=lambda x: (x[0] is None, x[0]))
-	return resolved
 
 
 def _order_sequence_labels(groups):
@@ -340,6 +303,10 @@ def last_odor_poke_time(
 				continue
 			n_trials = len(df)
 			completed = df[df.get("is_aborted") == False]
+			# `in_poke_times` is the flag matching `position_poke_times`, the blob this
+			# read before Phase 7b.4b -- section 2.
+			pokes_by_trial = position_entries_by_trial(
+				_load_position_data(results_dir, df), "in_poke_times")
 			for cat in categories:
 				session_groups = {}
 				cat_df = completed[completed.get("response_time_category") == cat]
@@ -353,10 +320,10 @@ def last_odor_poke_time(
 					seq_label = _sequence_label(seq)
 					if not seq_label:
 						continue
-					pos_dict = _parse_json_value(row.get("position_poke_times"))
-					last_entry = _last_position_entry(pos_dict)
-					if not last_entry:
+					entries = pokes_by_trial.get(row.get("global_trial_id")) or []
+					if not entries:
 						continue
+					last_entry = entries[-1]
 					poke_ms = last_entry.get("poke_time_ms")
 					if poke_ms is None:
 						continue
@@ -559,10 +526,13 @@ def first_odor_poke_duration(
 				continue
 			n_trials = len(df)
 			completed = df[df.get("is_aborted") == False]
+			pokes_by_trial = position_entries_by_trial(
+				_load_position_data(results_dir, df), "in_poke_times")
 			session_groups = {}
 			for _, row in completed.iterrows():
-				pos_dict = _parse_json_value(row.get("position_poke_times"))
-				first_entry = _extract_position_entry(pos_dict, 1)
+				first_entry = next(
+					(e for e in pokes_by_trial.get(row.get("global_trial_id")) or []
+					 if e.get("position") == 1), None)
 				if not first_entry:
 					continue
 				odor_name = first_entry.get("odor_name")
@@ -664,17 +634,18 @@ def poke_time_all_pos(
 					per_cat_sessions[name].append({"n_trials": 0, "groups": {}})
 				continue
 			n_trials = len(df)
+			pokes_by_trial = position_entries_by_trial(
+				_load_position_data(results_dir, df), "in_poke_times")
 			for name, aborted_flag in categories:
 				cat_df = df[df.get("is_aborted") == aborted_flag]
 				session_groups = {}
 				for _, row in cat_df.iterrows():
-					pos_dict = _parse_json_value(row.get("position_poke_times"))
-					if not isinstance(pos_dict, dict):
+					ordered = pokes_by_trial.get(row.get("global_trial_id"))
+					if not ordered:
 						continue
 					trial_idx = int(row["_trial_idx"])
-					ordered = _ordered_position_entries(pos_dict)
 					prev_odor = None
-					for _, entry in ordered:
+					for entry in ordered:
 						odor_name = entry.get("odor_name")
 						poke_ms = entry.get("poke_time_ms")
 						odor_str = str(odor_name) if odor_name is not None else None
@@ -939,6 +910,8 @@ def fa_analysis(
 			# Raw latencies; the 10x-group-mean rule below is a display filter.
 			fa_latencies = fa_latency_from_pokeout(df)
 			port_labels = fa_port_label(fa_df)
+			pokes_by_trial = position_entries_by_trial(
+				_load_position_data(results_dir, df), "in_poke_times")
 
 			session_poke = {}
 			session_resp_raw = []
@@ -947,14 +920,13 @@ def fa_analysis(
 				if last_odor not in odor_whitelist:
 					continue
 
-				pos_dict = _parse_json_value(row.get("position_poke_times"))
-				if not isinstance(pos_dict, dict):
+				ordered_entries = pokes_by_trial.get(row.get("global_trial_id"))
+				if not ordered_entries:
 					continue
-				ordered_entries = _ordered_position_entries(pos_dict)
 				odor_entry = None
 				preceding_odor = None
 				prev = None
-				for _, entry in ordered_entries:
+				for entry in ordered_entries:
 					entry_odor = _normalize_odor_name(entry.get("odor_name"))
 					if entry_odor == last_odor:
 						odor_entry = entry

@@ -23,14 +23,15 @@ Reuses ``_load_tracking_and_behavior`` (tracking + behavior loader) and
 
 from __future__ import annotations
 
-import json
 from typing import Iterable, Optional, Union
 
 import numpy as np
 import pandas as pd
+
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
+from hypnose_behavior.frames import position_entries_by_trial
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.metric_analysis.sing_rew_metrics import _classify_trial
 from hypnose_behavior.utils.helpers import session_selectors
@@ -149,32 +150,24 @@ def _naive_dt(value):
     return ts
 
 
-def _last_poke_out(row):
+def _last_poke_out(row, entries):
     """Time the animal leaves the odor cue port for the last time before its
-    response = the latest ``poke_odor_end`` across all entries in
-    ``position_poke_times``.
+    response = the latest ``poke_odor_end`` across all of the trial's positions.
 
     We take the maximum ``poke_odor_end`` (temporally last) rather than trusting
-    dict/position ordering, so the start is always the final cue-port exit.
+    position ordering, so the start is always the final cue-port exit. That is a
+    *different* rule from the two in ``movement_analysis_utils`` (last entry, and
+    scan back to the first non-null), and they stay separate — ``DECISIONS.md``
+    sections 13 and 14.
     Falls back only to explicit poke-out fields — never to ``sequence_start`` /
     ``sequence_end`` (those are the trial start/end, not the cue exit); if no
     poke-out time is available we return NaT so the trace is skipped rather than
     started at the wrong place.
+
+    ``entries`` is this trial's ``position_data`` rows (Phase 7b.4b; it used to
+    parse the ``position_poke_times`` blob off ``row``).
     """
-    pts = row.get("position_poke_times")
-    if isinstance(pts, str):
-        try:
-            pts = json.loads(pts)
-        except Exception:
-            pts = None
-
-    entries = []
-    if isinstance(pts, dict):
-        entries = [v for v in pts.values() if isinstance(v, dict)]
-    elif isinstance(pts, list):
-        entries = [v for v in pts if isinstance(v, dict)]
-
-    ends = [_naive_dt(v.get("poke_odor_end")) for v in entries]
+    ends = [_naive_dt(v.get("poke_odor_end")) for v in (entries or [])]
     ends = [t for t in ends if pd.notna(t)]
     if ends:
         return max(ends)
@@ -362,6 +355,13 @@ def plot_category_traces(
         tracking["time"] = _naive_dt(tracking["time"])
         tracking = smooth_xy(tracking, smooth_window)
 
+        # `behavior` is a `SessionResults`, so `position_data` is already there --
+        # derived lazily on first access, and a read of the side-table from step 4.
+        # `in_poke_times` matches `position_poke_times`, the blob this read before
+        # Phase 7b.4b (`DECISIONS.md` section 2).
+        pokes_by_trial = position_entries_by_trial(
+            behavior.get("position_data"), "in_poke_times")
+
         td = trial_data.sort_values("global_trial_id").reset_index(drop=True)
         next_init = _naive_dt(td["sequence_start"]).shift(-1) if "sequence_start" in td.columns \
             else pd.Series([pd.NaT] * len(td))
@@ -370,7 +370,7 @@ def plot_category_traces(
             main, sub = _classify_trial(row)
             if main not in CATEGORY_ORDER or sub is None:
                 continue
-            start = _last_poke_out(row)
+            start = _last_poke_out(row, pokes_by_trial.get(row.get("global_trial_id")))
             end = _segment_end(row, main, next_init.iloc[i])
             seg = _extract_segment(tracking, start, end)
             if seg is None:

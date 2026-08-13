@@ -29,7 +29,6 @@ from hypnose_behavior.frames import build_position_data
 from hypnose_behavior.visualization.prep import (
     _collect_sessions,
     _count_to_marker_size,
-    _last_position_entry,
     _load_sorted_session,
     _load_subject_trial_timeline,
     _nice_round,

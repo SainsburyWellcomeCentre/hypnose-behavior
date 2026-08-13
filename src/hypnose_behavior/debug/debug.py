@@ -8,7 +8,10 @@ import re
 
 import pandas as pd
 
-from hypnose_behavior.io.loaders import load_all_streams, load_odor_mapping
+from hypnose_behavior.frames import position_entries_by_trial
+from hypnose_behavior.io.loaders import (
+    _load_position_data, load_all_streams, load_odor_mapping,
+)
 from hypnose_behavior.io.layout import derivatives, normalize_subjid, rawdata
 
 
@@ -71,54 +74,6 @@ def _load_trial_data(results_dir: Path) -> pd.DataFrame:
 	else:
 		trial_df["is_aborted"] = False
 	return trial_df
-
-
-def _parse_like_mapping(value):
-	if isinstance(value, dict):
-		return value
-	if isinstance(value, (list, tuple)):
-		return value
-	if value is None or (isinstance(value, float) and pd.isna(value)):
-		return {}
-	if isinstance(value, str):
-		text = value.strip()
-		if not text:
-			return {}
-		try:
-			return json.loads(text)
-		except Exception:
-			pass
-		try:
-			return ast.literal_eval(text)
-		except Exception:
-			return {}
-	return value
-
-
-def _iter_position_entries(raw_positions):
-	parsed = _parse_like_mapping(raw_positions)
-	if isinstance(parsed, dict):
-		for key, val in parsed.items():
-			if not isinstance(val, dict):
-				try:
-					val = dict(val)
-				except Exception:
-					continue
-			pos = val.get("position")
-			if pos is None:
-				try:
-					pos = int(key)
-				except Exception:
-					pos = key
-			yield pos, val
-	elif isinstance(parsed, (list, tuple)):
-		for val in parsed:
-			if not isinstance(val, dict):
-				try:
-					val = dict(val)
-				except Exception:
-					continue
-			yield val.get("position"), val
 
 
 def _print_small_table(df: pd.DataFrame) -> None:
@@ -290,13 +245,15 @@ def list_short_purges_between_odors(subjid, date, trial_id, *, threshold_ms: flo
 	if bool(row.get("is_aborted", False)):
 		print(f"Trial {trial_id} is aborted; continuing with its stored odor timings.")
 
-	entries = []
-	for position, info in _iter_position_entries(row.get("position_valve_times")):
-		if not isinstance(info, dict):
-			continue
-		entries.append((position, info))
+	# `in_valve_times` is the flag matching `position_valve_times`, the blob this read
+	# before Phase 7b.4b -- and the one that matters most here, since that blob is a
+	# *superset* of the other two (`DECISIONS.md` section 2).
+	valves_by_trial = position_entries_by_trial(
+		_load_position_data(results_dir, match), "in_valve_times")
+	entries = [(info.get("position"), info)
+	           for info in valves_by_trial.get(row.get("global_trial_id")) or []]
 	if not entries:
-		raise ValueError(f"No position_valve_times found for trial {trial_id}")
+		raise ValueError(f"No valve positions found for trial {trial_id}")
 
 	def _position_sort_key(item):
 		position = item[0]
@@ -368,12 +325,15 @@ def poke_below_threshold(subjid, date, *, threshold_ms: float = 200.0):
 	trial_df = _load_trial_data(results_dir)
 	completed = trial_df[~trial_df["is_aborted"]].copy()
 
+	# `in_poke_times` matches `position_poke_times`, the blob this read before 7b.4b.
+	pokes_by_trial = position_entries_by_trial(
+		_load_position_data(results_dir, completed), "in_poke_times")
+
 	rows = []
 	for _, row in completed.iterrows():
 		trial_identifier = row.get("trial_id", row.name)
-		for position, info in _iter_position_entries(row.get("position_poke_times")):
-			if not isinstance(info, dict):
-				continue
+		for info in pokes_by_trial.get(row.get("global_trial_id")) or []:
+			position = info.get("position")
 			poke_ms = pd.to_numeric(info.get("poke_time_ms"), errors="coerce")
 			if pd.isna(poke_ms) or poke_ms <= 0 or float(poke_ms) >= float(threshold_ms):
 				continue

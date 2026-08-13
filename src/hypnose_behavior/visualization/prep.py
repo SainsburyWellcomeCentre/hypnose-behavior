@@ -44,7 +44,7 @@ from hypnose_behavior.utils.helpers import (
 __all__ = [
     "resample_trace", "smooth_xy", "_normalize_date", "_collect_sessions",
     "_load_trial_data", "_load_sorted_session", "_parse_json_value",
-    "_last_position_entry", "_count_to_marker_size", "_nice_round",
+    "_count_to_marker_size", "_nice_round",
     "_summary_save_suffix", "_darken", "_resolve_color", "_ordered_groups",
     "_coerce_tz_naive", "_load_protocol_from_summary",
     "load_tracking_with_behavior", "_load_subject_trial_timeline",
@@ -172,24 +172,6 @@ def _parse_json_value(val):
             return None
 
 
-def _last_position_entry(pos_dict):
-    if not isinstance(pos_dict, dict):
-        return None
-    candidates = []
-    for key, entry in pos_dict.items():
-        if not isinstance(entry, dict):
-            continue
-        position = entry.get("position")
-        if position is None:
-            try:
-                position = int(key)
-            except Exception:
-                position = None
-        candidates.append((position, entry))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda x: (x[0] is None, x[0]))
-    return candidates[-1][1]
 
 
 def _count_to_marker_size(count, *, base_area=36.0, ref_count=10.0, min_area=10.0, max_area=300.0):

@@ -4499,10 +4499,14 @@ def plot_poke_duration_by_position(
     and every position, the mean poke duration (ms) at that position is computed
     and contributes one dot to the corresponding figure:
 
-    - Completed trials (``is_aborted == False``): poke durations are read from the
-      ``position_poke_times`` column, keyed by position.
-    - Aborted trials (``is_aborted == True``): poke durations are read from the
-      ``presentations`` column, excluding the abort event; keyed by position.
+    - Completed trials (``is_aborted == False``): poke durations come from the
+      ``in_poke_times`` rows of ``position_data``, keyed by position.
+    - Aborted trials (``is_aborted == True``): from the ``in_presentations`` rows,
+      excluding the abort event; keyed by position.
+
+    (Those were the ``position_poke_times`` and ``presentations`` JSON columns of
+    ``trial_data`` until Phase 7b.4b; the provenance flags name the same two
+    sources -- ``DECISIONS.md`` section 2.)
 
     Dots are horizontally jittered around each x-tick, with a black mean line and
     SD error bars — mirroring :func:`plot_position_completion_rate`.

@@ -14,7 +14,7 @@ from matplotlib.colors import Normalize
 from collections import defaultdict
 from typing import Iterable, Optional, Union, Tuple
 from hypnose_behavior.io.load_results import load_session_results
-from hypnose_behavior.frames import parse_json_column, odor_letter
+from hypnose_behavior.frames import parse_json_column, odor_letter, position_entries_by_trial
 from hypnose_behavior.metric_analysis.run import run_all_metrics
 from datetime import timedelta, datetime
 from hypnose_behavior.io.loaders import load_all_streams, load_experiment
@@ -35,7 +35,9 @@ from hypnose_behavior.utils.helpers import (
     read_tracking_table,
 )
 from hypnose_behavior.io.layout import derivatives, normalize_subjid
-from hypnose_behavior.io.loaders import _load_table_with_trial_data, _load_trial_views
+from hypnose_behavior.io.loaders import (
+    _load_position_data, _load_table_with_trial_data, _load_trial_views,
+)
 from hypnose_behavior.visualization.prep import resample_trace, smooth_xy
 from hypnose_behavior.visualization.prep import (
     load_tracking_with_behavior,
@@ -941,23 +943,17 @@ def plot_trial_traces_by_mode(
             return None
         return seg["X"].to_numpy(), seg["Y"].to_numpy(), seg["time"].to_numpy()
 
-    def _last_poke_out_by_position(row):
-        pts = row.get("position_poke_times")
-        if isinstance(pts, str):
-            try:
-                pts = json.loads(pts)
-            except Exception:
-                pts = None
-        if isinstance(pts, dict) and pts:
-            vals = list(pts.values())
-            if all(isinstance(v, dict) and "position" in v for v in vals):
-                vals = sorted(vals, key=lambda v: v.get("position", 0))
-            last = vals[-1]
-            return pd.to_datetime(last.get("poke_odor_end"), errors="coerce")
-        if isinstance(pts, list) and pts:
-            last = pts[-1]
-            if isinstance(last, dict):
-                return pd.to_datetime(last.get("poke_odor_end"), errors="coerce")
+    def _last_poke_out_by_position(row, entries):
+        """The **last entry by position**, null accepted -- not a scan back.
+
+        `entries` is this trial's `position_data` rows sorted by position (Phase
+        7b.4b; it used to parse the `position_poke_times` blob off `row`). The rule
+        is deliberately unchanged: when there are entries, the last one's
+        `poke_odor_end` is the answer *even when it is null*, and only a trial with
+        no entries at all falls through to the row-level columns.
+        """
+        if entries:
+            return pd.to_datetime(entries[-1].get("poke_odor_end"), errors="coerce")
         for cand in ["poke_odor_end", "last_poke_out_time", "last_poke_time"]:
             if cand in row:
                 return pd.to_datetime(row.get(cand), errors="coerce")
@@ -1073,6 +1069,10 @@ def plot_trial_traces_by_mode(
                     td[c] = pd.to_datetime(td[c], errors="coerce")
         else:
             td = pd.DataFrame()
+        # `in_poke_times` is the flag matching `position_poke_times`, the blob this read
+        # before Phase 7b.4b (`DECISIONS.md` section 2).
+        pokes_by_trial = position_entries_by_trial(
+            _load_position_data(results_dir, td), "in_poke_times")
 
         if td.empty:
             # Fallback to behavior tables if trial_data is unavailable
@@ -1116,7 +1116,8 @@ def plot_trial_traces_by_mode(
                 seg = _extract_segment(tracking, start, end)
                 if seg is None:
                     continue
-                t_zero = _last_poke_out_by_position(row)
+                t_zero = _last_poke_out_by_position(
+                    row, pokes_by_trial.get(row.get("global_trial_id")))
                 speed_bins = speed_analysis_cache.get(date_str, {}).get(idx_row)
                 yield idx_row, row, seg, t_zero, speed_bins
 
@@ -2035,24 +2036,15 @@ def plot_traces_with_speed_threshold(
         except Exception:
             return pd.NaT
 
-    def _last_poke_out_scanning_back(row):
-        pts = row.get("position_poke_times")
-        if isinstance(pts, str):
-            try:
-                pts = json.loads(pts)
-            except Exception:
-                pts = None
+    def _last_poke_out_scanning_back(entries):
+        """Scan **back by position** to the first non-null `poke_odor_end`.
 
-        entries = []
-        if isinstance(pts, dict) and pts:
-            vals = list(pts.values())
-            if all(isinstance(v, dict) and "position" in v for v in vals):
-                vals = sorted(vals, key=lambda v: v.get("position", 0))
-            entries = vals
-        elif isinstance(pts, list) and pts:
-            entries = [p for p in pts if isinstance(p, dict)]
-
-        for poke in reversed(entries):
+        A different rule from `_last_poke_out_by_position` above, which takes the
+        last entry and accepts its null -- `DECISIONS.md` sections 13 and 14 are
+        about not merging helpers that differ, so both survive the Phase 7b.4b move
+        onto `position_data` unchanged.
+        """
+        for poke in reversed(entries or []):
             dt_val = _safe_dt(poke.get("poke_odor_end"))
             if pd.notna(dt_val):
                 return dt_val
@@ -2171,6 +2163,10 @@ def plot_traces_with_speed_threshold(
         for c in ["sequence_start", "sequence_end", "first_supply_time", "first_reward_poke_time", "fa_time", "speed_threshold_time"]:
             if c in trial_data.columns:
                 trial_data[c] = pd.to_datetime(trial_data[c], errors="coerce")
+        # `in_poke_times` is the flag matching `position_poke_times`, the blob the two
+        # `_last_poke_out_scanning_back` call sites read before Phase 7b.4b (section 2).
+        pokes_by_trial = position_entries_by_trial(
+            _load_position_data(results_dir, trial_data), "in_poke_times")
 
         if thr_series is not None:
             trial_data["speed_threshold_time"] = trial_data.index.map(thr_series)
@@ -2213,7 +2209,8 @@ def plot_traces_with_speed_threshold(
                 else:
                     continue
 
-                t_zero = _last_poke_out_scanning_back(row)
+                t_zero = _last_poke_out_scanning_back(
+                    pokes_by_trial.get(row.get("global_trial_id")))
                 if pd.isna(t_zero):
                     trial_id = row.get("trial_id", idx) if hasattr(row, "get") else idx
                     skipped_no_poke_end.append(trial_id)
@@ -2271,7 +2268,8 @@ def plot_traces_with_speed_threshold(
             else:
                 continue
 
-            t_zero = _last_poke_out_scanning_back(row)
+            t_zero = _last_poke_out_scanning_back(
+                pokes_by_trial.get(row.get("global_trial_id")))
             if pd.isna(t_zero):
                 trial_id = row.get("trial_id", idx) if hasattr(row, "get") else idx
                 skipped_no_poke_end.append(trial_id)

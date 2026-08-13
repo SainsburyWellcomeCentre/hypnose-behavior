@@ -1749,6 +1749,59 @@ This is the same pooled ambiguity section 25 recorded for every other `position_
 metric; it is not newly introduced here, and the fix is to compute per-position metrics one
 session at a time.
 
+### The readers yield entries and reduce nothing *(step 3)*
+
+Thirteen call sites across six modules moved off the blobs, through one primitive:
+`frames.position_entries_by_trial(position_data, flag)` -> `{global_trial_id: [entry, ...]}`
+sorted by position. It **reduces nothing**, because the callers do not agree on what
+"the last poke-out" is:
+
+| caller | rule |
+|---|---|
+| `sing_rew_movement._last_poke_out` | the **maximum** `poke_odor_end`, explicitly not trusting position order |
+| `metric_analysis.movement._last_poke_out`, `movement_analysis_utils._last_poke_out_scanning_back` | scan **back by position** to the first non-null |
+| `movement_analysis_utils._last_poke_out_by_position` | the **last entry**, null accepted, falling through to row columns only when there are no entries at all |
+
+Three rules, one shape of question -- sections 13 and 14 are about not merging helpers
+that differ, so the primitive hands over the entries and each caller keeps its own.
+
+**Every site passes the provenance flag matching the blob it used to read** (section 2):
+`in_poke_times`, or `in_valve_times` for the two valve readers. `_last_valve_start` is the
+one where it bites hardest -- it joins valve rows to poke rows by position, and
+`position_valve_times` is a *superset*, so an unfiltered read would offer the join
+positions the poke blob never had.
+
+`io/loaders._load_position_data(results_dir, trials)` is the **single seam** between "where
+the per-position facts live" and everything that reads them, so step 4 repoints one
+function rather than nine call sites. It takes `trials`, not just the directory, because
+callers do not all pass the whole session -- `sing_rew._session_reward_rts` passes the
+rewarded trials only, and a reader of the saved table must filter back to the frame it was
+handed or the metric silently widens.
+
+Deleted with the port, all of them blob parsers with no remaining purpose:
+`pred_seq_utils._extract_position_entry` / `_ordered_position_entries`,
+`prep._last_position_entry` (imported by two modules, called by neither),
+`debug._parse_like_mapping` / `_iter_position_entries`.
+
+### `compute_speed_analysis` has no gate, so it got a probe -- and the probe needed proving
+
+Four of the ported reads live in `compute_speed_analysis`, which no gate reaches and none
+can (above). Its control: lift `_last_poke_out` and `_last_valve_start` out of **both**
+trees -- they are nested functions, so by AST -- and run them over every trial of all nine
+sessions. **1,731/1,731 identical for both helpers**, on the written parquet and the
+load-time derivation alike.
+
+> **The first sensitivity check reported the probe BLIND, and it was right to.** Perturbing
+> a `poke_odor_end` cell changed nothing, because the cell chosen was not one either helper
+> *reads* -- `_last_poke_out` returns the last non-null by position, and the perturbed row
+> was interior. Re-aimed at the cell each helper actually returns, the probe discriminates:
+> one cell -> `differs: 1`, every `poke_odor_end` +1 ms -> 272 of 273, every `valve_start`
+> +1 ms -> 272 on `valve_start` and **0** on `poke_out`, and vice versa.
+
+**A probe validated with the wrong perturbation proves nothing** -- section 27's "a guard
+whose whitelist is wider than the behaviour it guards" in a second costume. Validate a
+check by perturbing *the value the code under test returns*, not merely a value it can see.
+
 ### Two `presentations` guards that never read the blob
 
 `odorx_abortion_rate` and `plot_false_alarm_rate_by_position` both began

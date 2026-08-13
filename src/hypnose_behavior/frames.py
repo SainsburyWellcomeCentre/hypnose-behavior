@@ -38,6 +38,7 @@ __all__ = [
     "odor_sequence_tokens",
     "sequence_depths",
     "reached_counts",
+    "position_entries_by_trial",
     "build_position_data",
 ]
 
@@ -121,6 +122,49 @@ _TRIAL_KEY = "global_trial_id"
 
 # The provenance flags the depth rule reads, and the marker it filters on.
 _DEPTH_COLUMNS = ("position", _TRIAL_KEY, "in_poke_times", "in_presentations")
+
+
+def position_entries_by_trial(position_data, flag: str = "in_poke_times") -> dict:
+    """``{global_trial_id: [entry, ...]}``, each list sorted by position.
+
+    The replacement, for callers outside ``metric_analysis``, for parsing a trial
+    row's JSON blob and sorting its entries by hand. Each entry is a plain dict,
+    so a caller keeps whatever reduction it already applied -- and they do *not*
+    share one:
+
+    - ``sing_rew_movement._last_poke_out`` takes the **maximum** ``poke_odor_end``
+      across entries, deliberately not trusting position order;
+    - ``metric_analysis.movement._last_poke_out`` scans **back by position** to the
+      first non-null one;
+    - ``movement_analysis_utils._last_poke_out_by_position`` takes the **last
+      entry** and accepts its null.
+
+    Those are three different rules and `DECISIONS.md` sections 13 and 14 are
+    about not merging helpers that differ, so this yields the entries and reduces
+    nothing.
+
+    ``flag`` is the provenance column matching the blob the caller used to read
+    (section 2): ``in_poke_times`` for ``position_poke_times``, ``in_valve_times``
+    for ``position_valve_times``, ``in_presentations`` for ``presentations``.
+    **It is not optional in meaning** -- reading the frame unfiltered picks up the
+    ~0 ms valve positions the other two blobs drop, which is exactly how
+    ``manual_vs_auto_stop_preference`` would change value.
+
+    Returns ``{}`` for an absent or unusable frame, which every caller already
+    treats as "no positions" -- the answer an empty blob gave.
+    """
+    if position_data is None or len(position_data) == 0:
+        return {}
+    if flag not in position_data.columns or _TRIAL_KEY not in position_data.columns:
+        return {}
+    rows = position_data[position_data[flag].astype(bool)]
+    if rows.empty:
+        return {}
+    rows = rows.sort_values([_TRIAL_KEY, "position"], kind="stable")
+    out: dict = {}
+    for entry in rows.to_dict("records"):
+        out.setdefault(entry.get(_TRIAL_KEY), []).append(entry)
+    return out
 
 
 def _aborted_flags(trials):

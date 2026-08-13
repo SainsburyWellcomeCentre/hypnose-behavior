@@ -20,7 +20,6 @@ state of the kind that stopped ``io/paths.py`` moving whole in Phase 2a.
 Source-only move -- no behaviour change.
 """
 
-import json
 import re
 from collections import defaultdict
 from typing import Union
@@ -28,8 +27,9 @@ from typing import Union
 import numpy as np
 import pandas as pd
 
+from hypnose_behavior.frames import position_entries_by_trial
 from hypnose_behavior.io.layout import derivatives, normalize_subjid
-from hypnose_behavior.io.loaders import _load_trial_views
+from hypnose_behavior.io.loaders import _load_position_data, _load_trial_views
 from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
 from hypnose_behavior.utils.helpers import (
@@ -281,24 +281,13 @@ def compute_speed_analysis(
         except Exception:
             return pd.NaT
 
-    def _last_poke_out(row):
-        pts = row.get("position_poke_times")
-        if isinstance(pts, str):
-            try:
-                pts = json.loads(pts)
-            except Exception:
-                pts = None
+    def _last_poke_out(entries):
+        """Scan **back by position** to the first non-null ``poke_odor_end``.
 
-        entries = []
-        if isinstance(pts, dict) and pts:
-            vals = list(pts.values())
-            if all(isinstance(v, dict) and "position" in v for v in vals):
-                vals = sorted(vals, key=lambda v: v.get("position", 0))
-            entries = vals
-        elif isinstance(pts, list) and pts:
-            entries = [p for p in pts if isinstance(p, dict)]
-
-        for poke in reversed(entries):
+        `entries` is this trial's `position_data` rows sorted by position (Phase
+        7b.4b; it used to parse the `position_poke_times` blob off the trial row).
+        """
+        for poke in reversed(entries or []):
             dt_val = _safe_dt(poke.get("poke_odor_end"))
             if pd.notna(dt_val):
                 return dt_val
@@ -314,32 +303,21 @@ def compute_speed_analysis(
             return _safe_dt(row.get("fa_time")) or _safe_dt(row.get("sequence_end"))
         return _safe_dt(row.get("sequence_end"))
 
-    def _parse_position_entries(val):
-        """Normalize position_* collections to a list of dicts sorted by position when present."""
-        if isinstance(val, str):
-            try:
-                val = json.loads(val)
-            except Exception:
-                val = None
-
-        entries = []
-        if isinstance(val, dict) and val:
-            vals = list(val.values())
-            if all(isinstance(v, dict) and "position" in v for v in vals):
-                vals = sorted(vals, key=lambda v: v.get("position", 0))
-            entries = vals
-        elif isinstance(val, list) and val:
-            entries = [v for v in val if isinstance(v, dict)]
-        return entries
-
-    def _last_valve_start(row):
+    def _last_valve_start(valve_entries, poke_entries):
         """Return the last valve_start that has a matching poke_odor_start for the same position.
 
         Iterates positions from highest to lowest; requires both valve_start and poke_odor_start
         for that position. If none meet both criteria, returns NaT.
+
+        Phase 7b.4b: the two blobs become two **flag-filtered views of the same
+        `position_data`** -- `in_valve_times` and `in_poke_times`. Filtering matters
+        here more than anywhere else in this file: `position_valve_times` is a
+        *superset*, holding valve activations whose poke registered as ~0 ms, and
+        reading the frame unfiltered would offer this join positions the poke blob
+        never had (`DECISIONS.md` section 2).
         """
-        pvt_entries = _parse_position_entries(row.get("position_valve_times"))
-        ppt_entries = _parse_position_entries(row.get("position_poke_times"))
+        pvt_entries = valve_entries or []
+        ppt_entries = poke_entries or []
 
         poke_by_pos = {}
         for entry in ppt_entries:
@@ -528,13 +506,19 @@ def compute_speed_analysis(
             if c in trial_data.columns:
                 trial_data[c] = pd.to_datetime(trial_data[c], errors="coerce")
 
+        # One row per trial x position for this session, split by the provenance flag
+        # matching the blob each helper used to read (`DECISIONS.md` section 2).
+        position_data = _load_position_data(results_dir, trial_data)
+        pokes_by_trial = position_entries_by_trial(position_data, "in_poke_times")
+        valves_by_trial = position_entries_by_trial(position_data, "in_valve_times")
+
         trials_info = []
         skipped_no_poke_end = []
         for idx_row, row in trial_data.iterrows():
             cond = _condition_label(row)
             if cond is None:
                 continue
-            t_zero = _last_poke_out(row)
+            t_zero = _last_poke_out(pokes_by_trial.get(row.get("global_trial_id")))
             if pd.isna(t_zero):
                 trial_id = row.get("trial_id", idx_row) if hasattr(row, "get") else idx_row
                 skipped_no_poke_end.append(trial_id)
@@ -663,7 +647,9 @@ def compute_speed_analysis(
                 crossing_time = pd.NaT
                 latency_val = np.nan
                 movement_from_valve = np.nan
-                valve_start = _last_valve_start(trial_data.loc[idx_row]) if "position_valve_times" in trial_data.columns else pd.NaT
+                gid = trial_data.loc[idx_row].get("global_trial_id")
+                valve_start = _last_valve_start(valves_by_trial.get(gid),
+                                                pokes_by_trial.get(gid))
 
                 bins = trial_bins.get(idx_row, {})
                 mids_trial = bins.get("mids")
