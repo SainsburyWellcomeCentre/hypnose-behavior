@@ -314,6 +314,17 @@ _VALVE_FIELDS = ("valve_start", "valve_end", "valve_duration_ms")
 _PRES_FIELDS = ("index_in_trial", "is_last_event", "poke_time_ms", "poke_first_in",
                 "poke_source", "valve_start", "valve_end", "valve_duration_ms")
 
+# The fields taken from `presentations` and from **nowhere else**. Separate from
+# `_PRES_FIELDS`, which documents everything that blob happens to carry and is
+# deliberately *not* read by the builder: its other members are already sourced from
+# `position_poke_times` / `position_valve_times` with `presentations` as the fallback.
+#
+# It exists as its own constant so the copy loop and `CARRIED_FIELDS` are driven by one
+# declaration. They were not: the loop hardcoded this pair while `CARRIED_FIELDS` was
+# built from `_PRES_FIELDS`, so a field added to `_PRES_FIELDS` alone would have passed
+# the guard and still been dropped -- the exact silent loss the guard exists to catch.
+_PRES_ONLY_FIELDS = ("index_in_trial", "is_last_event")
+
 _ID_COLUMNS = ("trial_id", "global_trial_id", "subjid", "date", "session_num")
 
 # Trial-level columns denormalised onto every position row, because a
@@ -326,6 +337,74 @@ _ID_COLUMNS = ("trial_id", "global_trial_id", "subjid", "date", "session_num")
 # agrees with that rule on all 9 fixture sessions, but it is a *different* rule,
 # and 4a reproduces today's values rather than a rule that happens to match.
 _TRIAL_COLUMNS = ("last_event_index",)
+
+# Every blob field `build_position_data` copies onto a position row. The field lists
+# above are a **whitelist**, not a passthrough: a key not named here is dropped
+# silently -- no error, no empty column, nothing. Once Phase 7b.4b removes the blobs
+# from `trial_data`, that silence is data loss, so the set is declared here and
+# checked rather than left implicit.
+# Built from exactly what the copy loop below reads -- **not** from `_PRES_FIELDS`,
+# which is documentation. A guard whose whitelist is wider than the behaviour it guards
+# reports a pass for a field that is still being dropped.
+CARRIED_FIELDS = frozenset(
+    _POKE_FIELDS + _VALVE_FIELDS + _PRES_ONLY_FIELDS
+    + ("position", "odor_name", "required_min_sampling_time_ms")
+)
+
+# Blob fields deliberately **not** carried. A field belongs here only when the
+# information is not lost -- "nothing reads it today" is not a reason, because the
+# point of the check is the reader that does not exist yet.
+#
+# `prior_presentations` is the failed Position-1 attempts preceding a trial: a list of
+# dicts written into position 1's valve entry by `classify_trials._position_valve_times`
+# and read exactly once, *in memory*, by `classify_trials` itself, to build
+# `non_initiated_odor1_attempts` -- which `save_results` already persists as its own
+# table. It also does not fit this grain: one row per failed *attempt*, not per
+# `trial x position`. Measured: 1,730 occurrences over the nine fixture sessions.
+KNOWN_UNCARRIED_FIELDS = {
+    "prior_presentations":
+        "per-attempt, not per-position; already saved as non_initiated_odor1_attempts",
+}
+
+
+class UncarriedPositionFieldError(Exception):
+    """A position blob carries a field `build_position_data` would silently drop.
+
+    Named rather than a bare `ValueError` so it is greppable in a batch log and
+    separately catchable -- `batch_analyze_sessions` wraps each session in
+    `except Exception`, where a `ValueError` is indistinguishable from pandas
+    complaining about an index (the section 20 rule, applied to a second schema check).
+    """
+
+
+def _check_carried(seen_fields, *, strict: bool) -> None:
+    """Report blob fields that `build_position_data` does not carry.
+
+    **Raises at write time, warns at read time**, and the split is the point:
+
+    * `save_results` passes ``strict=True``. The data was just produced by the current
+      classifier, so an unrecognised field means somebody added one and did not carry
+      it across -- exactly the mistake this exists to catch, and it should stop the
+      session rather than write a `position_data` quietly missing a column. Raising is
+      the safe failure in bulk for the section 20 reason: the batch catches per
+      session, names it, writes nothing, and carries on.
+    * every read path leaves it ``False``. This function also runs over sessions saved
+      years ago, whose blobs are *not* today's (section 2), and refusing to read
+      historical data because it carries a field we since stopped writing would be a
+      far worse failure than dropping it.
+    """
+    unknown = sorted(f for f in seen_fields
+                     if f not in CARRIED_FIELDS and f not in KNOWN_UNCARRIED_FIELDS)
+    if not unknown:
+        return
+    detail = (f"position blob field(s) {', '.join(unknown)} are not carried into "
+              f"`position_data` and would be silently dropped. Add them to "
+              f"`_POKE_FIELDS` / `_VALVE_FIELDS` / `_PRES_ONLY_FIELDS` in `frames.py` "
+              f"(NOT `_PRES_FIELDS`, which the builder does not read), or to "
+              f"`KNOWN_UNCARRIED_FIELDS` with a reason the information is not lost.")
+    if strict:
+        raise UncarriedPositionFieldError(detail)
+    warnings.warn(detail, RuntimeWarning, stacklevel=3)
 
 
 def _entries_by_position(val) -> dict[int, dict]:
@@ -349,8 +428,12 @@ def _entries_by_position(val) -> dict[int, dict]:
     return out
 
 
-def build_position_data(trials) -> pd.DataFrame:
+def build_position_data(trials, *, strict: bool = False) -> pd.DataFrame:
     """Expand the per-trial position blobs into one row per ``trial x position``.
+
+    ``strict=True`` raises `UncarriedPositionFieldError` when a blob carries a field
+    this function would drop. `save_results` passes it; read paths do not. See
+    ``_check_carried``.
 
     The long frame every per-position and per-odor metric groups on. Built from
     the union of ``position_poke_times``, ``presentations`` and
@@ -382,11 +465,18 @@ def build_position_data(trials) -> pd.DataFrame:
 
     id_cols = [c for c in _ID_COLUMNS + _TRIAL_COLUMNS if c in trials.columns]
     rows = []
+    # Accumulated across the whole frame and checked once, rather than per entry: the
+    # answer is a property of the session, and a per-entry check would emit the same
+    # warning thousands of times.
+    seen_fields: set = set()
     for _, trial in trials.iterrows():
         poke = _entries_by_position(trial.get("position_poke_times", {}))
         pres = _entries_by_position(trial.get("presentations", []))
         valve = _entries_by_position(trial.get("position_valve_times", {}))
         aborted = _is_aborted(trial)
+        for entries in (poke, pres, valve):
+            for entry in entries.values():
+                seen_fields.update(entry)
 
         for pos in sorted(set(poke) | set(pres) | set(valve)):
             p_entry, r_entry, v_entry = poke.get(pos, {}), pres.get(pos, {}), valve.get(pos, {})
@@ -411,8 +501,10 @@ def build_position_data(trials) -> pd.DataFrame:
             # Valve fields: position_valve_times wins, presentations fills in.
             for f in _VALVE_FIELDS:
                 row[f] = v_entry.get(f, r_entry.get(f))
-            for f in ("index_in_trial", "is_last_event"):
+            # Only `presentations` carries these, so there is no fallback source.
+            for f in _PRES_ONLY_FIELDS:
                 row[f] = r_entry.get(f)
             rows.append(row)
 
+    _check_carried(seen_fields, strict=strict)
     return pd.DataFrame(rows)

@@ -322,7 +322,17 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     #
     # Built after `global_trial_id` is assigned above, because that is one of the id
     # columns `build_position_data` carries onto every row.
-    classification["position_data"] = build_position_data(classification["trial_data"])
+    #
+    # **`strict=True`, and only here.** The blobs were just built by this run's
+    # classifier, so a field `build_position_data` does not carry means somebody added
+    # one and did not carry it across -- and once 7b.4b drops the blobs, that is data
+    # loss with no signal. Raising stops this session before it writes a `position_data`
+    # quietly missing a column; `batch_analyze_sessions` catches per session, so the
+    # broken one names itself and the batch completes (the section 20 rule). Read paths
+    # deliberately stay lenient: they also run over sessions saved long before these
+    # field lists existed, and refusing to read those would be the worse failure.
+    classification["position_data"] = build_position_data(
+        classification["trial_data"], strict=True)
 
     def _save_df(name: str, df) -> bool:
         """Write one table: parquet always, CSV only when asked for.

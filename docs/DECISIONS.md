@@ -1549,3 +1549,98 @@ after. Final compare **54/54 green**, 9/9 on each of the six keys.
 > Also: `Bash(timeout=)` is capped at 600000 ms and **silently clamps**, so a longer value
 > reads as a 10-minute kill on a job that needs more. Run the long gates in the background
 > instead.
+
+---
+
+## 27. A blob field that nobody carries is a raise, not a silent drop *(Phase 7b.4b prep, 2026-08-13)*
+
+`build_position_data` copies a **whitelist** of named fields out of the three per-trial
+blobs. A key not on that list is dropped with no error, no empty column and no signal.
+While the blobs remain in `trial_data` that is harmless -- the data is still there. Once
+7b.4b removes them it is **data loss with nothing to notice it**, and the person who
+loses the data is whoever adds a field to `classify_trials` and assumes it is saved.
+
+So the whitelist is now enforced, in two complementary places.
+
+### Strict at write, lenient at read -- and the split is the whole design
+
+`build_position_data(trials, *, strict=False)`:
+
+- **`save_results` passes `strict=True`.** The blobs were just produced by this run's
+  classifier, so an unrecognised field means somebody added one and did not carry it.
+  It raises `UncarriedPositionFieldError`, naming the field and both remedies. Raising
+  is the safe failure in bulk for section 20's reason: `batch_analyze_sessions` catches
+  per session, so the broken session names itself, writes nothing, and the batch
+  completes.
+- **Every read path leaves it `False`.** The same function runs over sessions saved long
+  before these field lists existed, whose blobs are *not* today's (section 2). Refusing
+  to read historical data because it carries a field we since stopped writing would be a
+  far worse failure than dropping it. So the read path warns.
+
+The check accumulates the field names seen across the whole frame and tests once, rather
+than per entry: the answer is a property of the session, and a per-entry test would emit
+the same warning thousands of times.
+
+### One declaration, shared with the gate
+
+`KNOWN_UNCARRIED_FIELDS` lives in `frames.py` and `qc/position_data_lossless.py`
+**imports** it. A second copy in the gate is exactly the duplication that lets one be
+updated and the other not, leaving a gate that blesses what the runtime forbids.
+
+It holds one entry. `prior_presentations` is the failed Position-1 attempts preceding a
+trial, read once *in memory* by `classify_trials` to build `non_initiated_odor1_attempts`
+-- which is already persisted as its own table -- and it does not fit this grain anyway:
+one row per failed *attempt*, not per `trial x position`. A field belongs on that list
+only when the information is **not lost**; "nothing reads it today" is not a reason,
+because the point is the reader that does not exist yet.
+
+### `qc/position_data_lossless.py` asserts the precondition for the drop
+
+**Not "the two are identical"** -- that can never be true (section 24), and a gate built
+on it would be wrong rather than strict. It asserts the claim that actually licenses the
+drop: *every field of every blob entry is recoverable from the matching `position_data`
+row, with an equal value, except a named allow-list.* Per `(blob, key)` it reports
+`equal` / `differs` / `absent`; `differs` always fails, `absent` fails unless
+allow-listed.
+
+**Measured, 9 sessions:** 25 of 26 pairs carried with **`differs: 0` and `absent: 0`**
+on all 4,791 occurrences each; the 26th is the allow-listed one, 1,730 occurrences.
+
+**Proved before trusted (section 17), on four paths:** emptying the allow-list reports
+`prior_presentations` as NOT CARRIED; corrupting **one cell of 9,770** reports
+`differs: 1` and names the trial, position and both values; dropping a carried column
+reports NOT CARRIED on all 383; and the clean run is GREEN.
+
+### The trap the guard itself walked into
+
+The first version of the guard built its whitelist from `_POKE_FIELDS + _VALVE_FIELDS +
+_PRES_FIELDS`. **`_PRES_FIELDS` is not read by the builder** -- it documents what that
+blob happens to carry, while the copy loop hardcoded `("index_in_trial",
+"is_last_event")` and sourced everything else from the poke/valve lists with
+`presentations` as fallback. So a field added to `_PRES_FIELDS` alone would have
+**passed the guard and still been dropped**: a false pass in precisely the scenario the
+guard exists for.
+
+Fixed by introducing `_PRES_ONLY_FIELDS`, read by *both* the copy loop and
+`CARRIED_FIELDS`, so one declaration drives behaviour and check alike. The error message
+now says explicitly not to use `_PRES_FIELDS`. `CARRIED_FIELDS` is unchanged at 13 names
+-- `_PRES_FIELDS` was a strict subset -- so no output moved, confirmed by `regression`
+GREEN 54/54.
+
+> **The general rule: a guard whose whitelist is wider than the behaviour it guards
+> reports a pass for something still broken.** Derive the check from what the code
+> actually reads, never from a constant that merely looks authoritative.
+
+### Adding a field later: two grains, no propagation between them
+
+`TrialRecord` and the blob field lists are **separate declarations at different grains**,
+and neither updates the other:
+
+| adding… | declare in | automatic | still manual |
+|---|---|---|---|
+| a **trial-level** field (one value per trial) | the right `TrialRecord` class | `trial_data_columns()`, `save_results`' conform, the loader's schema check | assign it in `classify_trials`; add to `DATETIME_FIELDS` if it is a datetime (section 21) |
+| a **per-position** field (one per `trial x position`) | `_POKE_FIELDS` / `_VALVE_FIELDS` / `_PRES_ONLY_FIELDS` | nothing | the list entry -- but `save_results` **raises** if you forget |
+
+Not `_PRES_FIELDS`. Either way it is an intended output change: `regression` RED on
+`+ added column` (in `trial_data_columns` or `position_data_columns`), regenerated
+deliberately.
