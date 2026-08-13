@@ -1300,3 +1300,78 @@ read `trial_data.csv` directly -- `_common` fingerprints the *canonical CSV*.
 > **Never rely on the default in the harness.** The gate would then change meaning whenever
 > the default did, and the failure is not a mismatch but a `FileNotFoundError` on a file
 > nobody decided to stop writing.
+
+---
+
+## 24. `position_data` is a written table, and it is a *projection* of the blobs *(Phase 7b.4a, 2026-08-13)*
+
+`position_data.parquet` is written beside `trial_data.parquet`: one row per
+`trial x position`, with `poke_source` and section 2's three provenance flags
+(`in_poke_times` / `in_presentations` / `in_valve_times`) as real typed columns rather than
+a table smuggled into a JSON string inside a cell.
+
+**Additive, deliberately.** The three blobs stay in `trial_data` and `load_results_dir`
+still derives the frame; 7b.4b makes the loader read the file and only then drops them. So
+7b.4a moves no existing column and no metric value -- `regression` GREEN 9/9, no
+regeneration.
+
+### It is built from the in-memory frame, and that is the point
+
+The blobs are JSON-encoded on their way into `trial_data.parquet`, so a frame derived at
+*load* time gets its five timestamp fields back as **ISO strings**. Built here, before
+serialisation, they are real `datetime64[ns]`. That is the entire "typed columns" win, and
+it is why the side-table is worth writing rather than just being a cached derivation.
+
+**Measured, not assumed, across all nine fixture sessions (4,791 position rows):** the
+load-derived and file-written frames agree on **every cell of every column** once parsed,
+and differ **only** in the dtype of `poke_odor_start`, `poke_odor_end`, `poke_first_in`,
+`valve_start` and `valve_end`. No value moves and no precision changes -- the same instants,
+differently typed. All 14 evaluable `position_data` metrics return identical results either
+way, because each reads those columns through `metrics.common._tz_naive`, i.e.
+`pd.to_datetime`. (The 15th, `hidden_rule_counts_by_odor`, needs its wrapper for
+`hr_odors`/`hr_positions` (section 5) so `spec.call` raises; it reads none of the five
+columns, so it is *unmeasured by that probe* rather than verified.)
+
+> **Neither `regression.py` nor any other gate watches this file.**
+> `_common.fingerprint_session` fingerprints the canonical CSV of `trial_data` and the
+> metrics dict -- `position_data` is neither, and the four metrics that touch its timestamp
+> columns (`hr_abort_poke_gap`, `reward_delivery_latency`, `trial_poke_span`,
+> `valve_to_reward_latency`) are all **unreported**, so they are not in the metrics dict
+> either. 7b.4a goes GREEN because it is additive, *not* because anything checked the new
+> table. Gating it means adding a third md5 to `_common`, as its own commit with its own
+> `--generate`.
+
+### The projection is lossless for every field anything reads -- with one exception
+
+`build_position_data` is a **union with merge**, not an encoding: poke fields take
+`position_poke_times` and fall back to `presentations`, valve fields take
+`position_valve_times` and fall back to `presentations`, and any key outside its field lists
+is dropped. So "the side-table is byte-identical to the blobs" is a sentence that cannot be
+true, and 7b.4b's control must be an **inventory**, not a hash.
+
+Measured exhaustively over the nine sessions -- every trial, every blob, every position,
+every key -- **25 of 26 `(blob, key)` pairs are carried with an equal value on all 4,791
+occurrences**, and `differs` is **zero everywhere**: the merge precedence never actually
+discards a value, because the blobs agree on every shared field. The lossiness is by field
+selection alone.
+
+The one exception is **`position_valve_times.prior_presentations`** (1,730 occurrences, all
+absent). It is written into position 1's valve entry by `classify_trials` and read exactly
+once, *in memory*, by `classify_trials` itself, to build `non_initiated_odor1_attempts` --
+which `save_results` already persists as its own table. Nothing reads it off a saved
+`trial_data`. It also would not fit this table's grain: it is one row per *failed
+position-1 attempt*, not per `trial x position`.
+
+> So the honest statement, and the one 7b.4b may rely on: **`position_data` carries every
+> blob field that any reader consumes.** The single dropped key is redundant with an
+> existing saved table.
+
+### What this does not license
+
+Dropping the blobs. Measured separately: **15 live reads across 7 modules** read them off a
+*loaded* `trial_data`, and `frames.sequence_depth` reads them off a **trial row** to feed
+`reached_counts` -- the per-position denominator of `abortion_rate_positionX` and
+`fa_abortion_stats`, both **reported** metrics. That work is 7b.4b, and it is sequenced
+after 7b.6 because `plot_regression` cannot see the switch until the server carries both
+representations: before the re-analysis no saved file has a `position_data.parquet`, so the
+fallback fires on both trees and a green diff would mean nothing.

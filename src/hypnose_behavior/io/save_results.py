@@ -24,6 +24,12 @@ from hypnose_helpers.provenance import provenance
 from hypnose_behavior.io.protocol_schema import (
     ABORT_COLUMNS, ASSEMBLED_COLUMNS, RESPONSE_TIME_COLUMNS, trial_data_columns,
 )
+# The one derivation of the long per-position frame, shared with `io/load_results.py`,
+# so the table written here and the one the loader falls back to deriving cannot drift
+# apart. `hypnose_behavior.frames` is a package-root leaf (standard library and pandas
+# only), which is what lets `trial_classification` reach it through this module without
+# picking up a `metric_analysis` dependency -- `docs/DECISIONS.md` section 3.
+from hypnose_behavior.frames import build_position_data
 # One rule for rewarded/unrewarded/timeout, shared with trial_classification. That module is a
 # leaf importing nothing from the package, so this is not a cycle -- DECISIONS section 3.
 from hypnose_behavior.trial_classification.outcome import classify_completed_trial, TIMEOUT
@@ -296,6 +302,28 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     else:
         classification["trial_data"] = pd.DataFrame()
 
+    # The measured per-position table: one row per `trial x position`, with `poke_source`
+    # and section 2's three provenance flags (`in_poke_times` / `in_presentations` /
+    # `in_valve_times`) as real typed columns instead of a table smuggled into a cell.
+    #
+    # **Additive for now.** The three blobs stay in `trial_data` and the loader still
+    # derives this frame; Phase 7b.4b makes the loader read the file and then drops them.
+    # So this changes no existing column and no metric value.
+    #
+    # Built from the **in-memory** `trial_df`, deliberately, and that is the whole reason
+    # this is worth writing: the blobs are JSON-encoded on their way into
+    # `trial_data.parquet`, so a frame derived at *load* time gets its five timestamp
+    # fields back as ISO strings, while this one carries real `datetime64`. Measured
+    # across the nine fixture sessions (4,791 position rows): the two agree on every
+    # cell of every column once parsed, and differ only in the dtype of `poke_odor_start`
+    # / `poke_odor_end` / `poke_first_in` / `valve_start` / `valve_end`. Every metric
+    # reading those normalises through `metrics.common._tz_naive` (`pd.to_datetime`), so
+    # all 14 evaluable `position_data` metrics return identical values either way.
+    #
+    # Built after `global_trial_id` is assigned above, because that is one of the id
+    # columns `build_position_data` carries onto every row.
+    classification["position_data"] = build_position_data(classification["trial_data"])
+
     def _save_df(name: str, df) -> bool:
         """Write one table: parquet always, CSV only when asked for.
 
@@ -334,8 +362,9 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
             vprint(verbose, f"[save] WARNING: failed writing {name}: {e}")
             return False
 
-    # Save only the streamlined set: trial_data plus the non-initiated tables.
-    for k in ("trial_data", "non_initiated_sequences",
+    # Save only the streamlined set: trial_data, its per-position side-table, and the
+    # non-initiated tables.
+    for k in ("trial_data", "position_data", "non_initiated_sequences",
               "non_initiated_odor1_attempts", "non_initiated_FA"):
         df = classification.get(k) if isinstance(classification, dict) else None
         if _save_df(k, df):
@@ -436,7 +465,7 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
         df = classification.get(name)
         return int(len(df)) if isinstance(df, pd.DataFrame) else 0
     for k in [
-        "trial_data","non_initiated_sequences","non_initiated_odor1_attempts","non_initiated_FA",
+        "trial_data","position_data","non_initiated_sequences","non_initiated_odor1_attempts","non_initiated_FA",
     ]:
         counts[k] = _n(k)
     # Attach per-run parameters to manifest runs
