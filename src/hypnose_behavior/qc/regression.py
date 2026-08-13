@@ -1,12 +1,23 @@
 #!/usr/bin/env python
 """Golden-master regression: confirm the pipeline output is unchanged.
 
-Fingerprints ``trial_data`` + the metrics dict for the coverage sessions in
-``sessions.yml`` and compares against stored baselines in ``fixtures/``. On a
-mismatch it reports *what* changed (added / removed / changed columns of
-trial_data, and added / removed / changed top-level metric keys), so an intended
-change (e.g. a new metric or column) is easy to confirm as "everything identical
-except X".
+Fingerprints six things for each coverage session in ``sessions.yml`` and compares
+them against stored baselines in ``fixtures/``:
+
+  ``trial_data``          the canonical CSV
+  ``metrics``             the reported metrics dict (``run.REPORT``, 25 entries)
+  ``position_data``       the per-position side-table, as written
+  ``metrics_by_trial``    the per-trial metric table, as written
+  ``metrics_by_poke``     the per-poke metric table, as written
+  ``unreported_metrics``  the 16 registered metrics ``REPORT`` does not save
+
+The last four were added in Phase 7b.6 and closed a real gap: the three tables were
+written by code no gate read back, and 18 registered metrics were computed by code no
+gate ran, so the GREENs that landed them measured *additivity* rather than coverage.
+
+On a mismatch it reports *what* changed (added / removed / changed columns, and
+added / removed / changed metric keys), so an intended change is easy to confirm as
+"everything identical except X".
 
 Usage
 -----
@@ -115,7 +126,21 @@ def compare(targets: set[str]) -> int:
         for key, parts_key, label_word in (
             ("trial_data", "trial_data_columns", "column"),
             ("metrics", "metrics_keys", "metric"),
+            # Added in Phase 7b.6. Before it, the three written tables and the 18
+            # unreported metrics had no coverage at all.
+            ("position_data", "position_data_columns", "column"),
+            ("metrics_by_trial", "metrics_by_trial_columns", "column"),
+            ("metrics_by_poke", "metrics_by_poke_columns", "column"),
+            ("unreported_metrics", "unreported_metrics_keys", "metric"),
         ):
+            # A fixture written before this key existed carries no baseline for it.
+            # Say so rather than raising KeyError, and count it -- "no baseline" is not
+            # a pass.
+            if key not in expected:
+                print(f"  [NO BASELINE] sub-{subjid} {date} ({label}) {key}: "
+                      f"fixture predates this check -- run --generate")
+                red += 1
+                continue
             if got[key] != expected[key]:
                 print(f"  [RED]  sub-{subjid} {date} ({label}) {key}: "
                       f"expected {expected[key][:8]} got {got[key][:8]}")

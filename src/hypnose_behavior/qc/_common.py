@@ -39,6 +39,50 @@ import hypnose_behavior.io.paths as _paths
 from hypnose_behavior.trial_classification.run import analyze_session_multi_run_by_id_date
 from hypnose_behavior.io.load_results import load_session_results
 from hypnose_behavior.metric_analysis.run import run_all_metrics
+from hypnose_behavior.metric_analysis.registry import REGISTRY
+# ---------------------------------------------------------------------------
+
+
+# Registered metrics that `run.REPORT` does not save, and which are therefore absent
+# from the metrics dict this harness fingerprints. Before Phase 7b.6 all 18 had
+# **zero** coverage: a change to any of them was invisible to every gate.
+#
+# **Sixteen of the eighteen, and the boundary is principled rather than arbitrary.**
+# `rolling_reward_fraction` and `rolling_hr_reward_fraction` take `window`
+# *positionally, with no default*, so fingerprinting them would mean inventing a
+# figure choice -- exactly the session-vs-figure line `DECISIONS.md` section 5 draws.
+# The rest are callable from their frames alone, or have defaults that mean something
+# definite: `fa_types=None` / `fr_types=None` are *unfiltered*, `aborted=False` is
+# *completed*. Only that default variant is covered; a change reachable only with a
+# non-default argument still is not.
+#
+# **Every one was checked to be populated before being fingerprinted** (section 26),
+# because `--generate` blesses whatever a metric returns and a hash of an empty
+# result is a canonised bug. Measured over the nine sessions: 14 populated on all 9,
+# `fa_latency_from_pokeout` on 7 (it needs false alarms) and `hr_abort_poke_gap` on 3
+# (it needs a hidden rule). None was empty everywhere.
+UNREPORTED_METRICS = (
+    "fa_latency_from_pokeout",
+    "fa_port_counts",
+    "fa_rate_by_odor",
+    "fa_rate_by_position",
+    "false_response_ratio",
+    "hidden_rule_mask",
+    "hr_abort_poke_gap",
+    "inter_trial_interval",
+    "poke_duration_by_odor",
+    "poke_duration_by_position",
+    "poke_durations",
+    "presentation_counts_by_odor",
+    "reward_delivery_latency",
+    "trial_poke_span",
+    "trial_poke_total",
+    "valve_to_reward_latency",
+)
+
+# The tables written beside `trial_data`, fingerprinted from the **written file** so the
+# save path added in 7b.4a / 7b.5 is covered rather than just the in-memory frame.
+SIDE_TABLES = ("position_data", "metrics_by_trial", "metrics_by_poke")
 # ---------------------------------------------------------------------------
 
 
@@ -77,6 +121,66 @@ def _metrics_fingerprint(metrics: dict) -> tuple[str, dict]:
     return overall, per_key
 
 
+def _canonical_table_df(parquet_path: Path) -> "pd.DataFrame":
+    """A saved table in canonical form: columns sorted, index reset.
+
+    Reads the **parquet**, because that is the only copy `save_csv=False` writes, but
+    fingerprints its *CSV rendering* rather than the file bytes -- pyarrow version and
+    compression metadata are not deterministic, which is why `trial_data` has always
+    been fingerprinted through the canonical CSV rather than the parquet.
+    """
+    df = pd.read_parquet(parquet_path)
+    return df.reindex(sorted(df.columns), axis=1).reset_index(drop=True)
+
+
+def _table_fingerprint(parquet_path: Path) -> tuple[str, dict]:
+    """Return (overall md5, {column_name: md5}) for a saved side-table."""
+    df = _canonical_table_df(parquet_path)
+    overall = _md5(df.to_csv(index=False))
+    per_col = {str(c): _md5(df[c].to_csv(index=False, header=False)) for c in df.columns}
+    return overall, per_col
+
+
+def _canonical_metric_value(value) -> str:
+    """Deterministic text for any registered metric's return value.
+
+    The unreported metrics return four different shapes -- `DataFrame`, `Series`,
+    `dict` and `tuple` (`fa_port_counts`, `false_response_ratio`) -- so this dispatches
+    rather than assuming. Frames go through `to_csv`, which preserves row order and is
+    stable across pandas' repr changes; everything else through `json.dumps` with
+    `sort_keys` and `default=str`, which renders a tuple as a list, deterministically.
+    """
+    if isinstance(value, pd.DataFrame):
+        return value.to_csv(index=True)
+    if isinstance(value, pd.Series):
+        return value.to_csv(index=True, header=False)
+    return json.dumps(value, sort_keys=True, default=str)
+
+
+def _unreported_metrics_fingerprint(results) -> tuple[str, dict]:
+    """Fingerprint the registered metrics `run.REPORT` does not save.
+
+    Each is called at its **default** arguments via `MetricSpec.call`, i.e. the same
+    `f(frame)` expression the registry defines. A metric that raises is recorded as
+    `ERROR: ...` rather than skipped, so losing the ability to compute one is a RED
+    instead of a silently shorter fingerprint.
+    """
+    per_key = {}
+    for name in UNREPORTED_METRICS:
+        spec = REGISTRY.get(name)
+        if spec is None:
+            per_key[name] = _md5("ABSENT FROM REGISTRY")
+            continue
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                value = spec.call(results)
+            per_key[name] = _md5(_canonical_metric_value(value))
+        except Exception as e:
+            per_key[name] = _md5(f"ERROR: {type(e).__name__}: {e}")
+    overall = _md5(json.dumps(per_key, sort_keys=True))
+    return overall, per_key
+
+
 def diff_report(label: str, fixture_parts: dict, current_parts: dict, indent: str = "      ") -> list[str]:
     """Human-readable added/removed/changed lines between two {name: md5} maps."""
     fset, cset = set(fixture_parts), set(current_parts)
@@ -109,12 +213,27 @@ def fingerprint_session(subjid, date) -> dict:
     """Run classification + metrics for one session in an isolated temp derivatives
     dir and return its fingerprint:
 
-        {'trial_data': md5, 'trial_data_columns': {col: md5},
-         'metrics': md5,    'metrics_keys': {key: md5}}
+        {'trial_data':         md5, 'trial_data_columns':         {col: md5},
+         'metrics':            md5, 'metrics_keys':               {key: md5},
+         'position_data':      md5, 'position_data_columns':      {col: md5},
+         'metrics_by_trial':   md5, 'metrics_by_trial_columns':   {col: md5},
+         'metrics_by_poke':    md5, 'metrics_by_poke_columns':    {col: md5},
+         'unreported_metrics': md5, 'unreported_metrics_keys':    {name: md5}}
 
     The overall md5s are the pass/fail signal; the per-column / per-key md5s let a
     mismatch report exactly *what* changed. Raises on any failure so a broken
     session is never silently fingerprinted.
+
+    **The three tables are fingerprinted from the written files** (Phase 7b.6), so the
+    save path is covered and not merely the in-memory frame. Before this, `trial_data`
+    and the reported metrics were the whole gate: `position_data.parquet` and the two
+    metric tables were written by code no gate read back, and 18 registered metrics
+    were computed by code no gate ran. Both GREENs that landed them were *additivity*,
+    not coverage.
+
+    A missing side-table is recorded as the md5 of `"ABSENT"` rather than skipped, so a
+    session that silently stops writing one is a RED and not a shorter fingerprint --
+    the section 2 rule that an absent marker must not read as agreement.
     """
     subjid = str(subjid)
     date = str(date)
@@ -137,18 +256,39 @@ def fingerprint_session(subjid, date) -> dict:
                 f"trial_data.csv not found for subj={subjid} date={date} under {tmp}"
             )
         trial_data_md5, trial_data_columns = _trial_data_fingerprint(matches[0])
+        results_dir = matches[0].parent
 
         with contextlib.redirect_stdout(sink):
             results = load_session_results(subjid, date)
-            metrics = run_all_metrics(results, save_txt=False, save_json=False, save_tables=False)
+            # `save_tables=True` explicitly, never by default -- the section 23 rule. The
+            # value differs from the other two flags because these tables are *what is
+            # being fingerprinted*, so they have to exist; the rule was "pass it
+            # explicitly", not "pass False".
+            metrics = run_all_metrics(results, save_txt=False, save_json=False, save_tables=True)
         metrics_md5, metrics_keys = _metrics_fingerprint(metrics)
 
-    return {
-        "trial_data": trial_data_md5,
-        "trial_data_columns": trial_data_columns,
-        "metrics": metrics_md5,
-        "metrics_keys": metrics_keys,
-    }
+        fingerprint = {
+            "trial_data": trial_data_md5,
+            "trial_data_columns": trial_data_columns,
+            "metrics": metrics_md5,
+            "metrics_keys": metrics_keys,
+        }
+
+        for name in SIDE_TABLES:
+            path = results_dir / f"{name}.parquet"
+            if path.exists():
+                table_md5, table_columns = _table_fingerprint(path)
+            else:
+                table_md5, table_columns = _md5("ABSENT"), {}
+            fingerprint[name] = table_md5
+            fingerprint[f"{name}_columns"] = table_columns
+
+        with contextlib.redirect_stdout(sink):
+            unreported_md5, unreported_keys = _unreported_metrics_fingerprint(results)
+        fingerprint["unreported_metrics"] = unreported_md5
+        fingerprint["unreported_metrics_keys"] = unreported_keys
+
+    return fingerprint
 
 
 def env_fingerprint() -> dict:

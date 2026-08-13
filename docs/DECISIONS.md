@@ -1461,3 +1461,91 @@ No CLI flag was added: the batch's per-session call picks up the default, which 
 counted** (not the banner -- section 22) with all four movement plotters present and all
 three `poke_durations` consumers exercised; `verify_scripts` GREEN, covering the
 `batch_process` path that writes the tables; `check_imports` PASS.
+
+---
+
+## 26. The gate now covers what it writes, and the 16 metrics nothing watched *(Phase 7b.6, 2026-08-13)*
+
+`regression.py` fingerprints **six** things per session, not two:
+
+| key | what it covers |
+|---|---|
+| `trial_data` | the canonical CSV -- unchanged |
+| `metrics` | the reported metrics dict (`run.REPORT`, 25 entries) -- unchanged |
+| `position_data` | the side-table, **as written** |
+| `metrics_by_trial` | the per-trial metric table, **as written** |
+| `metrics_by_poke` | the per-poke metric table, **as written** |
+| `unreported_metrics` | 16 registered metrics `REPORT` does not save |
+
+**This closed a real gap, not a theoretical one.** 7b.4a and 7b.5 both landed GREEN, and
+in both cases the GREEN measured *additivity* rather than coverage: the three tables were
+written by code no gate read back, and 18 registered metrics were computed by code no gate
+ran. A fingerprint that never looks at a file cannot tell "unchanged" from "unwatched".
+
+The tables are fingerprinted from the **written file**, so the save path is covered; a
+missing table records the md5 of `"ABSENT"` rather than being skipped, so a session that
+silently stops writing one is a RED and not a shorter fingerprint (the section 2 rule).
+`_common` therefore passes `save_tables=True` **explicitly** -- section 23's rule was
+*pass it explicitly*, not *pass False*.
+
+### Sixteen of eighteen, and the boundary is the section 5 line
+
+`rolling_reward_fraction` and `rolling_hr_reward_fraction` take `window` **positionally,
+with no default**, so fingerprinting them means inventing a figure choice. They are left
+out. The other 16 are callable from their frames alone or have defaults that mean
+something definite -- `fa_types=None` / `fr_types=None` are *unfiltered*, `aborted=False`
+is *completed*. **Only that default variant is covered**; drift reachable only through a
+non-default argument still is not.
+
+### Populated before blessed, and already validated before that
+
+`--generate` freezes whatever a metric returns, so a hash of an empty result is a canonised
+bug. Measured across the nine sessions first: **14 populated on all 9**,
+`fa_latency_from_pokeout` on 7 (it needs false alarms), `hr_abort_poke_gap` on 3 (it needs
+a hidden rule). **None was empty everywhere.**
+
+Populated is not the same as correct, so the prior validation was traced through the 4a
+history rather than assumed. Three routes, and every one of the 16 sits on one of them:
+
+- **12 -- the default variant is what an eyeballed plot draws.** 4a extracted these from
+  `visualization/` and the conversion commits were `plot_regression`-gated: `1cafd76`
+  (`inter_trial_interval`, `hr_abort_poke_gap`) **21/21 GREEN**, `70ec829` GREEN on all
+  four, `604dd77` 18/19. So the chain is: eyeballed plot -> old inline computation ->
+  gated byte-identical -> extracted core.
+- **1 -- `presentation_counts_by_odor`** is in no plotter at all, but is consumed by
+  `odorx_abortion_rate`, `hidden_rule_detection_rate` and `hidden_rule_counts_by_odor`,
+  **all three in `REPORT`**, so it has been inside the metrics md5 since 4b.
+- **3 -- `fa_rate_by_odor`, `fa_rate_by_position`, `false_response_ratio`**: the plotters
+  always pass `fa_types=`/`odors=`, and `sing_rew` uses
+  `false_response_ratio_contributions`, so the **default variant is not what any figure
+  draws**. It differs from the validated path by a single `if fa_types is not None`
+  branch -- same code, one conditional away. Recorded rather than blocked on.
+
+Three deliberate deviations from "byte-identical" are on the record from 4a and are
+representation changes, not value errors: `604dd77` moved 12 values by <=1 ULP (`np.mean`
+vs pandas `mean`, chosen and confirmed at the time), `0012ae4` moved five metrics at the
+0.999 ns `e9516e4` stopped truncating (max rel 2.2e-07), `de1a38d` moved one `FR_latency`
+value by 18.8 ns.
+
+**The regeneration was purely additive**: +8 keys per fixture, **0 removed, 0 changed**, on
+all nine -- every pre-existing md5 byte-identical to the previous baseline, verified
+*before* generating (the compare reported 18/18 green with 36 `[NO BASELINE]`) and again
+after. Final compare **54/54 green**, 9/9 on each of the six keys.
+
+### Two operational traps this cost real time to learn
+
+1. **Never run two mount-heavy jobs against the SMB share at once.** An interrupted
+   `--generate` overlapping with its own retry exhausted the SMB client's *handle pool*:
+   `[Errno 24] Too many open files` on a recursive walk, and a process wedged in **U**
+   state that `SIGKILL` could not reap until the I/O unwound. It is **not** a per-process
+   fd limit -- `RLIMIT_NOFILE` was 1048576 and the system sat at 19,200 of 184,320. The
+   fix is a force-unmount and remount, not a raised limit.
+2. **A shallow probe cannot clear a mount.** Listing one directory of 62 entries "passed"
+   while the mount was still wedged, and that false clear cost a second failed run. The
+   walk that fails opens harp streams recursively, so the check must too: the honest probe
+   walked both failing subject trees (2,476 dirs / 13,180 files), opened and read 526 real
+   files, and watched the fd count stay flat at 4. Only that licenses "healthy".
+
+> Also: `Bash(timeout=)` is capped at 600000 ms and **silently clamps**, so a longer value
+> reads as a 10-minute kill on a job that needs more. Run the long gates in the background
+> instead.
