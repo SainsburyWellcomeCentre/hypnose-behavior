@@ -45,6 +45,15 @@ from hypnose_helpers.provenance import provenance as _provenance
 # default hypnose-behavior-analysis layout below.
 _FIGURE_DIR_RESOLVER = None
 
+# Subdirectory for figures drawn from SLEAP tracking. Promoted here from
+# `visualization/movement_analysis_utils.py` when Phase 10 split that file into
+# `visualization/movement/`: four of the resulting modules use it, so by
+# DECISIONS section 3 it becomes a leaf rather than a peer import. This module is
+# the right leaf because it already owns "which scope of figure belongs at which
+# level of the tree", and because every one of those modules already imports
+# `save_figure` from here -- so the promotion adds no import edge.
+MOVEMENT_FIGURES_SUBDIR = "movement_figures"
+
 
 def resolve_figure_dir(subjids, dates=None) -> Path:
     """Determine where to save figures based on subject/session scope.

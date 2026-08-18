@@ -68,10 +68,15 @@ MODULES = [
     "hypnose_behavior.visualization.sequence",
     "hypnose_behavior.visualization.choice",
     "hypnose_behavior.visualization.overview",
-    "hypnose_behavior.visualization.movement_analysis.traces",
-    "hypnose_behavior.visualization.movement_analysis.speed",
-    "hypnose_behavior.visualization.movement_analysis.tortuosity",
-    "hypnose_behavior.visualization.movement_analysis.statistics",
+    # Phase 10 also renamed the package `movement_analysis` -> `movement`: the
+    # movement *analysis* went to `metric_analysis/movement.py` in Phase 4a, so
+    # the old name pointed at code that lives elsewhere. Both spellings stay
+    # listed, for the same first-match-wins reason as above.
+    "hypnose_behavior.visualization.movement.sing_rew_movement",
+    "hypnose_behavior.visualization.movement.traces",
+    "hypnose_behavior.visualization.movement.speed",
+    "hypnose_behavior.visualization.movement.tortuosity",
+    "hypnose_behavior.visualization.movement.summary_stats",
     # Phase 5's display primitives. No case resolves here today, but a plotter
     # moved onto them later must stay resolvable -- an unlisted module reads as
     # "function not found", which is untestable rather than green.
