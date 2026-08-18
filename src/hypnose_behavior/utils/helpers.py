@@ -150,3 +150,13 @@ def _filter_session_dirs(subj_dir: Path,
         subj_dir, dates, ses=ses, index=index,
         date_range=date_range, ses_range=ses_range, index_range=index_range,
     )]
+
+
+# Prints the cache these helpers maintain. Moved here from
+# `visualization/visualization_utils.py` in Phase 10: it reports on `CACHE`,
+# which is declared in this module, and it draws nothing.
+    # Utility function to print current cache keys
+def print_cache_keys():
+    print("[CACHE CONTENTS] Current cache keys:")
+    for k in CACHE.keys():
+        print(f"  {k}")

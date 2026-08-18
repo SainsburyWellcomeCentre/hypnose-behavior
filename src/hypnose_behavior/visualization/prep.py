@@ -1,9 +1,24 @@
 # Defers evaluation of PEP-604 annotations, matching `primitives.py`.
 from __future__ import annotations
 
-"""Trajectory prep shared between the two movement plotting modules.
+"""The non-drawing leaf of `visualization/`: what more than one plotter module needs.
 
-restructure_2 Phase 5, the survivors of the Phase 4 audit's finding 10. That
+Every plotter module depends on this; **this depends on no plotter module**. That
+one-way edge is the invariant of `docs/DECISIONS.md` sections 3 and 13 -- a thing
+shared by two plotting modules is promoted here, never reached by importing a
+sibling -- and it is what made the Phase 10 split of `visualization_utils.py`
+tractable at all. Measured after that split: 12 importers, of which 2 are the
+movement modules. It therefore does **not** belong under `movement_analysis/`;
+that would invert the edge for the other ten.
+
+It began (Phase 5) as trajectory prep for the two movement modules alone, and
+`resample_trace` / `smooth_xy` / `load_tracking_with_behavior` are the survivors
+of that. The rest arrived because it is where shared non-drawing code goes:
+session collection, JSON/label parsing, colour and marker sizing, the
+figure-level loaders, and -- from Phase 10 -- the registry-backed metric access
+`DECISIONS.md` section 5 describes.
+
+The Phase 5 history, kept because the conclusion still binds. The Phase 4 audit's
 finding listed seven helpers duplicated 2-4x across `movement_analysis_utils`
 and `movement_analysis/sing_rew_movement` and called for de-duplicating both
 files in one pass, on the premise that "every row has a twin".
@@ -23,15 +38,19 @@ import numpy as np
 import pandas as pd
 
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional, Tuple
 import ast
+import contextlib
+import io
 import json
 
 import matplotlib.colors as mcolors
 
 from hypnose_behavior.io.layout import derivatives, normalize_subjid
-from hypnose_behavior.io.load_results import load_session_results
+from hypnose_behavior.io.load_results import load_results_dir, load_session_results
 from hypnose_behavior.io.loaders import _load_trial_views
+from hypnose_behavior.metric_analysis.metrics.hidden_rule import hr_odor_associations
+from hypnose_behavior.metric_analysis.run import REGISTRY, _report_fa_abortion_stats
 from hypnose_behavior.io.paths import (
     get_derivatives_root, get_rawdata_root, get_server_root,
 )
@@ -48,6 +67,13 @@ __all__ = [
     "_summary_save_suffix", "_darken", "_resolve_color", "_ordered_groups",
     "_coerce_tz_naive", "_load_protocol_from_summary",
     "load_tracking_with_behavior", "_load_subject_trial_timeline",
+    # Phase 10 (follow-up Item 1): promoted out of `visualization_utils.py`
+    # because each is used by two or more of the construct modules it was split
+    # into -- section 3's rule, that a shared thing becomes a leaf rather than a
+    # peer import. `_computed_metrics` is the one DECISIONS section 5 names by
+    # its old path; it is the same function, unmoved in behaviour.
+    "_extract_metric_value", "_metric_name_for_key", "_computed_metrics",
+    "_computed_metric", "_series_line_widths", "_build_odor_colors",
 ]
 
 
@@ -481,3 +507,159 @@ def _load_subject_trial_timeline(subjid, subj_dates, *, ses=None, index=None,
         "trial_gaps": trial_gaps,
         "trial_boundaries": trial_boundaries,
     }
+
+
+# Load metric results for visualization (NOTE: Previously in metrics_utils.py) ==============================================================================
+
+def _extract_metric_value(metrics: dict, var_path: str):
+    """
+    Extract a numeric value from metrics dict given a dot-path.
+
+    A navigator over a metrics mapping, not a reader of one: since Phase 5 the
+    mapping comes from `_computed_metrics`, not from `metrics_*.json`. The
+    dot-path is how a plot names a sub-entry of a metric ("avg_response_time.Rewarded"),
+    so it survives the move to computing.
+
+    Examples:
+      - "decision_accuracy" -> uses the 3rd element (value) if tuple/list (num, denom, value)
+      - "avg_response_time.Rewarded" -> nested dict lookup
+    Returns float or np.nan if not found/unsupported.
+    """
+    try:
+        parts = var_path.split(".")
+        cur = metrics.get(parts[0], None)
+        for p in parts[1:]:
+            if isinstance(cur, dict):
+                cur = cur.get(p, None)
+            else:
+                # unsupported path deeper into non-dict
+                return float("nan")
+        # Resolve final value
+        if isinstance(cur, (int, float)) and not isinstance(cur, bool):
+            return float(cur)
+        if isinstance(cur, (list, tuple)) and len(cur) >= 3:
+            # assume (numerator, denominator, value)
+            val = cur[2]
+            return float(val) if val is not None else float("nan")
+        # Some dicts may hold numbers directly keyed by categories (needs explicit subkey in var_path)
+        return float(cur) if isinstance(cur, (int, float)) else float("nan")
+    except Exception:
+        return float("nan")
+
+
+    
+def _metric_name_for_key(key: str) -> Optional[str]:
+    """Registry name for a `metrics_*.json` key. They differ in exactly one place,
+    `hidden_rule_counts_by_odor`, always saved as `hidden_rule_by_odor`."""
+    if key in REGISTRY:
+        return key
+    for name, spec in REGISTRY.items():
+        if spec.key == key:
+            return name
+    return None
+
+
+
+def _computed_metrics(results_dir: Path, keys: Iterable[str]) -> dict:
+    """Compute the named metrics for a session, keyed and shaped exactly as
+    `metrics_*.json` holds them.
+
+    The compute-side replacement for `_ensure_metrics_json`. Plotters go through
+    the registry rather than reading the saved file, which is an export and the
+    record of an analysis run -- not a plotting input (`docs/DECISIONS.md`
+    section 5). That deletes the staleness problem rather than managing it.
+
+    `adapter(session(results))` is deliberately the *same expression* `run.py`
+    uses to build the file, so what a plotter now computes and what would have
+    been saved cannot drift apart by construction. The wrapper is used rather
+    than the bare core because several cores take session configuration as
+    keywords -- `hidden_rule_counts_by_odor` wants `hr_odors`/`hr_positions` --
+    and knowing how to dig those out of `results` is precisely the wrapper's job.
+    Its printing is suppressed: this asks for a value, not a report.
+    """
+    results = load_results_dir(results_dir)
+    metrics = {}
+    for key in keys:
+        name = _metric_name_for_key(key)
+        if name is None:
+            continue
+        spec = REGISTRY[name]
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            # `fa_abortion_stats` reports three tables rather than a value, so it
+            # does not fit the wrapper -> adapter shape and `run.py` special-cases
+            # it too. Calling the same builder keeps the shapes identical.
+            if key == "fa_abortion_stats":
+                metrics[key] = _report_fa_abortion_stats(results)
+                continue
+            value = spec.session(results)
+        metrics[key] = spec.adapter(value) if spec.adapter else value
+    return metrics
+
+
+
+def _computed_metric(results_dir: Path, key: str):
+    """One metric, in its saved-JSON shape. See `_computed_metrics`."""
+    return _computed_metrics(results_dir, [key]).get(key)
+
+
+# =========================================================== Metrics Plotting Functions =============================================================================
+
+def _series_line_widths(show_mean: bool):
+    """Shared per-line / mean-line widths so line-style plots (e.g.
+    :func:`plot_behavior_metrics`, :func:`plot_decision_accuracy`) render with
+    matching thickness.
+
+    Returns ``(per_series_lw, mean_lw)``. When ``show_mean`` is True the
+    individual lines are thinner and a thick mean line sits on top; when False
+    there is no mean line and the individual lines are drawn thicker (a bit
+    thicker than the with-mean group line). ``mean_lw`` is ``None`` when
+    ``show_mean`` is False.
+    """
+    if show_mean:
+        return 2.0, 4.0
+    return 3.5, None
+
+
+_ODOR_A_COLOR = "#E53935"   # bright red
+
+_ODOR_B_COLOR = "#00796B"   # teal/green
+
+_HR_A_COLOR = "#EF9A9A"     # lighter red  (HR odor associated with reward A)
+
+_HR_B_COLOR = "#4DB6AC"     # lighter green (HR odor associated with reward B)
+
+_OTHER_ODOR_COLORS = [      # distinct colours for non-A/B, non-HR odors
+    "#1E88E5",  # blue
+    "#FDD835",  # yellow
+    "#FB8C00",  # orange
+    "#8E24AA",  # purple
+    "#00ACC1",  # cyan
+    "#6D4C41",  # brown
+]
+
+_POOLED_SERIES_COLORS = {
+    "AB": "#AE05CF",     # magenta   (A+B pooled)
+    "HR": "#FF0766",     # pink/rose (hidden-rule pair pooled)
+    "OTHER": "#4D4C4B",  # dark grey (remaining odors pooled)
+}
+
+
+def _build_odor_colors(subj_dirs, odors_list) -> Tuple[dict, dict]:
+    """Return ``({odor_letter: color}, {hr_odor_letter: 'A'|'B'})`` using the
+    shared scheme: A=red, B=green, hidden-rule odor=lighter red/green by its
+    learned A/B association, every other odor=a distinct palette colour."""
+    assoc = hr_odor_associations(subj_dirs)
+    colors: dict = {}
+    other_i = 0
+    for letter in odors_list:
+        if letter == "A":
+            colors[letter] = _ODOR_A_COLOR
+        elif letter == "B":
+            colors[letter] = _ODOR_B_COLOR
+        elif letter in assoc:
+            colors[letter] = _HR_A_COLOR if assoc[letter] == "A" else _HR_B_COLOR
+        else:
+            colors[letter] = _OTHER_ODOR_COLORS[other_i % len(_OTHER_ODOR_COLORS)]
+            other_i += 1
+    return colors, assoc
