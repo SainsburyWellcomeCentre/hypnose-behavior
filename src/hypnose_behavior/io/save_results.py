@@ -31,6 +31,9 @@ from hypnose_behavior.io.protocol_schema import (
 # only), which is what lets `trial_classification` reach it through this module without
 # picking up a `metric_analysis` dependency -- `docs/DECISIONS.md` section 3.
 from hypnose_behavior.frames import build_position_data
+# The hardcoded scoring knobs, stamped into the manifest below. Also a package-root leaf,
+# for the same reason and with the same obligation -- DECISIONS section 3.
+from hypnose_behavior.parameters import scoring_parameters
 # One rule for rewarded/unrewarded/timeout, shared with trial_classification. That module is a
 # leaf importing nothing from the package, so this is not a cycle -- DECISIONS section 3.
 from hypnose_behavior.trial_classification.outcome import classify_completed_trial, TIMEOUT
@@ -174,6 +177,13 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
         # Manifest only. The regression fingerprints `trial_data` and the metrics dict
         # and never reads this file, so the stamp cannot cause a spurious RED.
         **_analysis_provenance(),
+        # The hardcoded scoring knobs this run applied, so "what was this session scored
+        # with" is answerable from the file (section 19). Built by introspection over
+        # `parameters.py`, never hand-copied, so it cannot disagree with what ran; a knob
+        # added there is stamped without touching this line. NOT merged into
+        # `summary.json`'s `params`, which holds the per-session *schema* values -- a
+        # different question, and one whose answer legitimately differs per session.
+        "analysis_parameters": scoring_parameters(),
         # Which schema this file follows, so a reader checks it against the right field
         # set instead of guessing from the columns it happens to find. Absent on every
         # file written before Phase 7b, which is how the loader knows to skip the check.

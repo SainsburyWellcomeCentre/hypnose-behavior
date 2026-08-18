@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Iterable, Optional, Union
 
 from hypnose_behavior.io.layout import filter_sessions, layout_for, list_sessions
+from hypnose_behavior.parameters import CACHE_MAX_ITEMS
 
 CACHE = OrderedDict()
-CACHE_MAX_ITEMS = 40
 
 
 def vprint(verbose: bool, *args, **kwargs):

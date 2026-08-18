@@ -2194,3 +2194,156 @@ figures section 17 records for an honest run.
   CLI with `--save-csv`. `check_imports` PASS.
 - Skipped, on reachability: `plot_regression` (no reader, and unreachable from a writer
   change), `position_data_lossless` (unrelated path), `ast_move_check` (not a move).
+
+---
+
+## 31. The hardcoded knobs have one home; the stamp it feeds is asserted by nothing *(Item 4, 2026-08-18)*
+
+`hypnose_behavior/parameters.py`, beside `frames.py` at the package root. Two genuinely
+hardcoded scoring knobs plus one cache size, and `scoring_parameters()`, whose result is
+written to `manifest.json` as **`analysis_parameters`**.
+
+**A leaf, and measured to be one rather than asserted.** Importing
+`hypnose_behavior.parameters` in a fresh interpreter loads exactly two modules --
+`hypnose_behavior` (whose `__init__.py` is *empty*) and `hypnose_behavior.parameters` --
+and its only import statement is `from __future__ import annotations`. Four modules stand
+on it: `trial_classification.windows`, `trial_classification.outcome`, `utils.helpers` and
+`io.save_results`. **The day it imports back, `trial_classification -> parameters` and
+`utils -> parameters` become real cycles** (§3, §20).
+
+> `windows.py` and `outcome.py` each opened with *"this module imports nothing from the
+> package"*. That sentence is load-bearing -- it is what licenses
+> `io/save_results -> trial_classification.outcome` -- so it was **amended, not left
+> false**: "nothing from the package except the root-level leaves". A leaf rule that has
+> quietly stopped being true is worse than no leaf rule.
+
+### The list is two knobs long, and the shortness is the finding
+
+| knob | was | reads it |
+|---|---|---|
+| `PRE_ODOR_GRACE_MS = 25.0` | `windows.py` | `windows.grace_poke_ms`, one site |
+| `LATE_LATENCY_WINDOW_MULTIPLIER = 3.0` | an **inline literal**, `outcome.py` | `outcome.latency_label`, one site |
+| `CACHE_MAX_ITEMS = 40` | `utils/helpers.py` | `helpers._update_cache`, one site |
+
+Named `LATE_LATENCY_WINDOW_MULTIPLIER` rather than anything containing "timeout": §16's
+`_time_out` is a *latency bucket* and `timeout` is a *completed-trial outcome*, and the two
+already read alike. It multiplies the session's **own** response window, which is a
+per-session schema value -- only the multiplier is hardcoded.
+
+**Deliberately not centralised**, each for a different reason: unit conversions (`* 1000.0`)
+are what the unit *is*, and a central name would invite changing it; the per-session schema
+values (`sample_offset_time_ms`, `minimum_sampling_time_ms_by_odor`,
+`response_time_window_sec`, `isSingleRewardProtocol`) legitimately differ between sessions,
+so one central value would be wrong for most of them; `modelling/switchpoint/`'s constants
+belong to one model, not to the scoring pipeline.
+
+### The stamp is in the manifest, and not in `summary.json`'s `params`
+
+They answer different questions. `summary.json`'s `params` is **what this session was
+configured with** -- read per session from the task schema by `trial_classification/params.py`
+and legitimately different each time (measured on `sub-057 20260709`: `sample_offset_time_ms`
+500.0, `minimum_sampling_time_ms` 1.0 per odor, `response_time_window_sec` **99999.0**).
+`analysis_parameters` is **what the analysis code applied**, identical on every session.
+Merged, a reader could not tell which kind a value is. Measured overlap between the two
+blocks: **none**.
+
+Under its own key, because `manifest["session"]["runs"][].parameters` already means the
+per-run *schema* parameters.
+
+> **Not named `params`, and that is not cosmetic.** `metrics/hidden_rule.py` reads
+> `manifest.get("params", {})` as a hidden-rule config source. A manifest `params` block
+> holding scoring knobs would make that key mean two different things depending on which
+> writer produced the file.
+
+### Built default-in, because default-out is §27's trap
+
+`scoring_parameters()` returns **every** public module-level constant except those named in
+`_NOT_SCORING`. A hand-written list of what *to* stamp is the §27 failure in a new place: a
+knob added to the file would be applied to every session and recorded on none of them, and
+no gate would say so. Excluding one is therefore the explicit act, and carries its reason.
+
+`CACHE_MAX_ITEMS` is the one exclusion: it is an LRU eviction bound, so it changes how often
+a file is re-read and never what any value is. The plan's table puts it in this file; the
+manifest's purpose ("what was this session scored with") keeps it out of the stamp. The bar
+for exclusion is that changing it **cannot change an output**, not that it looks incidental.
+
+> **Edit the file; do not assign to it at runtime.** Importers bind these names by value at
+> import time, so a runtime override of `parameters.PRE_ODOR_GRACE_MS` would be *reported*
+> by the stamp without being *applied* by code that already imported it. A stamp that
+> disagrees with what ran is worse than no stamp.
+
+### What gate sees this, measured -- and for the stamp the answer is *nothing*
+
+**The knobs' values are gated, and each was measured rather than assumed:**
+
+- `PRE_ODOR_GRACE_MS` decides `poke_source`. On `sub-057` alone: 786 `poke`, **62 `grace`**,
+  19 `outside_grace`. `position_data` and `trial_data` are both fingerprinted, so a change
+  to it is a RED.
+- `LATE_LATENCY_WINDOW_MULTIPLIER` is gated **on 4 of the 9 coverage sessions, not all 9**.
+  Five sessions carry `response_time_window_sec = 99999.0`, so every latency buckets
+  `_time_in` and the multiplier decides nothing there. The other four have real windows and
+  carry the labels it decides:
+
+  | session | window (s) | `fa_label` |
+  |---|---|---|
+  | sub-046 20260306 | 5.0 | `FA_time_out` 36, `FA_late` 10 |
+  | sub-048 20260306 | 3.0 | `FA_time_out` 5, `FA_late` 3 |
+  | sub-040 20251229 | 5.0 | `FA_time_out` 3, `FA_late` 4 |
+  | sub-040 20251124 | 2.0 | `FA_time_out` 14, `FA_late` 63 |
+
+  Totals **58 `_time_out` and 80 `_late`** -- exactly the figures §16 recorded, arrived at
+  independently. (Read from the server's saved derivatives, which predate the blob drop
+  (§29); the question is a property of the *data* and the session's schema window, not of
+  the code version.)
+- **A narrower gap, recorded because it is invisible:** `fr_label` exists on `sub-057` only,
+  whose window is 99999.0 -- so the **FR** side of `latency_label` never reaches its
+  multiplier comparison on any coverage session. It is the same function as the FA side, so
+  a change to the multiplier is still caught, through `fa_label` and not through `fr_label`.
+
+**The stamp itself is asserted by no gate.** `_common.fingerprint_session` reads
+`trial_data`, the metrics dict and the side tables, and **deliberately never the manifest** --
+§19 depends on exactly that, so that a per-run commit stamp cannot cause a spurious RED.
+`verify_scripts` compares `trial_data` and `metrics` alone. So the block silently ceasing to
+be written, or a knob added here never entering it, is caught by nothing. **This is the §30
+situation for the third time.**
+
+> **Decided, not overlooked.** Gating it means a `manifest_parameters` fingerprint over a
+> *filtered projection* -- the params block alone, never `created_at` / `commit` / `version` /
+> `paths`, which are precisely the keys that would make it a spurious RED -- plus an additive
+> `--generate` across the nine fixtures. Left undone because the knobs' **values** are
+> already gated through `trial_data` / `position_data` (above), and the stamp is built by
+> introspection so it cannot disagree with what ran. What stays uncaught is the block
+> disappearing and a new knob going unstamped.
+>
+> **Revisit this the moment a third knob is added here.** The argument rests on the list
+> being short enough to hold in the head, and it gets weaker with every entry.
+
+`io/parquet_peek.py`'s manifest header is deliberately **not** extended to print the block:
+it is a *one-line* header (§29), and a block that grows with each knob does not fit one line.
+`cat manifest.json` is the answer to "what was this scored with".
+
+### Evidence
+
+- `regression` **GREEN 90/90** (9 sessions x 10 fingerprints), zero `[RED]`, zero `[ERROR]`,
+  zero `[NO BASELINE]`, no regeneration -- this is a pure extraction, so a moved value would
+  have been a defect, not an intended change.
+- `check_imports` **PASS**, 66 modules, `parameters` among them.
+- **Offline probe, no mount**, four things each measured in a form that could have failed:
+  the leaf check above; all three constants equal to the literals they replaced, read back
+  through both `parameters` and the importing module; `latency_label` identical to the old
+  inline rule over **300 comparisons** spanning both boundaries at `±1e-9` with all three
+  buckets exercised (49 `_time_in`, 18 `_time_out`, 83 `_late` per prefix -- so not a
+  vacuous grid); and `grace_poke_ms` credit equal to `25 - gap` and reaching exactly 0 at
+  `gap == PRE_ODOR_GRACE_MS`.
+- **One real session** (`sub-057`, into a scratchpad derivatives root): `manifest.json`
+  carries `analysis_parameters = {"LATE_LATENCY_WINDOW_MULTIPLIER": 3.0,
+  "PRE_ODOR_GRACE_MS": 25.0}`, and its `trial_data` md5 matches the fixture.
+- **`ast_move_check` was not run, and running it would have been wrong.** Both use sites
+  have a literal replaced by a name, so `grace_poke_ms` and `latency_label` genuinely change
+  source segments and it would report `CHANGED` -- correctly. This is an edit, not a move,
+  and the gate for an edit is the value regression.
+- Skipped on reachability: `plot_regression` and `verbose_diff` (no figure and no printed
+  output changes; **every manifest consumer reads named keys and none iterates the key set**,
+  verified across `load_results`, `visualization_utils`, `hidden_rule` and `sing_rew_metrics`,
+  so a new top-level key cannot reach one), `position_data_lossless` (no field list moved),
+  `verify_scripts` (no CLI surface changed).

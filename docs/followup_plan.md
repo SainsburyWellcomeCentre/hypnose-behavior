@@ -183,6 +183,27 @@ locally. Note that `trial_classification` resolves *rawdata* while the rest reso
 
 ## Item 4 — `parameters.py` beside `frames.py`
 
+**Done 2026-08-18.** `hypnose_behavior/parameters.py`, a package-root leaf holding
+`PRE_ODOR_GRACE_MS`, `LATE_LATENCY_WINDOW_MULTIPLIER` (the inline `3.0`, now named) and
+`CACHE_MAX_ITEMS`; `scoring_parameters()` is stamped into `manifest.json` as
+`analysis_parameters`. `regression` GREEN 90/90 with no regeneration — a pure extraction.
+See `DECISIONS.md` section 31 for what it settled: why the stamp is manifest-only and not
+merged into `summary.json`'s `params`, why the stamp is built default-in, and the two
+measurements below.
+
+**Two of the plan's premises did not survive measurement, and both are recorded:**
+
+- **The stamp is invisible to every gate**, exactly as `DECISIONS.md` section 19 requires of
+  the manifest — so "the values go into the manifest" does *not* by itself discharge this
+  item's trap. Deliberately left ungated; section 31 states what that leaves uncaught and
+  the condition for revisiting it.
+- **The 3× multiplier is gated on 4 of the 9 coverage sessions, not 9.** Five carry
+  `response_time_window_sec = 99999.0`, so every latency buckets `_time_in` and the knob
+  decides nothing there. The `fr_label` side is exercised at its boundary by no session at
+  all.
+
+*Original brief below.*
+
 **Delivers.** One home for the genuinely hardcoded scoring knobs, plus their values stamped
 into `manifest.json` alongside the commit and version.
 
@@ -338,7 +359,7 @@ was obtainable two ways and two figures disagreed.
 1. ~~**7a** parquet peek — cheap, immediately useful.~~ **Done 2026-08-18.**
 2. ~~**5** the `non_initiated` collapse — measured, small, tidies the output.~~
    **Done 2026-08-18.**
-3. **4** `parameters.py` + manifest stamp.
+3. ~~**4** `parameters.py` + manifest stamp.~~ **Done 2026-08-18.**
 4. **3** session selectors.
 5. **1** Phase 10 — coverage measurement first, then the move, then the cleanup.
 6. **7b/7c + 2** the accessors and the curated API — last, once the module layout has

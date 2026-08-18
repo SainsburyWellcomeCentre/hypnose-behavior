@@ -1,7 +1,8 @@
 """Pure poke/valve window primitives for trial classification.
 
 A leaf, in the sense of ``DECISIONS.md`` section 3: **this module imports nothing from the
-package** -- only the standard library and pandas. Everything here is a pure function of
+package except the root-level leaves** -- here ``parameters.py``, which imports nothing at
+all. Otherwise the standard library and pandas. Everything here is a pure function of
 timestamps, boolean series and plain dicts, with no session context, no ``data``/``events``
 dictionaries and no I/O, so each piece is independently testable and importable from anywhere
 in the package (including ``io/``) without creating a cycle. Keep it that way.
@@ -17,6 +18,8 @@ from __future__ import annotations
 from bisect import bisect_left, bisect_right
 
 import pandas as pd
+
+from hypnose_behavior.parameters import PRE_ODOR_GRACE_MS
 
 
 # --------------------------------------------------------------------------------------
@@ -405,9 +408,6 @@ def merge_short_gaps(intervals: list[tuple], sample_offset_time_ms: float, cap_e
         else:
             merged.append((start, end))
     return merged
-
-
-PRE_ODOR_GRACE_MS = 25.0
 
 
 def last_poke_end_before(series_bool: pd.Series, ts):

@@ -1,7 +1,8 @@
 """The one rule for what a completed trial's outcome is.
 
 A leaf, in the sense of ``DECISIONS.md`` section 3: **this module imports nothing from the
-package** -- only the standard library. That is what lets ``io/save_results.py`` reach it
+package except the root-level leaves** -- here ``parameters.py``, which imports nothing at
+all. Otherwise the standard library. That is what lets ``io/save_results.py`` reach it
 without turning ``io -> trial_classification`` into a cycle. Keep it that way.
 
 Before Phase 6a, rewarded/unrewarded/timeout was decided in three places that shared no code:
@@ -25,6 +26,8 @@ genuinely differ between them:
   would move ~190 trials into the accuracy denominators.
 """
 from __future__ import annotations
+
+from hypnose_behavior.parameters import LATE_LATENCY_WINDOW_MULTIPLIER
 
 REWARDED = 'rewarded'
 UNREWARDED = 'unrewarded'
@@ -77,7 +80,9 @@ def classify_completed_trial(*, supply_count, reward_poke_count, has_await_rewar
 def latency_label(latency_ms, response_time_ms_window, prefix):
     """Bucket a reward-port latency into ``<prefix>_time_in`` / ``_time_out`` / ``_late``.
 
-    One response window is "in", up to three windows is "out", beyond that is "late". Shared by
+    One response window is "in", up to ``LATE_LATENCY_WINDOW_MULTIPLIER`` windows is "out",
+    beyond that is "late" -- the window itself is the session's own, read from its task
+    schema, and only the multiplier is hardcoded (``parameters.py``). Shared by
     the false-response labels on completed no-go trials (``FR``) and the false-alarm labels on
     aborted and non-initiated trials (``FA``) -- the same arithmetic was written out three times
     before Phase 6a.
@@ -86,6 +91,7 @@ def latency_label(latency_ms, response_time_ms_window, prefix):
     """
     if response_time_ms_window is not None and latency_ms <= response_time_ms_window:
         return f"{prefix}_time_in"
-    if response_time_ms_window is not None and latency_ms <= 3.0 * response_time_ms_window:
+    if (response_time_ms_window is not None
+            and latency_ms <= LATE_LATENCY_WINDOW_MULTIPLIER * response_time_ms_window):
         return f"{prefix}_time_out"
     return f"{prefix}_late"
