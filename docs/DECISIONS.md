@@ -2476,3 +2476,246 @@ The refusal is asserted too, in both spellings: `batch_process --index 1` and
 - Skipped, also on reachability: `plot_regression` (no plotter calls either batch
   function), `verbose_diff` (per-session stdout is unchanged; only batch-level ordering
   moved), `position_data_lossless`, `ast_move_check` (not a move).
+
+---
+
+## 33. `visualization/` splits because nothing in it imported anything else in it *(Item 1 / Phase 10, 2026-08-18)*
+
+`visualization_utils.py` (6,785) and `movement_analysis_utils.py` (3,604) are **gone** --
+carved into 13 modules by behavioural construct, none over 1,650 lines. No re-export shim,
+so nothing can keep importing the old paths by accident (§3's rule).
+
+| | modules (lines, after the cleanup commits) |
+|---|---|
+| `visualization/` | `false_alarm` 1,358, `hidden_rule` 1,238, `sampling` 1,111, `accuracy` 895, `rewards` 576, `timing` 522, `overview` 487, `choice` 438, `sequence` 290 |
+| `visualization/movement/` | `traces` 1,646, `summary_stats` 875, `speed` 763, `tortuosity` 325, beside `sing_rew_movement` 428 |
+
+### The boundary was decided by the helpers, because the plotters have no edges
+
+Measured with a reference graph over every top-level name before any code moved: **the 22
+public plotters in `visualization_utils.py` reference each other exactly zero times.** The
+whole file's internal coupling is 12 private helpers. So "where do the plotters go" was
+never the constraint -- the only real question was where each helper goes, and §3 answers
+it: *shared by two construct groups -> a leaf; used by one -> travels with it.*
+
+- **To `prep.py`** (used by 2-4 groups): `_computed_metrics`, `_computed_metric`,
+  `_metric_name_for_key`, `_extract_metric_value`, `_series_line_widths`,
+  `_build_odor_colors` + the odor colour constants. §5 names the first by its old path
+  `visualization._computed_metrics`; it is the same function.
+- **Stayed** (one group each): `_fa_stat_count` / `_fa_stat_rate` with `false_alarm`,
+  `_plot_metric_over_sessions` / `_rolling_median_iqr` / `_style_log_yaxis` with `timing`.
+- **`print_cache_keys` to `utils/helpers.py`**, the module that declares the `CACHE` it prints.
+
+Group names deliberately reuse `metric_analysis/metrics/`'s vocabulary, which §4 already
+established as "by behavioural construct".
+
+> **`prep.py` does not belong under `movement/`, and that was measured too.** It began
+> (Phase 5) as trajectory prep for the two movement modules, but after the split it has
+> **12 importers of which 2 are movement**, and only 3 of its ~23 names are
+> movement-specific (one of those, `load_tracking_with_behavior`, is consumed by `io/`).
+> Moving it into the movement package would invert §13's edge for the other ten.
+
+**The flat layout is a rule, not a leftover: a subpackage means a different input.**
+`movement/` needs SLEAP tracking, `modelling/` needs a fitted model, and the trial record
+is the default case. A `visualization/metrics/` package was considered and rejected -- it
+collides with `metric_analysis/metrics/`, which is the §20 collision (`schema.py` ->
+`protocol_schema.py`) in a new place, and it would be a folder for the *absence* of a
+property.
+
+### `movement_analysis/` -> `movement/`, because the analysis is not there
+
+Phase 4a moved the movement *analysis* to `metric_analysis/movement.py`. A
+`visualization/movement_analysis/` package therefore named code that lives elsewhere.
+Renamed with the carve, while it held one file rather than five.
+
+`MOVEMENT_FIGURES_SUBDIR` is used by all four new modules, so by §3 it is a leaf. Its home
+is **`io/save.py`**, which already owns "which scope of figure belongs at which level of
+the tree" and which all four already import `save_figure` from -- so the promotion adds
+**no import edge at all**.
+
+`metric_analysis/movement.py` became `metric_analysis/movement/speed_analysis.py`, leaving
+room for movement metrics beyond speed. The package `__init__` is docstring-only and
+re-exports nothing, so importers name the module.
+
+---
+
+### The coverage measurement, and the gate gap it exposed
+
+`plot_regression`'s 38 cases were **not** 38 of the ~30 plotters in these two files.
+Measured with §28's technique -- wrap every top-level definition, run the whole case list
+in one process:
+
+| module | reached | at zero |
+|---|---|---|
+| `visualization_utils.py` | **31/35** | `plot_cumulative_rewards_by_trial`, `plot_choice_history`, `print_cache_keys`, `_positions_in_presentations` |
+| `movement_analysis_utils.py` | **4/8** | `plot_movement_trace`, `plot_movement_by_trial_state`, `plot_movement_with_behavior`, `plot_movement_analysis_statistics` |
+| `metric_analysis/movement.py` | 0/4 | all four -- confirming §28 |
+
+> **One of those zeros was a probe artefact, and the lesson generalises.** The first probe
+> wrapped each module's *own* definitions, but `movement_analysis_utils` binds
+> `_binned_speed` / `speed_threshold` / `compute_speed_analysis` **by value** with
+> `from ... import`, so a wrapper installed on `metric_analysis.movement` after import was
+> never reached. Re-measured at the *use* site, `speed_threshold` is reached once.
+> `compute_speed_analysis` and `run_speed_analysis_batch` are genuinely at zero.
+> **Patch where the name is read, not where it is defined.**
+
+### The gate signed only what a plotter *returned*
+
+**This is the finding worth more than the split.** `plot_regression`'s child signed
+`sig(res)`. Four cases return a `dict`, so almost everything they drew was compared by
+nothing -- and three of the four are the movement plotters this very item moves:
+
+| case | gate saw | on its figures |
+|---|---|---|
+| `plot_traces_with_speed_threshold` | **3** | 37,347 |
+| `plot_tortuosity_lines_overlay` | **3** | 34,660 |
+| `plot_epoch_speeds_by_condition` | **11** | 14,201 |
+| `plot_fa_ratio_a_over_sessions` | 5 | 125 |
+
+Every open figure is now signed as well (a returned figure is signed twice, which costs
+bytes and changes no verdict). **Proved in both directions before being trusted (§17):** a
+clean run is GREEN, and perturbing a title on an *unreturned* figure goes RED with all
+three changed keys under `figures[...]` and none under `result[...]` -- i.e. the old child
+would have called that change green.
+
+**And the gate now reports how much it compared.** A case count says a case *ran*; it does
+not say the case *drew* anything, and a case that draws nothing is green in both trees
+(§26). A full run reports **43 cases and ~2.83 M drawn values, 0 empty**. Read that number
+the way §17 requires `verbose_diff`'s line count to be read.
+
+### Five cases added, one plotter that cannot be covered
+
+`plot_choice_history`, `plot_cumulative_rewards_by_trial`, `plot_movement_by_trial_state`,
+`plot_movement_with_behavior`, `plot_movement_analysis_statistics`. Each was checked to
+draw real data first (2,625 / 934,838 / 5,182 entries; the last, 10 figures and 22 lines of
+stdout). `plot_movement_with_behavior` uses a **narrow clock-time window on purpose**: the
+unwindowed call draws one 467k-point trace, 20 MB of JSON per tree, for no extra
+discrimination.
+
+> **`plot_movement_trace` cannot be covered and is recorded rather than faked.** It needs an
+> ezTrack `add_timestamps_to_tracking` CSV, and neither coverage session with tracking has
+> one. It raises identically in both trees, so a case would be *ungated*, not green (§7).
+
+---
+
+### `qc/figure_provenance.py` -- the record in every saved PDF was built by ungated code
+
+§9 says a `save_figure` wrapper must pass `skip_modules=(__name__,)`, and names the Phase 10
+split as one of two things that reintroduce the hazard. **Nothing watched it.**
+`plot_regression` runs every case with `save=False` precisely so it writes nothing, so
+`save_figure` is never called there and the record is never built.
+
+The new gate patches `save_figure` at the same stack depth, runs the cases with `save=True`,
+writes nothing, and asserts per saved figure that **`chain` names the case's plotter** and
+**`module` is a plotting module**. It reports `module`/`file` without gating them: those are
+derived from where the code lives, and moving code is the point -- gating them would only
+restate what `git diff` says.
+
+**§9's rule is confirmed and its wording corrected.** Confirmed: **6 of 37 cases record
+`function` as a local closure** (`_save_fig`, `_make_fig`, `_draw_panel`,
+`_plot_metric_over_sessions`) with the plotter only at `chain[1]`, so *read `chain` before
+`function`* is exactly right and asserting on `function` would be wrong.
+
+> **Corrected: §9 says a move changes `file` and `chain`. It does not change `chain`.**
+> `chain` is a list of *function names*, and a pure move renames nothing. Measured across
+> the split: `module`, `file`, `lineno` and `path` all moved --
+> `visualization_utils.py` -> `accuracy.py` / `hidden_rule.py` / `rewards.py` / `choice.py`
+> / `overview.py` / `false_alarm.py`, and `movement_analysis_utils.py` ->
+> `movement/speed.py` -- while `chain` and `function` are byte-identical either side.
+> A move *can* change `chain`, but only by adding or removing a wrapper, which is the
+> hazard rather than the move.
+
+**Proved before trusted, in both directions and selectively:** `--break-skip-modules`
+(omitting this module, i.e. §9's defect verbatim) reds all 3 saves with `module='__main__'`;
+`--break-chain` (`MAX_CHAIN=1`) reds **only** `plot_iti_over_time`, whose closure eats the
+name, and leaves `plot_decision_accuracy` green. A check that fails selectively is stronger
+evidence than one that just fails.
+
+---
+
+### Two live defects the coverage found, and one premise of §28 that no longer held
+
+**`plot_cumulative_rewards_by_trial` raised on every multi-session call.** `ax.axvline`
+creates a `Line2D` whose `get_xdata()` returns a two-element **list** (the default is
+`orig=True`, which hands back what was passed), so `.max()` was an `AttributeError`
+wherever a session boundary was drawn. Single-session calls draw no boundary and worked,
+which is how it survived: no case reached the plotter at all. Fixed with `orig=False`;
+the gate showed it as a raise-state change, `AttributeError` -> `(ran ok)`, which is the
+whole evidence -- and the next run's compared count rose by **1,805 values**, the plotter
+drawing in both trees for the first time.
+
+**§28 says `plot_traces_with_speed_threshold` "recomputes and saves" when
+`speed_analysis.parquet` is missing. It never wrote anything** -- the module contains no
+`to_parquet`/`to_csv` at all; the claim came from a stale docstring. What it did do was
+recompute the threshold *in memory*: a second derivation of a quantity
+`metric_analysis.movement` owns (§14), reached by no gate -- measured, the case takes the
+saved branch, so `_binned_speed` and that branch's `speed_threshold` call were both at
+**zero executions**.
+
+**Removed; a session without the file is now reported and skipped.** `bin_ms`, `mode`,
+`threshold_alpha` and `threshold_beta` went with it -- keeping them would have silently
+accepted a threshold setting that decides nothing. `pre_buffer_s` stayed: measured, it is
+still read by the saved branch.
+
+> **`mode` was not only a compute parameter -- it led the saved figure's filename.**
+> Dropping it is deliberate, not a side effect: the aggregation mode is a property of the
+> saved parquet, chosen when that file was computed, so a figure that no longer aggregates
+> anything cannot know it, and keeping it would label the output with a mode that need not
+> be the one the thresholds came from. **Saved names lose the `mean_`/`max_` prefix.**
+
+> **The removal is invisible to `plot_regression`** -- its case runs on a session that *has*
+> the file, so it is green either way. That green means "I did not look", so the control is
+> a probe: **present -> 3 figures / 151 lines; absent -> 0 figures, one warning naming the
+> remedy, and NONE of the session's files changed.** The probe also caught a defect in the
+> removal itself -- with no traces at all the axis scaling raised *"Cannot convert to cm
+> without finite x/y coordinate limits"*, reporting a units problem for what is missing
+> input. Now returns empty with a second warning.
+
+### `scripts/run_speed_analysis.py`
+
+`run_speed_analysis_batch` took only `subjids`/`dates` and sliced a listing directly -- §8's
+forbidden shape. It now takes all six selectors through `session_selectors`. **It resolves
+derivatives**, so `--index` is the rank among *analysed* sessions; §32 measured that to be a
+different session from rawdata's Nth on 7 of 8 subjects, so `ses` is what chains.
+
+Gated the §32 way -- the assertion is not "it ran" but *which sessions were chosen*, because
+a flag argparse accepts and then drops still produces a plausible run: **8/8 checks**, each
+selector narrowing to exactly the expected sessions, `compute_speed_analysis` replaced by a
+recorder so nothing was written. The CLI exits **1** when a selection matches nothing (a
+batch that silently processes zero sessions looks like one that succeeded) and **2** on bad
+arguments.
+
+### Two dead names, and the notebooks
+
+`_POOLED_SERIES_COLORS` and `_positions_in_presentations` were referenced nowhere in the
+repo; the latter parses the `presentations` blob, which Phase 7b.4b stopped writing. They
+were **carried verbatim through the move** so `ast_move_check` stayed a clean PASS, then
+dropped in their own commit -- §17's precedent, applied so that the move gate never had to
+report a MISSING it was meant to tolerate.
+
+> **The two visualization notebooks are left broken, deliberately** -- the user's call.
+> They do `from ...visualization_utils import *`, and neither file declared `__all__`, so a
+> moved name does not raise at the import line; it vanishes from the namespace and surfaces
+> as a `NameError` at the call site. That is louder than §3's ImportError precedent is
+> quiet, but it is still a *deferred* failure rather than an immediate one. Nothing gates
+> notebooks either way.
+
+### Evidence
+
+- **`ast_move_check` three times, all PASS:** `visualization_utils.py` **35/35**
+  byte-identical (0 changed / missing / duplicated / added, no uncarried constants);
+  `movement_analysis_utils.py` **8/8**; `metric_analysis/movement.py` **4/4**.
+- **`git diff -M --stat`:** `sing_rew_movement.py` and `movement/__init__.py` both **0
+  insertions / 0 deletions** across the package rename. The carves are not 1:1 renames, so
+  their line delta is the per-module import blocks and docstrings.
+- **`plot_regression` GREEN 43 cases** on each move, **2,826,502 drawn values, 0 empty**;
+  after the `by_trial` fix, **2,828,307**. One deliberate RED in between: the fix's
+  raise-state change.
+- **`figure_provenance` GREEN**, 92 saved figures across 37 cases, 0 wrong provenance.
+- **`check_imports` PASS** at every step -- and it earned it once, catching `mode` still
+  referenced in the filename suffix after the parameter was removed.
+- **Skipped, on reachability:** `regression.py` and `verbose_diff.py` (they fingerprint
+  `trial_data`, the metrics dict and stdout, and never see a figure -- §7; no metric,
+  column or printed pipeline output moved), `position_data_lossless` (no field list moved),
+  `verify_scripts` (no existing CLI surface changed; the new script is additive and gated by
+  its own probe).

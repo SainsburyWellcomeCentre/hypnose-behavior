@@ -11,6 +11,7 @@ read-only `rawdata` and redirect all derivatives I/O to a throwaway temp dir
 | [`regression.py`](regression.py) | Golden-master value check: `trial_data` + metrics vs stored fixtures |
 | [`verify_scripts.py`](verify_scripts.py) | Same, but through the actual `scripts/` CLIs (covers arg wiring) |
 | [`plot_regression.py`](plot_regression.py) | Old-vs-new check of what the **plotters draw** — `regression.py` never sees a figure |
+| [`figure_provenance.py`](figure_provenance.py) | Does a saved figure's provenance record still name the plotter that drew it? (`DECISIONS.md` §9) — the one gate that exercises `save_figure`, which `plot_regression` deliberately never calls |
 | [`check_imports.py`](check_imports.py) | Static check: flag any referenced global that isn't imported |
 | [`check_qlearning.py`](check_qlearning.py) | Structural self-check of the Q-learning null model — **synthetic data only, no mount needed** |
 | [`validate.py`](validate.py) | `validate_subject()` — pre-flight data-existence check used by the scripts |

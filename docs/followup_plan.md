@@ -42,15 +42,21 @@ provenance flags); table-returning metrics live in `metrics_by_trial.parquet` an
 `metrics_by_poke.parquet`; session-level metrics stay in `metrics_*.json`. Parquet is the
 format, CSV a convenience that is **off by default**.
 
-**Sizes, measured 2026-08-13:**
+**Sizes after Item 1 (2026-08-18).** `visualization_utils.py` (6,785) and
+`movement_analysis_utils.py` (3,604) no longer exist; they are 13 modules, largest 1,646:
 
 | module | lines |
 |---|---|
-| `visualization/visualization_utils.py` | 6,785 |
-| `visualization/movement_analysis_utils.py` | 3,604 |
+| `visualization/movement/traces.py` | 1,646 |
 | `visualization/pred_seq_utils.py` | 1,630 |
 | `visualization/sing_rew.py` | 1,363 |
-| `visualization/` total | 15,319 |
+| `visualization/false_alarm.py` | 1,358 |
+| `visualization/hidden_rule.py` | 1,238 |
+| `visualization/sampling.py` | 1,111 |
+| `visualization/accuracy.py` | 895 |
+| `visualization/movement/summary_stats.py` | 875 |
+| `visualization/movement/speed.py` | 763 |
+| the rest (`prep` 658, `valve_poke_plots` 635, `rewards` 576, `timing` 522, `overview` 487, `choice` 438, `sing_rew_movement` 428, `tortuosity` 325, `sequence` 290, `panels` 264, `primitives` 125) | 125–658 each |
 
 **Out of scope (explicit):** do NOT change protocol detection — the
 `"odourdiscrimination" in name` string matching stays as-is.
@@ -67,8 +73,13 @@ format, CSV a convenience that is **off by default**.
   `non_initiated_odor1_attempts` / `non_initiated_FA` as deletion guards that stay ABSENT).
   Reports added/removed/changed columns and keys, so an intended change is easy to confirm.
   `--generate` writes baselines. ~3-15 min depending on mount. Sections 26, 30.
-- **`plot_regression.py`** — old-vs-new diff of what the plotters **draw**, **38 cases**.
-  Two-tree, not a golden master. **Item 1 depends on it.** `DECISIONS.md` sections 7, 22.
+- **`plot_regression.py`** — old-vs-new diff of what the plotters **draw**, **43 cases**,
+  signing both the returned value and every figure left open. Two-tree, not a golden
+  master. Reports the **number of values compared** (~2.83 M) and names any case that
+  compared nothing. `DECISIONS.md` sections 7, 22, 33.
+- **`figure_provenance.py`** — does a saved figure's provenance record still name the
+  plotter that drew it? The only gate that calls `save_figure`, which `plot_regression`
+  deliberately never does. 92 figures across 37 cases. Sections 9, 33.
 - **`position_data_lossless.py`** — asserts every blob field is recoverable from
   `position_data` bar a named allow-list. 9/9. Section 27.
 - **`verify_scripts.py`** — regression through the actual CLI scripts (arg wiring).
@@ -124,6 +135,39 @@ measurement has already been taken it is recorded here so nobody re-derives it.
 ---
 
 ## Item 1 — Phase 10: split `visualization_utils.py`, and move the movement plotters
+
+**Done 2026-08-18.** Both files are gone, carved into **13 modules** by behavioural
+construct, none over 1,650 lines; `movement_analysis/` renamed **`movement/`** (the
+movement *analysis* has lived in `metric_analysis/` since Phase 4a, so the old name
+pointed elsewhere) and `metric_analysis/movement.py` became
+`metric_analysis/movement/speed_analysis.py`. See `DECISIONS.md` section 33.
+
+**The boundary was decided by a measurement, and it was not the one the brief implies.**
+The 22 public plotters in `visualization_utils.py` reference each other **zero times**, so
+"where do the plotters go" was never the constraint — the only question was where the 12
+private helpers go, which section 3 answers. Six went to the `prep.py` leaf.
+
+**The coverage measurement found a gate gap worth more than the split.** `plot_regression`
+signed only what a plotter *returned*, and four cases return a dict — so
+`plot_traces_with_speed_threshold` was gated by **3 values against the 37,347 on its
+figures**, and three of the four were the movement plotters this item moves. Every open
+figure is now signed, and the gate reports **how many values it compared** (~2.83 M across
+43 cases) so a case that draws nothing cannot pass as one that does.
+
+**Three things the item found that no gate was watching:**
+
+- **Provenance was ungated entirely** — `plot_regression` runs `save=False`, so
+  `save_figure` never ran under any gate and the record embedded in every saved PDF was
+  built by unexercised code. New gate: `qc/figure_provenance.py`. It also corrects
+  section 9: a pure move does **not** change `chain`.
+- **`plot_cumulative_rewards_by_trial` raised on every multi-session call** and no case
+  reached it. Fixed.
+- **Section 28's claim that `plot_traces_with_speed_threshold` "recomputes and saves" was
+  wrong** — it never wrote anything, and its in-memory recompute was a second derivation of
+  a `metric_analysis` quantity that no gate could reach. Removed in favour of a warning;
+  `scripts/run_speed_analysis.py` is now the one way to produce `speed_analysis.parquet`.
+
+*Original brief below.*
 
 **Delivers.** `visualization_utils.py` (6,785) and `movement_analysis_utils.py` (3,604) —
 **10,389 of the 15,319 lines in `visualization/`** — broken into modules by behavioural
@@ -383,8 +427,9 @@ was obtainable two ways and two figures disagreed.
    **Done 2026-08-18.**
 3. ~~**4** `parameters.py` + manifest stamp.~~ **Done 2026-08-18.**
 4. ~~**3** session selectors.~~ **Done 2026-08-18.**
-5. **1** Phase 10 — coverage measurement first, then the move, then the cleanup.
+5. ~~**1** Phase 10 — coverage measurement first, then the move, then the cleanup.~~
+   **Done 2026-08-18.**
 6. **7b/7c + 2** the accessors and the curated API — last, once the module layout has
-   stopped moving.
+   stopped moving. **It has: Item 1 was the last thing that moved it.**
 
 Item 6 needs no work: it is a decision, recorded above.
