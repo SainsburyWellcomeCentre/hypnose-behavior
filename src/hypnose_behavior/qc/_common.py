@@ -99,19 +99,20 @@ UNREPORTED_METRICS = (
 # `non_initiated_sequences` and `non_initiated_FA` are populated on 8, `non_initiated_odor1_attempts`
 # on 2. None is empty everywhere, so no fixture canonises an empty result.
 #
-# The last two are **deletion guards, not tables**: Item 5 stopped writing
-# `non_initiated_sequences` (redundant) and renamed `non_initiated_FA` to
-# `non_initiated_attempts`. Both are kept here fingerprinting as `"ABSENT"` so that
-# resurrecting either file is a RED. Dropping them from this list right after using it
-# to gate the deletion would leave the deletion asserted by nothing -- which is the
-# failure this whole item is about.
+# The last three are **deletion guards, not tables**: Item 5 stopped writing
+# `non_initiated_sequences` and `non_initiated_odor1_attempts` (each contained in
+# `non_initiated_attempts` by construction) and renamed `non_initiated_FA` to
+# `non_initiated_attempts`. All three are kept here fingerprinting as `"ABSENT"` so that
+# resurrecting any of those files is a RED. Dropping them from this list right after
+# using it to gate the deletion would leave the deletion asserted by nothing -- which is
+# the failure this whole item is about.
 SIDE_TABLES = (
     "position_data",
     "metrics_by_trial",
     "metrics_by_poke",
-    "non_initiated_odor1_attempts",
     "non_initiated_attempts",
     "non_initiated_sequences",
+    "non_initiated_odor1_attempts",
     "non_initiated_FA",
 )
 # ---------------------------------------------------------------------------

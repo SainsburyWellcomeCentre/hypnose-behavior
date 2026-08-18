@@ -135,18 +135,6 @@
     "poke_time_ms": "cf10d2f91d99d2bdd0483b26ee1ea093",
     "position": "e7991073bfa7d777c670ae4b00b52d64"
   },
-  "non_initiated_odor1_attempts": "f3a5c7354aba5436540a1a8b7797732e",
-  "non_initiated_odor1_attempts_columns": {
-    "attempt_end": "ece208878b10e10ec7a53a2fe46f459b",
-    "attempt_first_poke_in": "909c5c6f51653949a64c561e6b85b18f",
-    "attempt_poke_time_ms": "45bcb3836456e5826d8c79b06613bacb",
-    "attempt_start": "de3781755f8b8288ce278d744643a00c",
-    "global_trial_id": "9adca487fff07ae60cc2c661e2f1b601",
-    "odor_name": "287c9e7e3c4b5da4b5cf19954d26c0b9",
-    "required_min_sampling_time_ms": "95c1add2d5671c9eda62231ed18cf672",
-    "run_id": "1a554fa3b17281e71aafbd49a538e25b",
-    "trial_id": "9adca487fff07ae60cc2c661e2f1b601"
-  },
   "non_initiated_attempts": "f92c4ac39b2e0ef2b50bf7be6fb02faf",
   "non_initiated_attempts_columns": {
     "attempt_end": "de24668bd8a21051da010bfc564f3f5b",
@@ -175,6 +163,8 @@
   },
   "non_initiated_sequences": "b2f1a4a4f2ef254af6be776168da6e6d",
   "non_initiated_sequences_columns": {},
+  "non_initiated_odor1_attempts": "b2f1a4a4f2ef254af6be776168da6e6d",
+  "non_initiated_odor1_attempts_columns": {},
   "non_initiated_FA": "b2f1a4a4f2ef254af6be776168da6e6d",
   "non_initiated_FA_columns": {},
   "unreported_metrics": "ab5d7961830a78514cb60cc83977f728",

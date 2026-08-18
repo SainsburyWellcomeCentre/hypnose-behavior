@@ -1998,9 +1998,15 @@ a one-command check rather than an inference.
 
 ## 30. Redundant by construction, and the gate that could not see it *(Item 5, 2026-08-18)*
 
-**Intended output change, fixtures regenerated 2026-08-18.** `non_initiated_sequences` is
-no longer written; `non_initiated_FA` is renamed **`non_initiated_attempts`**;
-`non_initiated_odor1_attempts` is unchanged. Two saved tables where there were three.
+**Intended output change, fixtures regenerated 2026-08-18.** `non_initiated_FA` is renamed
+**`non_initiated_attempts`** and is now the **only** non-initiated table written:
+`non_initiated_sequences` and `non_initiated_odor1_attempts` are each contained in it by
+construction, and neither is saved. **One table where there were three; one file by
+default, three under `--save-csv`.**
+
+Landed in two stages on purpose, and the history is worth keeping in that shape: the
+three-to-two collapse the plan specified, then the two-to-one that measuring the first one
+exposed. Both inputs stay in `classification` -- they are what the concat below consumes.
 
 ### The gate could not see it, and neither could the one the plan named as backup
 
@@ -2039,17 +2045,30 @@ Three links, and none of them is data-dependent:
 
 1. **`run.py`** builds the FA input as
    `pd.concat([non_initiated_sequences, non_initiated_odor1_attempts])`, so every row and
-   every column of both enters.
+   every column of **both** enters.
 2. **`aborted_trials.classify_noninitiated_FA`** drops a row only when `attempt_end` is
-   NaN -- which `detect_trials` cannot produce: the failed-attempt record writes
-   `last_seg_end if last_seg_end is not None else event_start`, and `event_start` is a real
-   timestamp guarded by `if event_end <= event_start: continue`.
+   NaN, and **neither source can produce one** -- by two *different* code paths, which is
+   why each had to be checked separately:
+   - `detect_trials`' failed-attempt record writes
+     `last_seg_end if last_seg_end is not None else event_start`, and `event_start` is a
+     real timestamp guarded by `if event_end <= event_start: continue`;
+   - `prior_presentations` takes `valve_end` from
+     `windows.valve_windows_closing_at_series_end`, which closes an unterminated activation
+     at `valve_series.index[-1]` rather than leaving it null. (Note it is **not**
+     `valve_windows_dropping_unclosed` -- that is `detect_trials`' builder, and reasoning
+     from the wrong one would have proved nothing.)
 3. Each output row is **`{**row.to_dict(), <6 FA fields>}`** -- every input cell carried
    verbatim.
 
-Columns, rows and values are all subsets. The **only** difference is dtype widening at the
-concat: `attempt_number` int64 -> float64 where the odor1 rows introduce nulls. That is the
-whole of the plan's "78 shared-cell differences" scare -- 74 of them were `1` vs `1.0`.
+Columns, rows and values are all subsets, for both inputs. The **only** difference is dtype
+widening at the concat, int64 -> float64 wherever the other source's rows introduce nulls:
+`attempt_number` for the sequences rows, `global_trial_id` / `trial_id` for the odor1 rows.
+That is the whole of the plan's "78 shared-cell differences" scare -- 74 of them were `1`
+vs `1.0`.
+
+Verified cell-by-cell and typed on the two sessions carrying odor1 rows (`sub-057` 1 row,
+`sub-040 20251124` 5 rows): every column a subset, every row found, **zero genuine cell
+differences**, with the dtype widening visible and correctly not counted as one.
 
 > **A subset check says nothing about cell agreement, and a crude cell check says nothing
 > about values.** Compare typed, never as strings.
@@ -2077,9 +2096,24 @@ column widths follow: 19 without odor1 rows, 23 with (`global_trial_id`, `trial_
 `attempt_first_poke_in`, `attempt_poke_time_ms`).
 
 > **`non_initiated_odor1_attempts` is redundant with the renamed table by exactly the same
-> construction.** It is kept, because the item's scope was three tables to two and because
-> it is the only place those rows appear un-widened. Recorded so the next person does not
-> re-derive it -- and does not assume the collapse was incomplete.
+> construction**, which is why it too is no longer written. Measuring the first collapse is
+> what exposed the second: the containment argument never mentioned *which* input it was
+> about. The only cost is that the surviving table mixes two grains, separable by which
+> columns are null, with the ids widened to float64 -- the same cost already accepted for
+> the sequences rows.
+
+### The one thing this forced elsewhere: section 27's allow-list named the deleted table
+
+`frames.KNOWN_UNCARRIED_FIELDS` holds one entry, and its justification read *"already saved
+as `non_initiated_odor1_attempts`"* -- a table that no longer exists. Section 27's rule is
+that a field may be allow-listed **only when the information is not lost**, so the licence
+had to be restated with the second collapse, in the same commit, not left pointing at a
+vanished file: `prior_presentations` is now saved as **rows of `non_initiated_attempts`**.
+
+The information genuinely does survive, so the entry stands -- but a justification that
+silently stops being true is precisely the section 27 failure, and it would have been
+invisible to every gate. `qc/position_data_lossless.py` imports that same declaration, so
+there is still exactly one copy.
 
 ### Nothing reads any of them
 
@@ -2109,10 +2143,10 @@ rejected: it re-introduces the per-table asymmetry section 23 removed -- the asy
 made these three CSV-only and nearly unloadable -- and silently denies a CSV to the one
 caller who explicitly asked for one.
 
-Demonstrated on `sub-057`, both ways: default writes `non_initiated_attempts.parquet` +
-`non_initiated_odor1_attempts.parquet` and nothing else; `--save-csv` writes both with
-`.csv` and `.schema.json`, exactly like every other table. **Delivered as 3 -> 2 in the
-default configuration** (the one the server uses) **and 9 -> 6 under the flag.**
+Demonstrated on `sub-057`, both ways: the default writes `non_initiated_attempts.parquet`
+and nothing else; `--save-csv` adds its `.csv` and `.schema.json`, exactly like every other
+table. **Delivered as 3 files -> 1 in the default configuration** (the one the server uses)
+**and 9 -> 3 under the flag.**
 
 ### Named for what it holds, not for one of its columns
 
@@ -2140,9 +2174,18 @@ figures section 17 records for an honest run.
 
 ### Evidence
 
-- `regression` **RED 16/81** by design, every one a `- removed column`, **zero `+ added`,
-  zero `~ changed`, zero `[ERROR]`**; the 54 pre-Item-5 fingerprints green on all nine, so
-  no analysis output moved. Then **GREEN 90/90** after regeneration.
+- **Stage 1** (3 tables -> 2): `regression` **RED 16/81** by design, every one a
+  `- removed column`, **zero `+ added`, zero `~ changed`, zero `[ERROR]`**; the 54
+  pre-Item-5 fingerprints green on all nine, so no analysis output moved. Then **GREEN
+  90/90** after regeneration.
+- **Stage 2** (2 -> 1): `regression` **RED 2/90**, both `- removed column` on the only two
+  sessions carrying odor1 rows, the other seven already `ABSENT` and green; zero `+ added`,
+  zero `~ changed`, zero `[ERROR]`. Then **GREEN 90/90**. `non_initiated_attempts` kept its
+  md5 throughout (`0b376adc` on `sub-057`), so consolidating the odor1 rows changed nothing
+  in the surviving table. Gated on reachability: `verbose_diff` and `verify_scripts` were
+  **skipped and said so** -- stage 2 removes one name from a save tuple and adds no drop
+  logic, so the section 28 hazard it would guard cannot arise, and `fingerprint_session`
+  drives the same `save_session_analysis_results` with `save_csv=True`.
 - **The rename moved nothing**: the regenerated `non_initiated_attempts` md5 *and its entire
   per-column md5 map* are byte-identical to the old `non_initiated_FA` on all nine sessions.
   A rename that changed a cell would fail this; comparing only the table's own new md5

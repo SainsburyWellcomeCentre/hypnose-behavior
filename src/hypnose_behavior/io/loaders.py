@@ -699,13 +699,13 @@ def _load_table_with_trial_data(results_dir: Path, name: str) -> pd.DataFrame:
     # would return an empty frame -- with no error -- for every session saved with the
     # default. Parquet is always written.
     #
-    # `non_initiated_sequences` and `non_initiated_FA` are no longer *written* (Item 5:
-    # the first is redundant, the second was renamed to `non_initiated_attempts`), but
-    # they stay readable: every session currently on the server predates that change and
-    # carries both files. Section 2's rule -- a read path must answer for the files that
-    # exist, not only for the ones today's writer produces.
-    allowed = {"non_initiated_attempts", "non_initiated_odor1_attempts",
-               "non_initiated_sequences", "non_initiated_FA"}
+    # Only `non_initiated_attempts` is written now (Item 5: the other two are contained in
+    # it by construction, and `non_initiated_FA` was its old name). The retired names stay
+    # readable: every session currently on the server predates that change and carries all
+    # three files. Section 2's rule -- a read path must answer for the files that exist,
+    # not only for the ones today's writer produces.
+    allowed = {"non_initiated_attempts",
+               "non_initiated_sequences", "non_initiated_odor1_attempts", "non_initiated_FA"}
     if name in allowed:
         for path, reader in ((results_dir / f"{name}.parquet", pd.read_parquet),
                              (results_dir / f"{name}.csv", pd.read_csv)):

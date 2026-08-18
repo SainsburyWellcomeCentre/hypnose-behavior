@@ -63,8 +63,8 @@ format, CSV a convenience that is **off by default**.
 
 - **`regression.py`** — golden master, **90 checks** (9 coverage sessions x 10 fingerprints:
   `trial_data`, `metrics`, `position_data`, `metrics_by_trial`, `metrics_by_poke`,
-  `non_initiated_odor1_attempts`, `non_initiated_attempts`, `unreported_metrics`, plus
-  `non_initiated_sequences` / `non_initiated_FA` as deletion guards that must stay ABSENT).
+  `non_initiated_attempts`, `unreported_metrics`, plus `non_initiated_sequences` /
+  `non_initiated_odor1_attempts` / `non_initiated_FA` as deletion guards that stay ABSENT).
   Reports added/removed/changed columns and keys, so an intended change is easy to confirm.
   `--generate` writes baselines. ~3-15 min depending on mount. Sections 26, 30.
 - **`plot_regression.py`** — old-vs-new diff of what the plotters **draw**, **38 cases**.
@@ -210,12 +210,14 @@ surface, and "what was this session scored with" must be answerable from the fil
 
 ## Item 5 — collapse the `non_initiated_*` files: 9 files -> 2
 
-**Done 2026-08-18.** `non_initiated_sequences` no longer written, `non_initiated_FA`
-renamed **`non_initiated_attempts`**, `non_initiated_odor1_attempts` kept. Delivered as
-**3 -> 2 files by default** and 9 -> 6 under `--save-csv`: section 23 had already removed
-six of the nine, and `save_csv` was deliberately left uniform across tables. See
-`DECISIONS.md` section 30 — including the gate gap it found, the by-construction proof,
-and why `non_initiated_odor1_attempts` is redundant too but deliberately kept.
+**Done 2026-08-18 — and it went further than 9 -> 2.** `non_initiated_FA` renamed
+**`non_initiated_attempts`**, and it is now the *only* non-initiated table: both
+`non_initiated_sequences` and `non_initiated_odor1_attempts` are contained in it **by
+construction**, so neither is written. Delivered as **3 files -> 1 by default** and 9 -> 3
+under `--save-csv` (section 23 had already removed six of the original nine, and `save_csv`
+was deliberately left uniform across tables). See `DECISIONS.md` section 30 — the gate gap
+it found, the by-construction proof for both inputs, and the section 27 allow-list
+justification that had to be restated because it named a table that no longer exists.
 
 **The plan's gate was wrong, and that was the item's first finding.** Neither `regression`
 nor `verify_scripts` could see a deleted or renamed table; the gate was extended first, as

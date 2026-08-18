@@ -383,23 +383,31 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
             return False
 
     # Save only the streamlined set: trial_data, its per-position side-table, and the
-    # non-initiated tables.
+    # non-initiated table.
     #
-    # **`non_initiated_sequences` is deliberately not saved** (Item 5). It is fully
-    # contained in `non_initiated_attempts`, and by construction rather than by
-    # agreement on the coverage sessions: `run.py` builds the FA input as
-    # `concat([non_initiated_sequences, non_initiated_odor1_attempts])`;
-    # `aborted_trials.classify_noninitiated_FA` drops a row only when `attempt_end` is
-    # NaN, which `detect_trials` cannot produce (it falls back to the valve's own
-    # `event_start`); and each output row is `{**row.to_dict(), <6 FA fields>}`, so
-    # every input column and every input cell is carried verbatim. Columns, rows and
-    # values are all subsets -- the only difference is dtype widening at the concat,
-    # `attempt_number` int64 -> float64 where the odor1 rows introduce nulls.
+    # **`non_initiated_attempts` is the only non-initiated table saved** (Item 5). Its two
+    # inputs -- `non_initiated_sequences` and `non_initiated_odor1_attempts` -- are each
+    # fully contained in it, **by construction** rather than by agreement on the coverage
+    # sessions:
     #
-    # It stays in `classification` because it is the *input* to that concat, and
-    # because `summary.py` and `merge.py` report its counts. Only the file goes.
-    for k in ("trial_data", "position_data",
-              "non_initiated_odor1_attempts", "non_initiated_attempts"):
+    #   1. `run.py` builds the FA input as `concat([sequences, odor1_attempts])`, so every
+    #      row and every column of both enters;
+    #   2. `aborted_trials.classify_noninitiated_FA` drops a row only when `attempt_end` is
+    #      NaN, and neither source can produce one -- `detect_trials` falls back to the
+    #      valve's own `event_start`, and `prior_presentations` takes its `valve_end` from
+    #      `windows.valve_windows_closing_at_series_end`, which closes an unterminated
+    #      activation at the series' last timestamp rather than leaving it null;
+    #   3. each output row is `{**row.to_dict(), <6 FA fields>}`, so every input cell is
+    #      carried verbatim.
+    #
+    # Columns, rows and values are all subsets. The only difference is dtype widening at
+    # the concat, int64 -> float64 wherever the other source's rows introduce nulls
+    # (`attempt_number`, `global_trial_id`, `trial_id`). Verified cell-by-cell and typed:
+    # zero genuine differences.
+    #
+    # Both inputs stay in `classification` -- they are the *inputs* to that concat, and
+    # `summary.py` and `merge.py` report their counts. Only the files go.
+    for k in ("trial_data", "position_data", "non_initiated_attempts"):
         df = classification.get(k) if isinstance(classification, dict) else None
         if k == "trial_data" and isinstance(df, pd.DataFrame) and not df.empty:
             # **Phase 7b.4b: the blobs do not go to disk.** `trial_data` is now one row

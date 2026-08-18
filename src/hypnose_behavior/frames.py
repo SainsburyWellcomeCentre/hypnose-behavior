@@ -396,12 +396,19 @@ CARRIED_FIELDS = frozenset(
 # `prior_presentations` is the failed Position-1 attempts preceding a trial: a list of
 # dicts written into position 1's valve entry by `classify_trials._position_valve_times`
 # and read exactly once, *in memory*, by `classify_trials` itself, to build
-# `non_initiated_odor1_attempts` -- which `save_results` already persists as its own
-# table. It also does not fit this grain: one row per failed *attempt*, not per
-# `trial x position`. Measured: 1,730 occurrences over the nine fixture sessions.
+# `non_initiated_odor1_attempts` -- which `save_results` persists, **as rows of
+# `non_initiated_attempts`**. It also does not fit this grain: one row per failed
+# *attempt*, not per `trial x position`. Measured: 1,730 occurrences over the nine
+# fixture sessions.
+#
+# Item 5 (section 30) stopped writing `non_initiated_odor1_attempts` as its own file,
+# so this justification is restated rather than left pointing at a table that no longer
+# exists: the information is not lost, it is contained in `non_initiated_attempts` by
+# construction. **That is what licenses the entry** -- section 27's rule is that a field
+# belongs here only when the information survives somewhere, never that nothing reads it.
 KNOWN_UNCARRIED_FIELDS = {
     "prior_presentations":
-        "per-attempt, not per-position; already saved as non_initiated_odor1_attempts",
+        "per-attempt, not per-position; already saved as rows of non_initiated_attempts",
 }
 
 

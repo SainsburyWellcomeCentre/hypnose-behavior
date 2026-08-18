@@ -135,8 +135,6 @@
     "poke_time_ms": "4f875ec3b10079624b59963ef621a826",
     "position": "9c7639c600e86cd5290c7e60e9aff227"
   },
-  "non_initiated_odor1_attempts": "b2f1a4a4f2ef254af6be776168da6e6d",
-  "non_initiated_odor1_attempts_columns": {},
   "non_initiated_attempts": "c7c26d492541896a55c6db3dfc7892fe",
   "non_initiated_attempts_columns": {
     "attempt_end": "8060e25171ea8f7f0560be3d56dbea91",
@@ -161,6 +159,8 @@
   },
   "non_initiated_sequences": "b2f1a4a4f2ef254af6be776168da6e6d",
   "non_initiated_sequences_columns": {},
+  "non_initiated_odor1_attempts": "b2f1a4a4f2ef254af6be776168da6e6d",
+  "non_initiated_odor1_attempts_columns": {},
   "non_initiated_FA": "b2f1a4a4f2ef254af6be776168da6e6d",
   "non_initiated_FA_columns": {},
   "unreported_metrics": "2a86e9df49e30b42dc4f0de156613f9f",
