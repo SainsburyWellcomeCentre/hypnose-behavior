@@ -418,6 +418,12 @@ def main() -> int:
         new = json.loads(new_path.read_text())
 
     red = 0
+    # How many values were actually compared. The case count says a case ran; it
+    # does not say the case drew anything, and a case that draws nothing is green
+    # in BOTH trees for the wrong reason (section 26). This is the plot_regression
+    # analogue of the line count section 17 requires `verbose_diff` to be read by.
+    compared = 0
+    empty_cases: list[str] = []
     print()
     for name in sorted(set(old) | set(new)):
         if name not in old or name not in new:
@@ -442,6 +448,9 @@ def main() -> int:
         removed = sorted(set(fo) - set(fn_))
         changed = sorted(k for k in set(fo) & set(fn_) if fo[k] != fn_[k])
         stdout_differs = o["stdout"] != n["stdout"]
+        compared += len(fo)
+        if not fo and not o["stdout"]:
+            empty_cases.append(name)
         if added or removed or changed or stdout_differs:
             red += 1
             print(f"  [RED]  {name}: "
@@ -461,6 +470,13 @@ def main() -> int:
             print(f"  [green] {name}")
 
     print()
+    if empty_cases:
+        print(f"  [!] {len(empty_cases)} case(s) compared NOTHING -- drew no value and "
+              f"printed no line, so they are green in both trees by being empty:")
+        for name in empty_cases:
+            print(f"        {name}")
+        print()
+    print(f"  compared {compared:,} drawn values across {len(old)} cases")
     if red:
         print(f"PLOT REGRESSION RED: {red} plotter(s) draw something different.")
         return 1
