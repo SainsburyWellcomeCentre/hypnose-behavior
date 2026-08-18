@@ -5,7 +5,9 @@
 figure, so every change inside ``visualization/`` is unguarded by it. This closes
 that gap: it runs each plotter under Agg against a reference git revision *and*
 the working tree, then compares every Line2D's xy data, every collection's
-offsets, every patch's geometry, the axis decoration, and stdout.
+offsets, every patch's geometry, the axis decoration, and stdout -- on the
+returned value **and on every figure the plotter left open**, because several
+return a dict and would otherwise have their drawing compared by nothing.
 
 Deliberately **not** a golden master. Figures are expected to change as the
 plotters evolve, so a stored fixture would be stale within a phase; the useful
@@ -51,6 +53,25 @@ MODULES = [
     "hypnose_behavior.visualization.sing_rew",
     "hypnose_behavior.visualization.movement_analysis_utils",
     "hypnose_behavior.visualization.movement_analysis.sing_rew_movement",
+    # Item 1 (Phase 10) carves the two modules above into the ones below. Named
+    # here *before* the split for the same reason `metrics_utils` is still named
+    # below after its own: `_resolve` swallows the ImportError, so a module that
+    # does not exist yet costs nothing, and with both spellings listed the gate
+    # resolves every case against the pre-split tree and the post-split working
+    # tree in one run -- which is the whole reason a move can be gated at all.
+    "hypnose_behavior.visualization.accuracy",
+    "hypnose_behavior.visualization.false_alarm",
+    "hypnose_behavior.visualization.hidden_rule",
+    "hypnose_behavior.visualization.sampling",
+    "hypnose_behavior.visualization.rewards",
+    "hypnose_behavior.visualization.timing",
+    "hypnose_behavior.visualization.sequence",
+    "hypnose_behavior.visualization.choice",
+    "hypnose_behavior.visualization.overview",
+    "hypnose_behavior.visualization.movement_analysis.traces",
+    "hypnose_behavior.visualization.movement_analysis.speed",
+    "hypnose_behavior.visualization.movement_analysis.tortuosity",
+    "hypnose_behavior.visualization.movement_analysis.statistics",
     # Phase 5's display primitives. No case resolves here today, but a plotter
     # moved onto them later must stay resolvable -- an unlisted module reads as
     # "function not found", which is untestable rather than green.
@@ -141,6 +162,30 @@ CASES = [
                                              "verbose": False}),
     ("plot_category_traces", [40], {"dates": [20251124], "show_average": True,
                                     "save": False}),
+    # Added in Item 1 (Phase 10). Measured 2026-08-18 by wrapping every top-level
+    # definition of the two modules this item splits and running the whole case
+    # list in one process (the section 28 technique): 31 of 35 definitions in
+    # `visualization_utils` and only **4 of 8** in `movement_analysis_utils` were
+    # executed by any case. These five were the plotters at zero, so their move
+    # would have been verified by `ast_move_check` alone.
+    #
+    # Each was checked to draw real data before being added: 2,625 / 934,838 /
+    # 5,182 flattened entries, and `plot_movement_analysis_statistics` 10 figures
+    # plus 22 lines of stdout. A case that draws nothing goes green in both trees
+    # (section 26), so drawing something is the precondition, not the result.
+    #
+    # `plot_movement_trace` is the one that CANNOT be covered: it needs an ezTrack
+    # `add_timestamps_to_tracking` CSV, and neither of the two coverage sessions
+    # with tracking (sub-040 20251124 / 20251229) has one. It raises identically
+    # in both trees, so adding it would be an ungated case, not a green one.
+    ("plot_choice_history", [40], {"dates": [20251124, 20251229]}),
+    ("plot_cumulative_rewards_by_trial", [[40]], {"dates": [20251124, 20251229]}),
+    ("plot_movement_by_trial_state", [40, 20251124], {}),
+    # A narrow clock-time window on purpose: the unwindowed call draws one 467k-point
+    # trace, i.e. 20 MB of JSON per tree for no extra discrimination.
+    ("plot_movement_with_behavior", [40, 20251124],
+     {"mode": "time_windows", "time_windows": [("14:42:12", "14:42:55")]}),
+    ("plot_movement_analysis_statistics", [40], {"dates": [20251124]}),
 ]
 
 # Runs inside the child process, against whichever tree is on sys.path.
@@ -248,7 +293,20 @@ for name, args, kwargs in CASES:
             np.random.seed(0)
             with contextlib.redirect_stdout(buf):
                 res = fn(*args, **attempt_kwargs)
-            out[name] = {"result": sig(res), "stdout": buf.getvalue()}
+            # `sig(res)` sees only what the plotter RETURNS. Measured 2026-08-18
+            # across the whole case list: four cases return a dict and have almost
+            # everything they draw compared by nothing --
+            # `plot_traces_with_speed_threshold` 3 entries seen against 37,347 on
+            # its figures, `plot_tortuosity_lines_overlay` 3 against 34,660,
+            # `plot_epoch_speeds_by_condition` 11 against 14,201,
+            # `plot_fa_ratio_a_over_sessions` 5 against 125. Three of those are
+            # movement plotters, i.e. exactly the ones Phase 10 moves.
+            # Every open figure is therefore signed as well. A returned figure is
+            # signed twice, which costs bytes and changes no verdict; a figure that
+            # is created and never returned stops being invisible.
+            out[name] = {"result": sig(res), "stdout": buf.getvalue(),
+                         "figures": [axes_sig(plt.figure(i))
+                                     for i in sorted(plt.get_fignums())]}
             break
         except TypeError as e:
             if "save" in str(e) and attempt_kwargs is not kwargs:
@@ -377,7 +435,9 @@ def main() -> int:
             print(f"  [both raise, unchanged] {name}: {o['error'][:60]}")
             continue
 
-        fo, fn_ = _flatten(o["result"]), _flatten(n["result"])
+        # Both halves: what the plotter returned, and every figure it left open.
+        fo = _flatten({"result": o["result"], "figures": o.get("figures")})
+        fn_ = _flatten({"result": n["result"], "figures": n.get("figures")})
         added = sorted(set(fn_) - set(fo))
         removed = sorted(set(fo) - set(fn_))
         changed = sorted(k for k in set(fo) & set(fn_) if fo[k] != fn_[k])
