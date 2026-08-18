@@ -16,7 +16,6 @@ string branches have been unreachable since Phase 5 (DECISIONS section 5).
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from hypnose_behavior.frames import parse_json_column
 from hypnose_behavior.metric_analysis.metrics.false_alarm import (
     fa_port_counts,
     fa_port_ratio,
@@ -648,28 +647,6 @@ def plot_fa_ratio_a_over_sessions(
         figs[odor] = fig
     
     return figs
-
-
-
-def _positions_in_presentations(pres_json):
-    """Return the list of positions present in a trial's ``presentations`` JSON.
-
-    ``presentations`` is a list of per-odor dicts (one per position the animal
-    sampled), so this is every position the trial reached.
-    """
-    data = parse_json_column(pres_json)
-    if not isinstance(data, list):
-        return []
-    out = []
-    for entry in data:
-        if isinstance(entry, dict):
-            pos = entry.get("position")
-            if pos is not None:
-                try:
-                    out.append(int(pos))
-                except (TypeError, ValueError):
-                    pass
-    return out
 
 
 

@@ -638,13 +638,6 @@ _OTHER_ODOR_COLORS = [      # distinct colours for non-A/B, non-HR odors
     "#6D4C41",  # brown
 ]
 
-_POOLED_SERIES_COLORS = {
-    "AB": "#AE05CF",     # magenta   (A+B pooled)
-    "HR": "#FF0766",     # pink/rose (hidden-rule pair pooled)
-    "OTHER": "#4D4C4B",  # dark grey (remaining odors pooled)
-}
-
-
 def _build_odor_colors(subj_dirs, odors_list) -> Tuple[dict, dict]:
     """Return ``({odor_letter: color}, {hr_odor_letter: 'A'|'B'})`` using the
     shared scheme: A=red, B=green, hidden-rule odor=lighter red/green by its
