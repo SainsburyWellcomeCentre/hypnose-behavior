@@ -1891,3 +1891,105 @@ take their denominator from `position_data`. Left in place, the drop would have 
 **reported metric** and a **figure** silently empty. Removed with the re-plumb, which is
 also why they are worth naming: a guard on a column the function does not use is invisible
 until the column goes.
+
+---
+
+## 29. The peek tool is a reader, and a reader must not become a second source *(Item 7a, 2026-08-18)*
+
+`io/parquet_peek.py` + `scripts/parquet_peek.py`. Three narrowing views: a session's
+tables, then one line per **column** of one table, then one column with its values.
+
+**Never the frame.** `trial_data` is 58-73 columns wide and hundreds of rows long, so
+any row-shaped view is unreadable in a terminal. One line per column is O(width), and
+60 lines is a screenful.
+
+### Where it lives, and the two homes it was kept out of
+
+- **Not `qc/`.** Every tool there is a *gate*: a pass/fail exit code, usually a fixture,
+  and mount redirection. This has no pass/fail and nothing to regenerate. `check_imports`
+  also skips the runnable qc tools by default, which is precisely wrong for a new module.
+- **Not item 7b's surface.** 7b resolves a *session*; this reads a *file*. Keeping the
+  library functions path-based is what lets 7b's handle call them without re-paying
+  `find_session` -- 14.6 s cold against 29 ms to compute every metric (section 5). The
+  **script** takes `--subjids`/`--dates` like the rest of the family and does the
+  resolution at the entry point, which is the only place it belongs.
+- **`io/`, by the 0.2 test:** it knows the *layout* (which tables a session holds, where
+  the manifest is), and performs no analysis. Standard library and pandas only, with
+  `pyarrow` optional at both sites that use it, so a footer read degrades to a full read
+  rather than an ImportError.
+
+### It carries no schema check, deliberately
+
+The manifest gives the protocol mode, so comparing against `trial_data_columns(mode)` is
+one line away -- and it is section 27's trap, a second spelling of a check that can drift
+from the first. `io/load_results._warn_if_stale` already does it (section 22). **Ask the
+loader, not the peek tool.**
+
+### Two facts about the saved files that any reader of them needs
+
+1. **The JSON encoding reaches the parquet, not just the CSV.** `save_results._save_df`
+   writes the frame `_normalize_df_for_io` returns, so `odor_sequence` is on disk as the
+   *string* `'["OdorG", "OdorE", "OdorB"]'` in **both** formats. A tool reporting it as a
+   plain string column is misleading about exactly the columns anyone opens it for, so
+   the dtype is annotated `(JSON)`.
+2. **`.schema.json` is not available to depend on.** It is written **only when
+   `save_csv=True`** (section 23), so no session written by current code has one. Its
+   `jsonified_columns` list happens to describe the parquet too, which makes it tempting
+   -- and useless, because it is absent exactly where it would be used. The JSON
+   annotation is therefore **sniffed from the values**, and absence of the sidecar means
+   nothing (section 2). The tool does not read it at all.
+
+`manifest.json` is the opposite case and *is* read: always written, beside the parquet,
+and it carries section 19's `commit`/`version` and section 20's `protocol_mode`. It is
+printed as a one-line header on all three views. An absent key and a null one are
+rendered differently (`absent` vs `null`), because section 19 writes both keys always so
+that a reader can tell those apart.
+
+### Three display rules, each of which was a defect before it was a rule
+
+Written from the design, all three looked right; run against real data, all three were
+wrong. They are recorded because the next such tool will reach for the same defaults:
+
+- **`dtype == object` does not find string columns.** Under pandas 3.0 a string column
+  round-trips through parquet as the **`str`** dtype, so an object-gated JSON sniff never
+  fires -- measured: `odor_sequence` reported as a plain `str` column, i.e. the one thing
+  the sniff exists to prevent. The gate now tests what the column is *not* (numeric,
+  bool, datetime, timedelta), which survives whatever pandas stores strings as next.
+- **A percentage must be floored, never rounded.** `last_odor` on `sub-057 20260709` is
+  **338 of 339** non-null, which `%.0f` renders as `100%` -- a column with a missing
+  value reading as complete. `100%` now means `non_null == n_rows` and nothing else.
+- **A sparse column's first rows are usually null.** `response_time_ms` is defined on 63
+  of 339 trials, so the first screenful is empty while the column is fine; the listing
+  says so rather than leaving that impression.
+
+> The general form: **a tool for looking at data must not manufacture the failure it is
+> used to detect.** Two of the three above would have made a healthy file look complete
+> or a JSON blob look like text.
+
+### The gate, and why it is two things and not five
+
+`regression`, `plot_regression` and `verify_scripts` **cannot reach this code**, and
+running them would produce a green that means "I did not look" -- this phase's recurring
+lesson (section 28). `regression` fingerprints `trial_data` and the metrics dict;
+`verify_scripts` drives a hardcoded list of three pipeline scripts with
+`--subjids`/`--dates`, which a reader is not in. The honest gate is **`check_imports`
+(PASS) plus running the tool**, on a synthetic session covering the awkward cases and on
+a real one. Evidence that no existing path moved: `git diff --stat` reports **zero
+modifications to tracked files** -- the change is two new files, imported by nothing.
+
+Each display rule above was validated by the section 17 rule, in both directions:
+`odor_sequence` flags `(JSON)` while the plain string column `reward_determinacy` does
+not; 338/339 gives `99%` while 339/339 gives `100%`; the sparse hint fires on
+`response_time_ms` and not on `num_odors`.
+
+### Measured in passing: the server predates the blob drop
+
+Both peeked subjects' saved sessions were written by **`3094c40`** (Phase 7b.5), which is
+**not** an ancestor of `42d5684`, the commit that dropped the three position blobs. Their
+`trial_data` column counts confirm it arithmetically: `sub-057` (single_reward) **73 =
+70 + 3**, `sub-040` (standard) **61 = 58 + 3**, with `position_valve_times`,
+`position_poke_times` and `presentations` all present as `str (JSON)`.
+
+Expected, not a defect -- section 28 sequenced the re-analysis after the drop. Recorded
+because it is the precondition several later items are waiting on, and because it is now
+a one-command check rather than an inference.

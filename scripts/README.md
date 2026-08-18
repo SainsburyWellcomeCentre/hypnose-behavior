@@ -10,9 +10,14 @@ install is required.
 | `run_trial_classification.py` | Trial classification → writes `trial_data` (+ summary) to derivatives |
 | `run_metrics_analysis.py` | Behavioural metric analysis (reads saved classification results) |
 | `batch_process.py` | Runs trial classification, then metric analysis |
+| `parquet_peek.py` | Read-only: what is in a saved parquet table |
 
 Run trial classification **before** metric analysis — metrics read the saved
 classification results from the derivatives tree.
+
+`parquet_peek.py` takes the same `--subjids`/`--dates`, but reads the *derivatives*
+tree rather than rawdata: it writes nothing and runs no analysis, so it shows what
+the other three already wrote. See [its own section](#parquet_peekpy) below.
 
 ## Arguments (shared)
 
@@ -57,3 +62,47 @@ python scripts/run_metrics_analysis.py --subjids 53 --date-range 20260501 202605
 # classification + metrics in one go
 python scripts/batch_process.py --subjids 53 58 --dates 20260528
 ```
+
+## `parquet_peek.py`
+
+Parquet is the format and CSV is off by default, so "open the CSV and look" stopped
+being an answer for anything written after Phase 7b.3. This is the replacement.
+Three views, narrowing:
+
+```bash
+# every table in the session: rows, columns, size on disk
+python scripts/parquet_peek.py --subjids 57 --dates 20260709
+
+# one table: ONE LINE PER COLUMN -- dtype, non-null count, distinct count, value range
+python scripts/parquet_peek.py --subjids 57 --dates 20260709 --table trial_data
+
+# one column, with its actual values
+python scripts/parquet_peek.py --subjids 57 --dates 20260709 \
+    --table trial_data --column response_time_ms
+python scripts/parquet_peek.py --subjids 57 --dates 20260709 \
+    --table trial_data --column odor_sequence --rows 50
+```
+
+It never prints the frame: `trial_data` is 58–73 columns wide and hundreds of rows
+long, so a row-shaped view is unreadable in a terminal. One line per column is, and
+`--max-columns N` trims it further on a narrow screen.
+
+| Argument | Meaning |
+| --- | --- |
+| `--subjids ID [ID ...]` | **required** — a peek is scoped to a subject, never the whole tree |
+| `--dates` / `--date-range` | as the other scripts; omit for every analysed session of that subject |
+| `--table NAME` | which table; omit for an inventory of all of them |
+| `--column NAME` | that column alone, with values. A name that is not there **raises**, and suggests near matches |
+| `--rows N` | values to list for `--column` (default 20; `0` = statistics only) |
+| `--max-columns N` | show only the first N columns (default: all) |
+
+Two things it shows that a bare `pd.read_parquet` does not:
+
+- **`(JSON)` on a column's dtype.** Object columns are JSON-encoded on the way into
+  the parquet as well as the CSV, so `odor_sequence` is on disk as the *string*
+  `'["OdorG", "OdorE", "OdorB"]'`. Reporting it as a plain string column would be
+  misleading about exactly the columns worth inspecting.
+- **A manifest header** naming the protocol mode and the commit that wrote the file —
+  which is how you find out that a saved session predates the code you are reading.
+
+It reads only; it writes nothing anywhere, including under a read-only mount.

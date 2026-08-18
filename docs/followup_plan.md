@@ -265,8 +265,12 @@ untouched. Keep as a note to explore later; not required for the v2.0.0 release.
 
 ## Item 7 — parquet peek tool and the cross-repo accessors
 
-**7a. A parquet peek tool.** With CSV off by default, "what is in this file" needs an
-answer that is not a notebook. Small, no design risk, do it first.
+**7a. A parquet peek tool.** ~~With CSV off by default, "what is in this file" needs an
+answer that is not a notebook. Small, no design risk, do it first.~~
+**Done 2026-08-18** — `io/parquet_peek.py` + `scripts/parquet_peek.py`, three narrowing
+views (session inventory -> one line per column -> one column with values). See
+`DECISIONS.md` section 29 for what it settled, including why it is not a `qc/` tool and
+why it does not read the `.schema.json` sidecar.
 
 **7b. A session handle and the measured-data accessors.**
 
@@ -314,7 +318,7 @@ was obtainable two ways and two figures disagreed.
 
 ## Suggested order
 
-1. **7a** parquet peek — cheap, immediately useful.
+1. ~~**7a** parquet peek — cheap, immediately useful.~~ **Done 2026-08-18.**
 2. **5** the `non_initiated` collapse — measured, small, tidies the output.
 3. **4** `parameters.py` + manifest stamp.
 4. **3** session selectors.
