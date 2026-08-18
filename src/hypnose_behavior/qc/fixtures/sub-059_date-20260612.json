@@ -135,25 +135,10 @@
     "poke_time_ms": "d9b99202d39473b81943df6714ceffec",
     "position": "35372eef4a312ea91ad9e567af34547f"
   },
-  "non_initiated_sequences": "1905f751359ef166149a23a058d4d673",
-  "non_initiated_sequences_columns": {
-    "attempt_end": "a013f8ef59c95e127ab1d769aa3ac45e",
-    "attempt_number": "f2160c8ffedf48068f2e1137e0a3a7e7",
-    "attempt_start": "a013f8ef59c95e127ab1d769aa3ac45e",
-    "continuous_poke_time_ms": "69a5ad5ef961e3287d81761b44782ba7",
-    "failure_reason": "18153aed55fa976fcbfffb564ef09537",
-    "initiation_sequence_time": "393f59136182ae10c79e235ff8de001f",
-    "next_attempt_start": "070050cd5a3d1f83d782290964ef3719",
-    "odor_name": "582fe7ae59906ef6df890fc206c68e34",
-    "pos1_poke_time_ms": "69a5ad5ef961e3287d81761b44782ba7",
-    "required_min_sampling_time_ms": "64ecdc53b4ee1043023eb0091d4162ee",
-    "run_id": "f2160c8ffedf48068f2e1137e0a3a7e7",
-    "timestamp": "a013f8ef59c95e127ab1d769aa3ac45e"
-  },
   "non_initiated_odor1_attempts": "b2f1a4a4f2ef254af6be776168da6e6d",
   "non_initiated_odor1_attempts_columns": {},
-  "non_initiated_FA": "c38453bc1c0a50d694ae1a8e0ccd2b4a",
-  "non_initiated_FA_columns": {
+  "non_initiated_attempts": "c38453bc1c0a50d694ae1a8e0ccd2b4a",
+  "non_initiated_attempts_columns": {
     "attempt_end": "a013f8ef59c95e127ab1d769aa3ac45e",
     "attempt_number": "f2160c8ffedf48068f2e1137e0a3a7e7",
     "attempt_start": "a013f8ef59c95e127ab1d769aa3ac45e",
@@ -174,6 +159,10 @@
     "run_id_original": "f2160c8ffedf48068f2e1137e0a3a7e7",
     "timestamp": "a013f8ef59c95e127ab1d769aa3ac45e"
   },
+  "non_initiated_sequences": "b2f1a4a4f2ef254af6be776168da6e6d",
+  "non_initiated_sequences_columns": {},
+  "non_initiated_FA": "b2f1a4a4f2ef254af6be776168da6e6d",
+  "non_initiated_FA_columns": {},
   "unreported_metrics": "3845da161d9d6b84ef0c2c76a59d3b23",
   "unreported_metrics_keys": {
     "fa_latency_from_pokeout": "6e37c8b9843895bc67c6c19ac8dbe8b4",

@@ -518,7 +518,7 @@ def print_merged_session_summary(merged_classification: dict, subjid=None, date=
                 _print_fa_counts(non_hr_trials)
 
             # False Alarm classification for non-initiated trials (if present)
-            fa_noninit_df = merged_classification.get('non_initiated_FA', pd.DataFrame())
+            fa_noninit_df = merged_classification.get('non_initiated_attempts', pd.DataFrame())
             if isinstance(fa_noninit_df, pd.DataFrame) and not fa_noninit_df.empty: 
                 print("\nFalse Alarm Classification for Non-Initiated Trials:")
                 print(f"  Total Non-Initiated FA Trials: {int(len(fa_noninit_df))}")

@@ -342,9 +342,16 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
 
         **Parquet is the format; CSV is a convenience.** It is written for every table, not
         just `trial_data`, because `save_csv=False` would otherwise make a table unreadable
-        rather than merely unreadable-by-eye -- `loaders._load_trial_views` could load the
-        three `non_initiated_*` tables from CSV *only*, and would have returned an empty
+        rather than merely unreadable-by-eye -- `loaders._load_table_with_trial_data` could
+        load the `non_initiated_*` tables from CSV *only*, and would have returned an empty
         frame with no error.
+
+        **`save_csv` stays uniform across tables** (Item 5). The follow-up plan's "drop CSV
+        and .schema.json" for the non-initiated tables was written against a pre-7b.3 file
+        count, where every table got all three files; with CSV off by default they already
+        get parquet alone. Exempting particular tables from the flag would re-introduce the
+        per-table asymmetry section 23 removed -- and would silently deny a CSV to the one
+        caller who asked for one.
 
         The `.schema.json` sidecar goes with the CSV, not the parquet: it records which
         object columns were JSON-encoded to survive a flat text file, which parquet does not
@@ -377,8 +384,22 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
 
     # Save only the streamlined set: trial_data, its per-position side-table, and the
     # non-initiated tables.
-    for k in ("trial_data", "position_data", "non_initiated_sequences",
-              "non_initiated_odor1_attempts", "non_initiated_FA"):
+    #
+    # **`non_initiated_sequences` is deliberately not saved** (Item 5). It is fully
+    # contained in `non_initiated_attempts`, and by construction rather than by
+    # agreement on the coverage sessions: `run.py` builds the FA input as
+    # `concat([non_initiated_sequences, non_initiated_odor1_attempts])`;
+    # `aborted_trials.classify_noninitiated_FA` drops a row only when `attempt_end` is
+    # NaN, which `detect_trials` cannot produce (it falls back to the valve's own
+    # `event_start`); and each output row is `{**row.to_dict(), <6 FA fields>}`, so
+    # every input column and every input cell is carried verbatim. Columns, rows and
+    # values are all subsets -- the only difference is dtype widening at the concat,
+    # `attempt_number` int64 -> float64 where the odor1 rows introduce nulls.
+    #
+    # It stays in `classification` because it is the *input* to that concat, and
+    # because `summary.py` and `merge.py` report its counts. Only the file goes.
+    for k in ("trial_data", "position_data",
+              "non_initiated_odor1_attempts", "non_initiated_attempts"):
         df = classification.get(k) if isinstance(classification, dict) else None
         if k == "trial_data" and isinstance(df, pd.DataFrame) and not df.empty:
             # **Phase 7b.4b: the blobs do not go to disk.** `trial_data` is now one row
@@ -492,8 +513,12 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     def _n(name):
         df = classification.get(name)
         return int(len(df)) if isinstance(df, pd.DataFrame) else 0
+    # `non_initiated_sequences` is counted although it is no longer saved as a table: the
+    # count is a real fact about the session (how many sampling attempts failed), it is
+    # what `merge.py`'s per-run sanity check compares against, and dropping it would
+    # change a number readers of `summary.json` have always had.
     for k in [
-        "trial_data","position_data","non_initiated_sequences","non_initiated_odor1_attempts","non_initiated_FA",
+        "trial_data","position_data","non_initiated_sequences","non_initiated_odor1_attempts","non_initiated_attempts",
     ]:
         counts[k] = _n(k)
     # Attach per-run parameters to manifest runs

@@ -355,7 +355,12 @@ def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verb
                 fa_noninit_df = fa_noninit_df.copy()
                 fa_noninit_df['run_id'] = i + 1
 
-            cls['non_initiated_FA'] = fa_noninit_df
+            # Named for what it holds, not for one of its columns: this is *every*
+            # non-initiated attempt -- both failed sampling attempts and failed
+            # position-1 attempts, per the concat above -- annotated with an FA outcome.
+            # Most of its rows are `nFA`, so the old name `non_initiated_FA` told a
+            # reader the opposite of the truth.
+            cls['non_initiated_attempts'] = fa_noninit_df
             out['classification'] = cls
 
             # Normalize outputs for merging
@@ -393,7 +398,7 @@ def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verb
     # Merge classifications (now preserves per-run params)
     merged = merge_classifications(merge_inputs, verbose=verbose)
     merged['aborted_index'] = merged.get('index', {}).get('aborted', {})
-    merged['non_initiated_FA'] = merged.get('non_initiated_FA', pd.DataFrame())
+    merged['non_initiated_attempts'] = merged.get('non_initiated_attempts', pd.DataFrame())
 
     save_dir = None
     save_err: Exception | None = None

@@ -15,7 +15,7 @@ and what remained live has been carried into the seven items below. Same branch,
 `docs/archive/` holds closed working documents, including the restructure_2 plan and its
 per-phase Progress table. **Nothing live points into it** and no item needs to read it; it
 is there if a historical "why was it done that way" ever needs answering, and
-`DECISIONS.md` sections 1-28 already hold everything that still binds.
+`DECISIONS.md` sections 1-30 already hold everything that still binds.
 
 ---
 
@@ -61,10 +61,12 @@ format, CSV a convenience that is **off by default**.
 
 `src/hypnose_behavior/qc/`, see `qc/README.md`:
 
-- **`regression.py`** — golden master, **54 checks** (9 coverage sessions x 6 fingerprints:
+- **`regression.py`** — golden master, **90 checks** (9 coverage sessions x 10 fingerprints:
   `trial_data`, `metrics`, `position_data`, `metrics_by_trial`, `metrics_by_poke`,
-  `unreported_metrics`). Reports added/removed/changed columns and keys, so an intended
-  change is easy to confirm. `--generate` writes baselines. ~3-15 min depending on mount.
+  `non_initiated_odor1_attempts`, `non_initiated_attempts`, `unreported_metrics`, plus
+  `non_initiated_sequences` / `non_initiated_FA` as deletion guards that must stay ABSENT).
+  Reports added/removed/changed columns and keys, so an intended change is easy to confirm.
+  `--generate` writes baselines. ~3-15 min depending on mount. Sections 26, 30.
 - **`plot_regression.py`** — old-vs-new diff of what the plotters **draw**, **38 cases**.
   Two-tree, not a golden master. **Item 1 depends on it.** `DECISIONS.md` sections 7, 22.
 - **`position_data_lossless.py`** — asserts every blob field is recoverable from
@@ -208,6 +210,19 @@ surface, and "what was this session scored with" must be answerable from the fil
 
 ## Item 5 — collapse the `non_initiated_*` files: 9 files -> 2
 
+**Done 2026-08-18.** `non_initiated_sequences` no longer written, `non_initiated_FA`
+renamed **`non_initiated_attempts`**, `non_initiated_odor1_attempts` kept. Delivered as
+**3 -> 2 files by default** and 9 -> 6 under `--save-csv`: section 23 had already removed
+six of the nine, and `save_csv` was deliberately left uniform across tables. See
+`DECISIONS.md` section 30 — including the gate gap it found, the by-construction proof,
+and why `non_initiated_odor1_attempts` is redundant too but deliberately kept.
+
+**The plan's gate was wrong, and that was the item's first finding.** Neither `regression`
+nor `verify_scripts` could see a deleted or renamed table; the gate was extended first, as
+its own commit, before the change was made.
+
+*Original brief below, kept for the measurements it records.*
+
 **Delivers.** `non_initiated_sequences` **deleted**, `non_initiated_FA` **renamed**,
 `non_initiated_odor1_attempts` kept, CSV and `.schema.json` dropped for all of them.
 
@@ -319,7 +334,8 @@ was obtainable two ways and two figures disagreed.
 ## Suggested order
 
 1. ~~**7a** parquet peek — cheap, immediately useful.~~ **Done 2026-08-18.**
-2. **5** the `non_initiated` collapse — measured, small, tidies the output.
+2. ~~**5** the `non_initiated` collapse — measured, small, tidies the output.~~
+   **Done 2026-08-18.**
 3. **4** `parameters.py` + manifest stamp.
 4. **3** session selectors.
 5. **1** Phase 10 — coverage measurement first, then the move, then the cleanup.

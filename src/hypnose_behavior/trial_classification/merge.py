@@ -149,7 +149,7 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
         'aborted_sequences',
         'aborted_sequences_HR',
         'aborted_sequences_detailed',
-        'non_initiated_FA',
+        'non_initiated_attempts',
     ]
 
     def _normalize_trial_id(s):

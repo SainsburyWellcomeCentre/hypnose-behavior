@@ -286,12 +286,14 @@ def load_results_dir(results_dir):
     # it -- see `SessionResults`.
     dict.__setitem__(results, "position_data", _UNBUILT)
 
-    # The three `non_initiated_*` tables are deliberately not loaded. Phase 4a
-    # step 6 dropped non-initiated trials from the metric set: they are not in
+    # The `non_initiated_*` tables are deliberately not loaded. Phase 4a step 6
+    # dropped non-initiated trials from the metric set: they are not in
     # `trial_data`, so every metric over them needed its own frame and its own
     # shape, and integrating them properly is its own piece of work. Trial
-    # classification still writes the tables; nothing in `metric_analysis` reads
-    # them.
+    # classification still writes them; nothing in `metric_analysis` reads them,
+    # and measured for Item 5, nothing in `visualization/` or `modelling/` does
+    # either -- every `_load_table_with_trial_data` call site in the repo asks for
+    # `trial_data`.
 
     # Attach manifest and summary
     results["manifest"] = manifest

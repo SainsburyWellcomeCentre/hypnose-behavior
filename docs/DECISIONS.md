@@ -1993,3 +1993,161 @@ Both peeked subjects' saved sessions were written by **`3094c40`** (Phase 7b.5),
 Expected, not a defect -- section 28 sequenced the re-analysis after the drop. Recorded
 because it is the precondition several later items are waiting on, and because it is now
 a one-command check rather than an inference.
+
+---
+
+## 30. Redundant by construction, and the gate that could not see it *(Item 5, 2026-08-18)*
+
+**Intended output change, fixtures regenerated 2026-08-18.** `non_initiated_sequences` is
+no longer written; `non_initiated_FA` is renamed **`non_initiated_attempts`**;
+`non_initiated_odor1_attempts` is unchanged. Two saved tables where there were three.
+
+### The gate could not see it, and neither could the one the plan named as backup
+
+The follow-up plan's gate for this item was "regression (removed tables => deliberate
+`--generate`), `verify_scripts`". Measured before touching anything, **both are blind**:
+
+| gate | what it compares | sees a deleted table? |
+|---|---|---|
+| `regression.py` | the six section 26 fingerprints -- none a `non_initiated_*` table | **no** |
+| `verify_scripts.py` | `fx["trial_data"]` and `fx["metrics"]` only, not even the three side tables | **no**, only a crash |
+| `plot_regression.py` | figures, from *already written* derivatives | **no** -- see readers below |
+| `verbose_diff.py` | stdout, which reads the **in-memory** dict | no -- but see the trap |
+
+So the change would have gone GREEN by nothing looking at the files it changed. **Section
+26's lesson, arriving in a new place, one item after it was written.**
+
+The gate was therefore extended *first, as its own commit* (`3f99d28`), not alongside the
+change: `_common.SIDE_TABLES` gained the three tables, `--generate` was verified purely
+additive (54 pre-existing fingerprints green, **zero deletions in all nine fixture files**),
+and only then was the change made against a baseline that could see it.
+
+> **`regression.compare` had been keeping its own hand-written copy of the side-table
+> list.** Section 27's trap, inside the gate itself: the copy that decides whether a
+> fingerprint is *checked* could fall behind the copy that decides whether it is
+> *written*, leaving a table fingerprinted and silently never compared. `CHECKS` is now
+> derived from `_common.SIDE_TABLES`.
+
+**The two old names stay in `SIDE_TABLES` as deletion guards**, fingerprinting as
+`md5("ABSENT") = b2f1a4a4...`, so resurrecting either file is a RED. Removing them right
+after using them to gate the deletion would leave the deletion asserted by nothing.
+
+### Redundant by construction, not by agreement on nine sessions
+
+Section 27's rule -- the code path is the answer, nine sessions agreeing is a hypothesis.
+Three links, and none of them is data-dependent:
+
+1. **`run.py`** builds the FA input as
+   `pd.concat([non_initiated_sequences, non_initiated_odor1_attempts])`, so every row and
+   every column of both enters.
+2. **`aborted_trials.classify_noninitiated_FA`** drops a row only when `attempt_end` is
+   NaN -- which `detect_trials` cannot produce: the failed-attempt record writes
+   `last_seg_end if last_seg_end is not None else event_start`, and `event_start` is a real
+   timestamp guarded by `if event_end <= event_start: continue`.
+3. Each output row is **`{**row.to_dict(), <6 FA fields>}`** -- every input cell carried
+   verbatim.
+
+Columns, rows and values are all subsets. The **only** difference is dtype widening at the
+concat: `attempt_number` int64 -> float64 where the odor1 rows introduce nulls. That is the
+whole of the plan's "78 shared-cell differences" scare -- 74 of them were `1` vs `1.0`.
+
+> **A subset check says nothing about cell agreement, and a crude cell check says nothing
+> about values.** Compare typed, never as strings.
+
+### The 5-6 extra rows are the other table
+
+`non_initiated_FA` had 5-6 more rows than `non_initiated_sequences`, carrying `fa_label`
+but null `attempt_number` and null `failure_reason`. They are the
+`non_initiated_odor1_attempts` rows, and `len(FA) == len(sequences) + len(odor1_attempts)`
+on all eight fixture sessions holding any:
+
+| | sequences | odor1_attempts | FA | FA cols |
+|---|---|---|---|---|
+| 057 20260709 | 32 | **1** | 33 | **23** |
+| 040 20251124 | 74 | **5** | 79 | **23** |
+| six others | 1-65 | -- | same | 19 |
+| 048 20260306 | -- | -- | -- | -- |
+
+The nulls are structural, not a defect: `attempt_number` / `failure_reason` are
+`detect_trials` fields, and the concat NaN-fills them for rows from the other source. **Two
+genuinely different events** share the table -- a failed *sampling attempt* inside an
+initiation period, numbered within a series; and a failed *position-1 attempt* on a trial
+that did initiate, which belongs to a `global_trial_id` and is not one of a series. The
+column widths follow: 19 without odor1 rows, 23 with (`global_trial_id`, `trial_id`,
+`attempt_first_poke_in`, `attempt_poke_time_ms`).
+
+> **`non_initiated_odor1_attempts` is redundant with the renamed table by exactly the same
+> construction.** It is kept, because the item's scope was three tables to two and because
+> it is the only place those rows appear un-widened. Recorded so the next person does not
+> re-derive it -- and does not assume the collapse was incomplete.
+
+### Nothing reads any of them
+
+`loaders._load_table_with_trial_data` accepts these names, and section 23 records the
+near-miss that they were once loadable from **CSV only**. Measured across the repo: **every
+call site passes `"trial_data"`** -- 21 in `visualization_utils`, 4 in
+`movement_analysis_utils`, and one each in `prep`, `switchpoint/data`, `io/tracking`,
+`metric_analysis/movement`, `metrics/false_alarm`, `metrics/hidden_rule`. Zero hits in
+`notebooks/` and `scripts/`. `load_results` does not load them by design (Phase 4a step 6),
+and no metric reads `summary["counts"]`.
+
+That is why `plot_regression` was **skipped and not merely passed**: no plotter reads these
+tables, and it diffs figures drawn from already-written derivatives, so a change to what the
+classifier writes cannot reach it in either tree.
+
+**The old names stay readable.** Every session on the server predates this change and
+carries `non_initiated_sequences.parquet` and `non_initiated_FA.parquet`; the read
+whitelist keeps all four names. Section 2's rule -- a read path answers for the files that
+exist, not only for the ones today's writer produces.
+
+### `save_csv` stays uniform -- the plan's "9 files" predates section 23
+
+The item said "drop CSV and `.schema.json` for all of them", and the 9 was 3 tables x
+(`.csv` + `.schema.json` + `.parquet`). **Section 23 had already deleted six of those nine**
+by making CSV off by default. Exempting particular tables from the flag was measured and
+rejected: it re-introduces the per-table asymmetry section 23 removed -- the asymmetry that
+made these three CSV-only and nearly unloadable -- and silently denies a CSV to the one
+caller who explicitly asked for one.
+
+Demonstrated on `sub-057`, both ways: default writes `non_initiated_attempts.parquet` +
+`non_initiated_odor1_attempts.parquet` and nothing else; `--save-csv` writes both with
+`.csv` and `.schema.json`, exactly like every other table. **Delivered as 3 -> 2 in the
+default configuration** (the one the server uses) **and 9 -> 6 under the flag.**
+
+### Named for what it holds, not for one of its columns
+
+`non_initiated_FA` is not the FA subset -- 26 of `sub-057`'s 33 rows are `nFA`. It is every
+non-initiated attempt annotated *with* an FA outcome. The key is renamed at its source
+(`run.py`, `merge.py`, `summary.py`), not just at the filename, so there are not two names
+for one thing.
+
+`counts` in `summary.json` still reports `non_initiated_sequences`: the count is a real fact
+about the session, it is what `merge.py`'s per-run sanity check compares against, and
+dropping it would change a number readers have always had. **The table stays in
+`classification` too** -- it is the *input* to the concat above. Only the file goes.
+
+### The trap this walked up to, and the gate that catches it
+
+Section 28's lesson: the blobs had to be dropped **on the way to the file, never from
+`classification`**, because things read that dict after the save. Identical here --
+`summary.py` prints the non-initiated statistics off the in-memory frames. `verbose_diff` is
+the gate that sees it, and it discriminates in both directions: mutating the dict would empty
+those statistics, and renaming the write without the read would make the whole "False Alarm
+Classification for Non-Initiated Trials" block vanish.
+
+**Not a vacuous pass:** 9/9 identical totalling **16,944 lines**, range 464-3,083 -- the same
+figures section 17 records for an honest run.
+
+### Evidence
+
+- `regression` **RED 16/81** by design, every one a `- removed column`, **zero `+ added`,
+  zero `~ changed`, zero `[ERROR]`**; the 54 pre-Item-5 fingerprints green on all nine, so
+  no analysis output moved. Then **GREEN 90/90** after regeneration.
+- **The rename moved nothing**: the regenerated `non_initiated_attempts` md5 *and its entire
+  per-column md5 map* are byte-identical to the old `non_initiated_FA` on all nine sessions.
+  A rename that changed a cell would fail this; comparing only the table's own new md5
+  against itself would not.
+- `verbose_diff` GREEN 9/9, 16,944 lines. `verify_scripts` GREEN, 19 checks through the real
+  CLI with `--save-csv`. `check_imports` PASS.
+- Skipped, on reachability: `plot_regression` (no reader, and unreachable from a writer
+  change), `position_data_lossless` (unrelated path), `ast_move_check` (not a move).

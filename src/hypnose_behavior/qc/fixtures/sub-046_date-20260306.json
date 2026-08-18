@@ -135,25 +135,10 @@
     "poke_time_ms": "ee46022b9630b0c8d9a07fcd27623b25",
     "position": "6c3339cd0967b9d4aea1db20b81b77a6"
   },
-  "non_initiated_sequences": "60c1e655a1bdc20ca7b9845c8e267eea",
-  "non_initiated_sequences_columns": {
-    "attempt_end": "59fd8cfc39da4920c92ec7e8255052be",
-    "attempt_number": "788cb467896297ff2789d035f00b0766",
-    "attempt_start": "dfffbb0c3c0d9f48f88812f96425973e",
-    "continuous_poke_time_ms": "f974bdf4d59b6c9b4d4709695f40121b",
-    "failure_reason": "c0b208191d05dcd850553dcf01a107b5",
-    "initiation_sequence_time": "79c7f85141e4b8391c52745025829dac",
-    "next_attempt_start": "f878f5541c3a368ac19dd89f17c30cdb",
-    "odor_name": "9c0e1528a1b49e7e50f50a166f54de4e",
-    "pos1_poke_time_ms": "f974bdf4d59b6c9b4d4709695f40121b",
-    "required_min_sampling_time_ms": "8dc713e7b16faaa5355d4ac26f30300c",
-    "run_id": "f364fb99658b66c3a94830a1d126f41a",
-    "timestamp": "dfffbb0c3c0d9f48f88812f96425973e"
-  },
   "non_initiated_odor1_attempts": "b2f1a4a4f2ef254af6be776168da6e6d",
   "non_initiated_odor1_attempts_columns": {},
-  "non_initiated_FA": "6ecda2850c72116b0dd3883a3cab1dce",
-  "non_initiated_FA_columns": {
+  "non_initiated_attempts": "6ecda2850c72116b0dd3883a3cab1dce",
+  "non_initiated_attempts_columns": {
     "attempt_end": "59fd8cfc39da4920c92ec7e8255052be",
     "attempt_number": "788cb467896297ff2789d035f00b0766",
     "attempt_start": "dfffbb0c3c0d9f48f88812f96425973e",
@@ -174,6 +159,10 @@
     "run_id_original": "f364fb99658b66c3a94830a1d126f41a",
     "timestamp": "dfffbb0c3c0d9f48f88812f96425973e"
   },
+  "non_initiated_sequences": "b2f1a4a4f2ef254af6be776168da6e6d",
+  "non_initiated_sequences_columns": {},
+  "non_initiated_FA": "b2f1a4a4f2ef254af6be776168da6e6d",
+  "non_initiated_FA_columns": {},
   "unreported_metrics": "4255ef010b0fac077d0176483aa4b86a",
   "unreported_metrics_keys": {
     "fa_latency_from_pokeout": "3f0904b8b3e3bc21ed99005cf79f287b",

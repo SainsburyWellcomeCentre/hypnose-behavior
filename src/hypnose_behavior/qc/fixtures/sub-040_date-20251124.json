@@ -135,21 +135,6 @@
     "poke_time_ms": "cf10d2f91d99d2bdd0483b26ee1ea093",
     "position": "e7991073bfa7d777c670ae4b00b52d64"
   },
-  "non_initiated_sequences": "872814a20c0927101b495024e553ef0a",
-  "non_initiated_sequences_columns": {
-    "attempt_end": "8b9975ff17142167315050b37c20bd6a",
-    "attempt_number": "6ac474636e695b6dfbf5a887867d5b5b",
-    "attempt_start": "8c006b0386c4aad55909900dbba5ed82",
-    "continuous_poke_time_ms": "8d70ad0eaf43ff535eb10a671a6eef60",
-    "failure_reason": "b1cf22dfa1fffce13e69175519baefd1",
-    "initiation_sequence_time": "c30da2491f867c3cf037fb7c5bf3e022",
-    "next_attempt_start": "d485e4649409f0ce1299037fc6cfdc72",
-    "odor_name": "c36755d52fc7f65200dd4e7c4f4a3646",
-    "pos1_poke_time_ms": "8d70ad0eaf43ff535eb10a671a6eef60",
-    "required_min_sampling_time_ms": "620be8322f11dc87b38d16a973bfd281",
-    "run_id": "a96abe33182b94b62491f7776f99d9a8",
-    "timestamp": "8c006b0386c4aad55909900dbba5ed82"
-  },
   "non_initiated_odor1_attempts": "f3a5c7354aba5436540a1a8b7797732e",
   "non_initiated_odor1_attempts_columns": {
     "attempt_end": "ece208878b10e10ec7a53a2fe46f459b",
@@ -162,8 +147,8 @@
     "run_id": "1a554fa3b17281e71aafbd49a538e25b",
     "trial_id": "9adca487fff07ae60cc2c661e2f1b601"
   },
-  "non_initiated_FA": "f92c4ac39b2e0ef2b50bf7be6fb02faf",
-  "non_initiated_FA_columns": {
+  "non_initiated_attempts": "f92c4ac39b2e0ef2b50bf7be6fb02faf",
+  "non_initiated_attempts_columns": {
     "attempt_end": "de24668bd8a21051da010bfc564f3f5b",
     "attempt_first_poke_in": "b4c5535944459c30f2a4248411781c5a",
     "attempt_number": "77b542978f0ee8e9bf2435a6dfff5922",
@@ -188,6 +173,10 @@
     "timestamp": "8a4b6018c6077153c8c3e2ee0e923373",
     "trial_id": "ac9bd39cab895415218ae9af6cb004b9"
   },
+  "non_initiated_sequences": "b2f1a4a4f2ef254af6be776168da6e6d",
+  "non_initiated_sequences_columns": {},
+  "non_initiated_FA": "b2f1a4a4f2ef254af6be776168da6e6d",
+  "non_initiated_FA_columns": {},
   "unreported_metrics": "ab5d7961830a78514cb60cc83977f728",
   "unreported_metrics_keys": {
     "fa_latency_from_pokeout": "f850c784f232def51e6bdc0c5f29dce4",
