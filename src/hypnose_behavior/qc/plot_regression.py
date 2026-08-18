@@ -97,6 +97,9 @@ MODULES = [
     "hypnose_behavior.metric_analysis.metrics.timing",
     "hypnose_behavior.metric_analysis.metrics.common",
     "hypnose_behavior.metric_analysis.movement",
+    # Item 1 turned the flat `movement.py` into a package. Both spellings listed,
+    # so a case resolves against the pre-move revision and the working tree alike.
+    "hypnose_behavior.metric_analysis.movement.speed_analysis",
     "hypnose_behavior.metric_analysis.sing_rew_metrics",
     "hypnose_behavior.metric_analysis.run",
 ]

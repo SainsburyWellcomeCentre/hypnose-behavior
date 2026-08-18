@@ -7,11 +7,12 @@ from __future__ import annotations
 Carved out of ``movement_analysis_utils.py`` in restructure_2 Phase 10
 (follow-up Item 1). Source-only move -- no behaviour change.
 
-Both read ``speed_analysis.parquet``, written by
-``metric_analysis.movement.compute_speed_analysis``. The threshold itself has
-one definition -- ``metric_analysis.movement.speed_threshold`` -- because a
-plotted threshold that disagrees with the one used to compute the saved
-latencies is invisible in any output (audit finding 7).
+Both **read** ``speed_analysis.parquet``, written by
+``metric_analysis.movement.speed_analysis.compute_speed_analysis``. Neither
+computes it: a session without that file is reported and skipped. The threshold
+has one definition -- ``metric_analysis.movement.speed_analysis.speed_threshold``
+-- because a plotted threshold that disagrees with the one used to compute the
+saved latencies is invisible in any output (audit finding 7).
 """
 
 import pandas as pd
@@ -34,10 +35,7 @@ from hypnose_behavior.io.loaders import (
 )
 from hypnose_behavior.visualization.prep import smooth_xy
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
-from hypnose_behavior.metric_analysis.movement import (
-    _binned_speed,
-    speed_threshold,
-)
+from hypnose_behavior.metric_analysis.movement.speed_analysis import speed_threshold
 from hypnose_behavior.io.save import save_figure
 import re
 import numpy as np
@@ -273,11 +271,7 @@ def plot_traces_with_speed_threshold(
     position_units="cm",
     arena_size_cm=50.0,
     fa_types="FA_time_in",
-    bin_ms: int = 100,
     pre_buffer_s: float = 0.2,
-    threshold_alpha: float = 6.0,
-    threshold_beta: float = 6.0,
-    mode: str = "mean",
     smooth_window: int = 5,
     figsize=(10, 8),
     invert_y: bool = True,
@@ -288,12 +282,19 @@ def plot_traces_with_speed_threshold(
     """Plot spatial traces for rewarded, unrewarded, and FA trials with a speed threshold marker.
 
     For the selected sessions, builds three figures (rewarded, unrewarded, fa). Traces are overlaid
-    across sessions. Each trial trace gets a black dot at the first time after last poke-out when
-    speed exceeds vthresh = max(alpha*mu, mu+beta*sigma), where mu/sigma come from the pooled
-    baseline window [-0.15s, -0.05s] relative to last poke-out across all trials in the session.
-    If a parquet with `speed_threshold_time` exists for the session (written by
-    compute_speed_analysis), it is loaded (and cached) and used directly; otherwise the
-    threshold is recomputed and the result is saved + cached.
+    across sessions. Each trial trace gets a black dot at the `speed_threshold_time` recorded in
+    that session's ``speed_analysis.parquet``.
+
+    **This reads; it does not compute.** A session without that file is reported and skipped --
+    run ``scripts/run_speed_analysis.py`` for it first. Until 2026-08-18 this recomputed the
+    threshold in memory instead, which was a second derivation of a quantity
+    ``metric_analysis.movement`` owns (the section 14 hazard), and which no gate could reach:
+    measured, ``plot_regression``'s case takes the saved branch, so the recompute ran zero times.
+    The docstring also claimed the recomputed result was "saved + cached"; it never was.
+
+    ``bin_ms`` / ``mode`` / ``threshold_alpha`` / ``threshold_beta`` went with it. They only ever
+    fed the recompute, so keeping them would have silently accepted a threshold setting that
+    decides nothing -- they belong to ``compute_speed_analysis``, which is where they still are.
 
     Parameters
     ----------
@@ -310,17 +311,8 @@ def plot_traces_with_speed_threshold(
         Physical size represented by the xlim/ylim ranges when displaying cm.
     fa_types : str | Iterable
         FA labels to include (default "FA_time_in"). Case-insensitive; accepts comma/semicolon list.
-    bin_ms : int
-        Epoch/bin width in milliseconds for speed aggregation (default 100).
     pre_buffer_s : float
-        Seconds to include before last poke-out when computing speed (default 0.2). Needs >=0.15s
-        to populate the baseline window.
-    threshold_alpha : float
-        Multiplier for mu in the threshold definition (default 6.0).
-    threshold_beta : float
-        Multiplier for sigma in the threshold definition (default 6.0).
-    mode : {"max", "mean"}
-        Aggregation per bin when computing speeds.
+        Seconds of trace to draw before last poke-out (default 0.2).
     smooth_window : int
         Rolling window (frames) for smoothing X/Y before speed computation and plotting.
     figsize : tuple
@@ -372,15 +364,6 @@ def plot_traces_with_speed_threshold(
             if verbose:
                 print(f"[plot_traces_with_speed_threshold] Failed to save figure '{save_name}': {exc}")
 
-    # Ensure helper is available even if an old module version was loaded
-    try:
-        binned_speed_fn = _binned_speed
-    except NameError:
-        import hypnose_behavior.visualization.movement_analysis_utils as _mau
-        binned_speed_fn = getattr(_mau, "_binned_speed", None)
-    if binned_speed_fn is None:
-        raise RuntimeError("_binned_speed helper not available; reload hypnose_behavior.visualization.movement_analysis_utils")
-
     # Color palette consistent with plot_trial_traces_by_mode
     port_colors = {1: "#FF6B6B", 2: "#4ECDC4"}
     port_colors_fa = {1: "#FF8E8E", 2: "#7EE9DF"}
@@ -404,21 +387,24 @@ def plot_traces_with_speed_threshold(
         def fa_filter_fn(lbl):
             return str(lbl).lower() in fa_set if pd.notna(lbl) else False
 
-    suffix_parts = [mode]
+    # `mode` used to lead this suffix, so saved names read `..._mean_fa_time_in_...`.
+    # It is gone with the recompute, and dropping it from the name is the point
+    # rather than a side effect: the aggregation mode is now a property of the
+    # saved `speed_analysis.parquet`, chosen when that file was computed. A figure
+    # that no longer aggregates anything cannot know it, so keeping it in the
+    # filename would label the output with a mode that may not be the one the
+    # thresholds actually came from.
+    suffix_parts = []
     if fa_label_display:
         suffix_parts.append(_slugify(fa_label_display))
     if smooth_window > 1:
         suffix_parts.append(f"smooth{smooth_window}")
     save_suffix = "_".join(filter(None, suffix_parts))
 
-    if mode not in {"max", "mean"}:
-        raise ValueError("mode must be 'max' or 'mean'")
     if position_units not in {"cm", "px"}:
         raise ValueError("position_units must be either 'cm' or 'px'")
     if position_units == "cm" and arena_size_cm <= 0:
         raise ValueError("arena_size_cm must be positive")
-    if pre_buffer_s < 0.15:
-        print("pre_buffer_s < 0.15s: baseline window [-0.15, -0.05] may be empty")
 
     subj_str = normalize_subjid(subjid)
     derivatives_dir = get_derivatives_root()
@@ -428,8 +414,6 @@ def plot_traces_with_speed_threshold(
     if not ses_dirs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
-    baseline_window = (-0.15, -0.05)
-    bin_s = bin_ms / 1000.0
 
     def _safe_dt(val):
         try:
@@ -650,122 +634,29 @@ def plot_traces_with_speed_threshold(
             # done with this session
             continue
 
-        baseline_vals = []
-        baseline_mask = None
-        trial_cache = {}
-
-        # First pass: per-trial binned speeds to build baseline and cache for later reuse
-        for idx, row in trial_data.iterrows():
-            rtc = str(row.get("response_time_category", "")).lower()
-            is_aborted = bool(row.get("is_aborted", False))
-            fa_label = str(row.get("fa_label", "")).lower()
-
-            if rtc == "rewarded" and not is_aborted:
-                cond = "rewarded"
-            elif rtc == "unrewarded" and not is_aborted:
-                cond = "unrewarded"
-            elif fa_label.startswith("fa_") and fa_filter_fn(fa_label):
-                cond = "fa"
-            else:
-                continue
-
-            t_zero = _last_poke_out_scanning_back(
-                pokes_by_trial.get(row.get("global_trial_id")))
-            if pd.isna(t_zero):
-                trial_id = row.get("trial_id", idx) if hasattr(row, "get") else idx
-                skipped_no_poke_end.append(trial_id)
-                continue
-            t_end = _end_time(row, cond)
-            if pd.isna(t_end) or t_end <= t_zero:
-                continue
-
-            mids_trial, arr_trial = binned_speed_fn(tracking, t_zero, t_end, pre_buffer_s, bin_s, mode)
-            if mids_trial is None or arr_trial is None:
-                continue
-
-            if baseline_mask is None:
-                baseline_mask = (mids_trial >= baseline_window[0]) & (mids_trial <= baseline_window[1])
-            if baseline_mask is not None and baseline_mask.any():
-                baseline_vals.extend([v for v in arr_trial[baseline_mask] if not np.isnan(v)])
-
-            trial_cache[idx] = {
-                "cond": cond,
-                "t_zero": t_zero,
-                "t_end": t_end,
-                "mids": mids_trial,
-                "arr": arr_trial,
-            }
-
-        if not baseline_vals:
-            print(f"No baseline window data for {date_str}; skipping session")
-            if skipped_no_poke_end:
-                print(f"Warning [{date_str}]: skipped trials with no poke_odor_end in position_poke_times: {skipped_no_poke_end}")
-            continue
-
-        baseline_vals_arr = np.asarray([v for v in baseline_vals if np.isfinite(v)])
-        if baseline_vals_arr.size == 0:
-            print(f"Baseline values not finite for {date_str}; skipping session")
-            if skipped_no_poke_end:
-                print(f"Warning [{date_str}]: skipped trials with no poke_odor_end in position_poke_times: {skipped_no_poke_end}")
-            continue
-        stats = speed_threshold(baseline_vals_arr, alpha=threshold_alpha,
-                                beta=threshold_beta)
-        mu, sigma = stats["mu"], stats["sigma"]
-        vthresh = stats["max_alpha_mu_mu_plus_beta_sigma"]
-
-        if "speed_threshold_time" not in trial_data.columns:
-            trial_data["speed_threshold_time"] = pd.NaT
-
-        # Second pass: build traces and threshold markers using computed threshold
-        for idx, meta in trial_cache.items():
-            cond = meta["cond"]
-            t_zero = meta["t_zero"]
-            t_end = meta["t_end"]
-            row = trial_data.loc[idx]
-
-            thr_time = pd.NaT
-            saved_thr = trial_data.at[idx, "speed_threshold_time"] if "speed_threshold_time" in trial_data.columns else pd.NaT
-            if pd.notna(saved_thr):
-                thr_time = saved_thr
-            else:
-                mids_trial = meta.get("mids")
-                arr_trial = meta.get("arr")
-                if mids_trial is not None and arr_trial is not None:
-                    crossing_idx = np.where((mids_trial >= 0) & (arr_trial > vthresh))[0]
-                    if crossing_idx.size > 0:
-                        k = crossing_idx[0]
-                        thr_time = t_zero + pd.Timedelta(seconds=float(mids_trial[k]))
-
-            start_dt = t_zero - pd.Timedelta(seconds=pre_buffer_s)
-            seg = tracking[(tracking["time"] >= start_dt) & (tracking["time"] <= t_end)].copy()
-            if len(seg) < 2 or {"X", "Y", "time"} - set(seg.columns):
-                continue
-            t_rel = (seg["time"] - t_zero).dt.total_seconds().to_numpy()
-            if not np.isfinite(t_rel).all() or np.ptp(t_rel) == 0:
-                continue
-            x = seg["X"].to_numpy()
-            y = seg["Y"].to_numpy()
-
-            marker = None
-            trial_data.at[idx, "speed_threshold_time"] = thr_time
-            if pd.notna(thr_time):
-                nearest_idx = int(np.argmin(np.abs((seg["time"] - thr_time).dt.total_seconds())))
-                marker = (x[nearest_idx], y[nearest_idx])
-
-            port = _port_for_coloring(row, cond)
-            if cond == "fa":
-                color = port_colors_fa.get(port, port_colors_fa[1])
-            else:
-                color = port_colors.get(port, port_colors[1 if _category_from_row(row) == "A" else 2])
-
-            traces[cond].append({"x": x, "y": y, "color": color, "session": date_str})
-            if marker is not None:
-                markers[cond].append({"xy": marker, "color": "black", "session": date_str})
-
-        if skipped_no_poke_end:
-            print(f"Warning [{date_str}]: skipped trials with no poke_odor_end in position_poke_times: {skipped_no_poke_end}")
+        # No `speed_analysis.parquet` for this session. Until 2026-08-18 this fell
+        # through to recomputing the threshold in memory -- a second derivation of a
+        # quantity `metric_analysis.movement` owns (section 14), reached by no gate
+        # (measured: `plot_regression`'s case takes the branch above, so this ran zero
+        # times), and whose result the docstring wrongly claimed was saved.
+        print(f"[plot_traces_with_speed_threshold] No speed_analysis.parquet for "
+              f"{date_str}; skipping this session. Run "
+              f"scripts/run_speed_analysis.py --subjids {subjid} --dates {date_str} first.")
+        continue
 
     figs = {}
+
+    # No session yielded a trace -- every one of them was missing its
+    # `speed_analysis.parquet`. Return empty rather than falling through: the
+    # axis-scaling below needs finite coordinate limits and raises
+    # "Cannot convert to cm without finite x/y coordinate limits" without them,
+    # which reports a units problem for what is really missing input. Caught by
+    # the probe for this change, not by any gate -- `plot_regression`'s case runs
+    # on a session that has the file, so it never reaches here.
+    if not any(traces.values()):
+        print("[plot_traces_with_speed_threshold] No speed analysis available for any "
+              "requested session; nothing to plot.")
+        return (figs, saved_paths) if (save and return_paths) else figs
 
     def _coord_limits(axis):
         vals = []

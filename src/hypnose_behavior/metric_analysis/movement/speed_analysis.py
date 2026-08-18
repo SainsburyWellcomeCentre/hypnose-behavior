@@ -17,7 +17,18 @@ Phase 4a metric audit, now closed):
 built from the session directory at runtime, so there is no ``__file__``-derived
 state of the kind that stopped ``io/paths.py`` moving whole in Phase 2a.
 
-Source-only move -- no behaviour change.
+Moved again in Phase 10 (follow-up Item 1), from the flat
+``metric_analysis/movement.py`` into this package, so movement metrics have room
+to grow beyond speed. The package ``__init__`` is docstring-only and re-exports
+nothing (section 3), so importers name this module.
+
+**This is the only place the speed threshold is computed.** Phase 10 removed the
+in-plotter recompute from ``visualization/movement/speed.py``: it was a second
+derivation of a quantity this module owns (section 14) that no gate could reach,
+and it wrote nothing despite a docstring claiming otherwise. A plotter now reads
+``speed_analysis.parquet`` or reports that it is missing.
+
+Source-only moves -- no behaviour change.
 """
 
 import re

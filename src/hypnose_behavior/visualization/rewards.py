@@ -529,12 +529,18 @@ def plot_cumulative_rewards_by_trial(
 
     ax.set_xlabel("Trial number")
     ax.set_ylabel("Cumulative Rewards")
+    # `orig=False` returns the processed ndarray. The default `orig=True` hands
+    # back whatever was passed in, and `axvline` passes a two-element *list*, so
+    # `.max()` raised `AttributeError` on every call that drew a session
+    # boundary -- i.e. every multi-session call. Single-session calls draw no
+    # boundary and worked, which is how it survived: measured 2026-08-18, no
+    # `plot_regression` case reached this plotter at all until Item 1 added one.
     data_xmax = max(
-        (line.get_xdata().max() for line in ax.get_lines() if len(line.get_xdata())),
+        (line.get_xdata(orig=False).max() for line in ax.get_lines() if len(line.get_xdata())),
         default=ax.get_xlim()[1],
     )
     data_ymax = max(
-        (line.get_ydata().max() for line in ax.get_lines() if len(line.get_ydata())),
+        (line.get_ydata(orig=False).max() for line in ax.get_lines() if len(line.get_ydata())),
         default=ax.get_ylim()[1],
     )
     ax.set_xlim(left=0, right=data_xmax * 1.01)
