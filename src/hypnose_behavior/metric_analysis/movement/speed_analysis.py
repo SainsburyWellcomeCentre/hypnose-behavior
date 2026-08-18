@@ -47,6 +47,7 @@ from hypnose_behavior.utils.helpers import (
     _filter_session_dirs,
     _iter_subject_dirs,
     _update_cache,
+    session_selectors,
 )
 
 __all__ = ["binned_speed", "compute_speed_analysis", "run_speed_analysis_batch"]
@@ -95,6 +96,11 @@ def run_speed_analysis_batch(
     subjids=None,
     dates=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     bin_ms: int = 100,
     pre_buffer_s: float = 1.0,
     fa_label_filter=None,
@@ -110,13 +116,28 @@ def run_speed_analysis_batch(
     inclusive (start, end) tuple). Only sessions with existing data are passed
     to compute_speed_analysis. Returns a list of (subjid, date) processed and
     prints a summary when verbose=True.
+
+    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow
+    the selection further; they intersect with ``dates`` and with each other, and
+    resolve through ``session_selectors`` rather than by slicing a listing --
+    section 8's rule, and the shape section 32 had to remove from
+    ``batch_analyze_sessions``.
+
+    **This resolves derivatives**, so ``index`` is the rank among *analysed*
+    sessions. Section 32 measured that to be a different session from rawdata's
+    Nth on 7 of 8 subjects, so an index is not portable between the two trees;
+    ``ses`` is.
     """
 
+    select = session_selectors(
+        ses=ses, index=index, date_range=date_range,
+        ses_range=ses_range, index_range=index_range,
+    )
     derivatives_dir = get_derivatives_root()
     processed: list[tuple[int, Union[int, str]]] = []
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, subjids):
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         if not ses_dirs:
             if verbose:
                 print(f"[run_speed_analysis_batch] No sessions found for sub-{sid:03d} with given dates.")
