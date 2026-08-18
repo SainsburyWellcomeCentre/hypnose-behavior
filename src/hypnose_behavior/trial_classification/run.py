@@ -41,7 +41,7 @@ from hypnose_behavior.trial_classification.params import (
 from hypnose_behavior.trial_classification.response_times import analyze_response_times
 from hypnose_behavior.trial_classification.merge import merge_classifications
 from hypnose_behavior.trial_classification.summary import print_merged_session_summary
-from hypnose_behavior.utils.helpers import vprint
+from hypnose_behavior.utils.helpers import session_selectors, vprint
 
 # --------------------------------------------------------------------------------------
 # One run: detect -> classify -> response times -> abortions, assembled into one dict.
@@ -583,42 +583,39 @@ def build_position_pokes_table(classification: dict, *, threshold_ms: float | No
     return out
 
 
-def _parse_date_input(dates_input):
+# `_parse_date_input` lived here and expanded a 2-tuple into every calendar day in the
+# range, so `batch_analyze_sessions` could intersect that list against the sessions a
+# subject has. `filter_sessions` reads a 2-tuple as a range itself, so the expansion had
+# no remaining caller once the resolution moved into the layout -- deleted rather than
+# left, because its only purpose was the local slicing section 8 forbids.
+
+
+def _requested_dates(dates):
+    """The dates named *explicitly*, for the not-found warning, or None.
+
+    A 2-tuple is an inclusive range rather than a membership list, and "the range named
+    a date this subject does not have" is not a mistake worth warning about -- a range
+    is expected to be sparse. Only an explicit list is.
     """
-    Parse date input into a list of dates to analyze.
-    
-    - If dates_input is a list/iterable: return as-is (specific dates)
-    - If dates_input is a tuple of 2 elements: treat as (start_date, end_date) range
-      and discover all dates in that range from the filesystem
-    - If dates_input is None: return None (analyze all dates)
-    
-    Returns: list of dates (int YYYYMMDD format) or None
-    """
-    if dates_input is None:
+    if dates is None:
         return None
-    
-    # If it's a tuple with exactly 2 elements, treat as a range
-    if isinstance(dates_input, tuple) and len(dates_input) == 2:
-        start_date = int(dates_input[0])
-        end_date = int(dates_input[1])
-        
-        # Convert to datetime for range operations
-        start_dt = pd.to_datetime(str(start_date), format='%Y%m%d')
-        end_dt = pd.to_datetime(str(end_date), format='%Y%m%d')
-        
-        # Generate all dates in range
-        date_range = pd.date_range(start=start_dt, end=end_dt, freq='D')
-        dates_list = [int(dt.strftime('%Y%m%d')) for dt in date_range]
-        
-        return dates_list
-    
-    # Otherwise treat as specific dates (list, set, etc.)
-    return list(dates_input)
+    if isinstance(dates, tuple) and len(dates) == 2:
+        return None
+    try:
+        return [int(d) for d in dates]
+    except (TypeError, ValueError):
+        return None
+
 
 def batch_analyze_sessions(
     subjids=None,
     dates=None,
     *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
     save=True,
     verbose=False,
     print_summary=True,
@@ -628,10 +625,21 @@ def batch_analyze_sessions(
     """
     Analyze all sessions for given subject(s) and/or date(s).
     - If subjids is None: analyze all subjects found in rawdata.
-    - If dates is None: analyze all dates found for each subject.
-    - If both are lists: analyze all combinations.
+    - If no selector is given: analyze all dates found for each subject.
     - Handles missing subjects/dates gracefully.
     Returns a dict: {(subjid, date): result_dict}
+
+    **The six selectors intersect and none is required** (`utils.helpers.session_selectors`):
+    `None` means "do not filter on this". They resolve through
+    `rawdata.find_sessions(...)` rather than by slicing a listing here, because
+    `session_index` is only defined *against* a listing -- `docs/DECISIONS.md` section 8.
+
+    **This resolves RAWDATA.** `metric_analysis.batch_run_all_metrics_with_merge` resolves
+    *derivatives*, and the two trees hold different session sets for the same subject, so
+    `index=5` names a different session to each of them. Measured across 8 subjects: on 7
+    of them at least one index disagrees, and on `sub-061` all 27 do. `ses` and the dates
+    are tree-stable; `index` and `index_range` are not. `scripts/batch_process.py`, which
+    chains both, therefore refuses the two tree-relative selectors -- section 32.
     """
     results = {}
 
@@ -641,7 +649,9 @@ def batch_analyze_sessions(
     else:
         subjids = [int(s) for s in subjids]
 
-    dates_to_run_global = _parse_date_input(dates)
+    selectors = session_selectors(ses=ses, index=index, date_range=date_range,
+                                  ses_range=ses_range, index_range=index_range)
+    requested = _requested_dates(dates)
 
     for subjid in subjids:
         # A missing subject and a subject with no sessions are different problems;
@@ -650,21 +660,19 @@ def batch_analyze_sessions(
             print(f"[batch_analyze_sessions] WARNING: Subject {subjid} not found.")
             continue
 
-        # Discover available dates for this subject
-        available_dates = [int(s.date) for s in rawdata.find_sessions(subjid)]
+        # One resolution, through the layout. Previously this listed every session and
+        # intersected the result against a locally expanded date list -- which produced
+        # the same *set* (measured: identical on all 33 probe cases) but preserved the
+        # caller's argument order and ran a duplicated date twice.
+        dates_for_subject = [
+            int(s.date) for s in rawdata.find_sessions(subjid, date=dates, **selectors)
+        ]
 
-        # Determine which dates to run for this subject
-        if dates_to_run_global is None:
-            # Analyze all available dates
-            dates_for_subject = available_dates
-        else:
-            # Use only dates that exist for this subject
-            dates_for_subject = [dt for dt in dates_to_run_global if dt in available_dates]
-            missing = [dt for dt in dates_to_run_global if dt not in available_dates]
-            if missing and verbose:
-                for dt in missing:
+        if verbose and requested:
+            for dt in requested:
+                if dt not in dates_for_subject:
                     print(f"[batch_analyze_sessions] WARNING: Date {dt} not found for subject {subjid}.")
-        
+
         for date in dates_for_subject:
             try:
                 print(f"\n[batch_analyze_sessions] Analyzing subject {subjid}, date {date}...")

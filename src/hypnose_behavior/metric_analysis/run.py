@@ -34,7 +34,7 @@ from hypnose_behavior.metric_analysis.summary import (
     format_fa_abortion_tables,
     save_merged_metrics_txt,
 )
-from hypnose_behavior.utils.helpers import _filter_session_dirs
+from hypnose_behavior.utils.helpers import _filter_session_dirs, session_selectors
 # Imported for their **registrations**: a metric declares itself where it is
 # defined, so every definition module must be imported before REGISTRY is read.
 from hypnose_behavior.metric_analysis.metrics import (  # noqa: F401
@@ -438,11 +438,27 @@ def batch_run_all_metrics_with_merge(
     protocol=None,
     save_txt=True,
     save_json=True,
-    verbose=True
+    verbose=True,
+    *,
+    ses=None,
+    index=None,
+    date_range=None,
+    ses_range=None,
+    index_range=None,
 ):
     """
     Batch run metrics for combinations of subjids and dates, with optional protocol filter.
     Also computes and saves merged metrics across all sessions, per subject, and across all subjects.
+
+    **The six selectors intersect and none is required** -- `None` means "do not filter on
+    this". They are forwarded to `_filter_session_dirs`, i.e. to the shared
+    `filter_sessions`, rather than being interpreted here: an index is only defined
+    *against* a listing (`docs/DECISIONS.md` section 8).
+
+    **This resolves DERIVATIVES**, where `trial_classification.batch_analyze_sessions`
+    resolves *rawdata*. The same subject legitimately holds different sessions in each, so
+    `index=5` names a different session to each of them -- see that function's docstring
+    for the measurement and section 32 for what the chained script does about it.
     """
     derivatives_dir = get_derivatives_root()
     results = []
@@ -469,7 +485,11 @@ def batch_run_all_metrics_with_merge(
         session_stats[subjid] = {'analyzed': [], 'skipped': [], 'failed': []}
 
         # Find all session directories for this subject
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_dirs = _filter_session_dirs(
+            subj_dir, dates,
+            **session_selectors(ses=ses, index=index, date_range=date_range,
+                                ses_range=ses_range, index_range=index_range),
+        )
         
         if not ses_dirs:
             continue

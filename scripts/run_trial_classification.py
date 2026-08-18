@@ -8,7 +8,13 @@ Examples
 --------
   python scripts/run_trial_classification.py --subjids 53 --dates 20260528
   python scripts/run_trial_classification.py --subjids 53 58 --date-range 20260501 20260531
+  python scripts/run_trial_classification.py --subjids 53 --ses 20
+  python scripts/run_trial_classification.py --subjids 53 --index-range 1 9
   python scripts/run_trial_classification.py                      # all subjects, all dates
+
+The six selectors intersect; none is required. `--index` here is the rank within
+**rawdata**, which is not the rank within derivatives -- see `docs/DECISIONS.md`
+section 32.
 """
 import sys
 import argparse
@@ -35,6 +41,14 @@ def main() -> int:
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--dates", nargs="*", type=int, default=None, help="specific date(s) YYYYMMDD")
     g.add_argument("--date-range", nargs=2, type=int, metavar=("START", "END"), help="inclusive YYYYMMDD range")
+    ap.add_argument("--ses", nargs="*", default=None,
+                    help="session number(s) as written in the ses-NNN directory (40, 040 or ses-040)")
+    ap.add_argument("--index", nargs="*", default=None,
+                    help="session index/indices: the subject's gap-free chronological rank, 1..N (rawdata)")
+    ap.add_argument("--ses-range", nargs=2, metavar=("START", "END"), default=None,
+                    help="inclusive ses range")
+    ap.add_argument("--index-range", nargs=2, metavar=("START", "END"), default=None,
+                    help="inclusive session-index range, e.g. --index-range 1 9 (rawdata)")
     ap.add_argument("--no-save", action="store_true", help="do not write derivatives")
     ap.add_argument("--save-csv", action="store_true",
                     help="also write a human-readable CSV of every table (parquet is always written)")
@@ -56,6 +70,10 @@ def main() -> int:
     batch_analyze_sessions(
         subjids=subjids,
         dates=dates,
+        ses=args.ses,
+        index=args.index,
+        ses_range=args.ses_range,
+        index_range=args.index_range,
         save=not args.no_save,
         save_csv=args.save_csv,
         print_summary=not args.no_summary,

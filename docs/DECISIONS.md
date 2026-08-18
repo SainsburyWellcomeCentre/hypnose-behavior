@@ -2347,3 +2347,132 @@ it is a *one-line* header (§29), and a block that grows with each knob does not
   verified across `load_results`, `visualization_utils`, `hidden_rule` and `sing_rew_metrics`,
   so a new top-level key cannot reach one), `position_data_lossless` (no field list moved),
   `verify_scripts` (no CLI surface changed).
+
+---
+
+## 32. `ses` identifies across trees, `index` ranks within one *(Item 3, 2026-08-18)*
+
+All six selectors (`ses`, `index`, `dates`, `date_range`, `ses_range`, `index_range`) are
+now accepted by `trial_classification.batch_analyze_sessions` (which resolves **rawdata**),
+by `metric_analysis.batch_run_all_metrics_with_merge` (which resolves **derivatives**), and
+by the three CLI scripts.
+
+### The measurement the whole item turns on
+
+`--index N` names a **different session** in the two trees, on 7 of 8 subjects:
+
+| subject | rawdata | derivatives | index values naming a different session |
+|---|---|---|---|
+| sub-040 | 48 | 48 | 0 of 48 |
+| sub-046 | 60 | 40 | **56 of 60** |
+| sub-048 | 60 | 57 | **56 of 60** |
+| sub-053 | 56 | 50 | 6 of 56 |
+| sub-056 | 58 | 51 | 7 of 58 |
+| sub-057 | 64 | 50 | 28 of 64 |
+| sub-059 | 79 | 60 | 28 of 79 |
+| sub-061 | 27 | 8 | **27 of 27** |
+
+> **Derivatives is a subset of rawdata but *not a prefix* of it**, and that is what makes
+> the divergence unfixable by arithmetic. `sub-061`'s derivatives holds its **last** 8 of
+> 27, so every index shifts by 19; `sub-053` / `sub-056` are missing only their last few,
+> so low indices agree and high ones resolve to nothing; `sub-046` interleaves (rawdata
+> index 5 -> `20251215`, derivatives index 5 -> `20251226`). The offset is arbitrary per
+> subject *and* per index.
+
+**`ses` is tree-stable — 9 of 9 fixture sessions.** It is the number written in the
+`ses-NNN_date-YYYYMMDD` directory name, which derivatives inherits from rawdata. So the six
+selectors split in two, and this is the rule to keep:
+
+| | selectors | chaining across trees |
+|---|---|---|
+| **tree-stable** | `ses`, `dates`, `date_range`, `ses_range` | safe — the matched set may **shrink** in derivatives, never **shift** onto other sessions |
+| **tree-relative** | `index`, `index_range` | unsafe — a rank within a listing, and the listings differ |
+
+Incidentally confirms §8 directly: `sub-046` is `ses` 61 at rawdata index 60, `sub-048`
+`ses` 62 at index 60. `ses` has holes; `index` is gap-free; neither substitutes.
+
+### What the CLI does about it
+
+- **`run_trial_classification.py`** — all six, against rawdata.
+- **`run_metrics_analysis.py`** — all six, against derivatives. `--index` there means "the
+  Nth **analysed** session", which is well defined and *not* the same as rawdata's Nth.
+- **`batch_process.py`** — `--ses` / `--dates` / `--date-range` / `--ses-range` pass through
+  to both halves; **`--index` / `--index-range` are refused**, exit 2, before any
+  resolution. They are still declared (with `argparse.SUPPRESS`) so the refusal can name
+  them: `unrecognized arguments` would not say why.
+
+> **Why refuse rather than resolve once and pass dates down.** The resolve-once form is
+> better UX and was rejected on a specific defect, not on taste:
+> `batch_run_all_metrics_with_merge` takes **one `dates` list for all subjects**, while an
+> index resolves **per subject**. So the union over-selects — `--subjids 53 58
+> --index-range 1 5` would give subject 58 any of *its* sessions whose date happens to fall
+> in 53's first five. Doing it correctly needs a per-subject
+> `sessions={subjid: [dates]}` parameter threaded through the metrics batch. Deliberately
+> not built here; recorded as the shape it would take.
+
+### `batch_analyze_sessions` no longer slices a listing locally
+
+It listed every session for a subject and intersected that against a locally expanded date
+list — §8's forbidden shape, and the reason the six selectors could not reach it. It is now
+one `rawdata.find_sessions(subjid, date=dates, **session_selectors(...))`.
+
+**Measured equivalent before the change, on the real tree — 33 cases across 3 subjects, the
+resolved *set* identical in all 33.** Six differ as *lists*, in exactly two ways, both
+intended and neither able to change an output:
+
+- **input order** — the old form preserved the caller's argument order, so
+  `--dates 20260521 20260420` ran in that order; the new form is chronological;
+- **duplicates** — `--dates X X` analysed the session **twice**, and now once. The return
+  value is a dict keyed `(subjid, date)`, so duplicates already collapsed there; only the
+  redundant work and the printed order differ.
+
+`_parse_date_input` expanded a 2-tuple into every calendar day so the intersection could be
+taken. `filter_sessions` reads a 2-tuple as a range itself, so it had no caller left and was
+**deleted**, not left in place — its only purpose was the slicing §8 forbids.
+
+### Not one of these flags was visible to any gate
+
+Both of the plan's named gates are blind, and the first one is blind *structurally*:
+
+| gate | why it cannot see a selector flag |
+|---|---|
+| `regression.py` | `_common.fingerprint_session` calls `analyze_session_multi_run_by_id_date` and `run_all_metrics` **directly** — it never executes either batch function |
+| `verify_scripts.py` | `_run_cli` hardcoded `["--subjids", s, "--dates", d]`, so a new flag arrived ungated |
+
+So `verify_scripts` gained the flags in the **same commit** as them: unlike §30, there was no
+earlier state in which a gate could have gone RED, because the thing to observe did not
+exist. What replaces "gate first" is that **each case asserts two things, and the second is
+the one that can fail**:
+
+- the resulting `trial_data` md5 equals the fixture's, **and**
+- **exactly one session directory was written.**
+
+The second is load-bearing. A flag accepted by argparse and then dropped on the floor would
+analyse the subject's whole history and *still* produce a matching md5 for that date — a
+green meaning "I did not look". The case runs on `sub-061`, which has **27** rawdata
+sessions, so a dropped `--ses` writes 27 rather than 1.
+
+`--index`'s value is resolved from rawdata **at run time**, never hardcoded: rawdata grows,
+and a literal index rots the moment a session is backfilled before the fixture's date.
+
+The refusal is asserted too, in both spellings: `batch_process --index 1` and
+`--index-range 1 2` must exit non-zero **and** write no session.
+
+### Evidence
+
+- `verify_scripts` **GREEN, 24 checks** (19 pre-existing + 5 selector-wiring), zero `[RED]`,
+  zero `[ERROR]`. All nine sessions still reproduce byte-identical `trial_data` **and**
+  `metrics` md5s through the real CLI — which is what confirms the resolution change moved
+  nothing.
+- `check_imports` **PASS**, before and after deleting `_parse_date_input`.
+- The equivalence probe above (33 cases), and the two-tree index probe (8 subjects), both
+  run read-only against the real trees before any code was written.
+- **`regression` skipped, on reachability and not on cost**: it cannot execute
+  `batch_analyze_sessions` or `batch_run_all_metrics_with_merge` at all, so a GREEN from it
+  would have measured nothing about this change. Neither edited module gained a new
+  module-level import (`utils.helpers` was already imported by both), so there is no
+  import-time path to the fingerprinted code either. `verify_scripts` covers the same nine
+  sessions' `trial_data` and `metrics` through the production entry points.
+- Skipped, also on reachability: `plot_regression` (no plotter calls either batch
+  function), `verbose_diff` (per-session stdout is unchanged; only batch-level ordering
+  moved), `position_data_lossless`, `ast_move_check` (not a move).

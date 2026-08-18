@@ -167,6 +167,28 @@ access is.**
 
 ## Item 3 — `ses` / session-index selectors in `trial_classification` and `metric_analysis`
 
+**Done 2026-08-18.** All six selectors accepted by `batch_analyze_sessions` (rawdata),
+`batch_run_all_metrics_with_merge` (derivatives) and the three CLI scripts.
+`batch_analyze_sessions` no longer slices a listing locally. See `DECISIONS.md` section 32.
+
+**The item's real content was the rawdata/derivatives split, and it is worse than the
+brief assumed.** `--index N` names a *different* session in the two trees on **7 of 8
+subjects** — all 27 on sub-061 — because derivatives is a subset of rawdata but **not a
+prefix** of it. `ses` is tree-stable (9/9 fixture sessions), so the six selectors split
+into tree-stable (`ses`, `dates`, `date_range`, `ses_range`) and tree-relative (`index`,
+`index_range`). `batch_process.py`, which chains both resolvers, **refuses the two
+tree-relative ones**.
+
+**Both named gates were blind, and one is blind structurally.** `regression.py` never
+executes either batch function — it calls `analyze_session_multi_run_by_id_date` and
+`run_all_metrics` directly — so it was skipped on reachability rather than run for a
+meaningless GREEN. `verify_scripts._run_cli` hardcoded `--dates`, and was extended with
+the flags in the same commit; each case asserts the fixture md5 **and** that exactly one
+session directory was written, because a flag that is accepted and then ignored would
+match the md5 anyway.
+
+*Original brief below.*
+
 **Delivers.** The six session selectors (`ses`, `index`, `date_range`, `ses_range`,
 `index_range`, `dates`) accepted by trial classification and metric analysis, as
 `visualization/`'s 44 session-selecting functions already accept them.
@@ -360,7 +382,7 @@ was obtainable two ways and two figures disagreed.
 2. ~~**5** the `non_initiated` collapse — measured, small, tidies the output.~~
    **Done 2026-08-18.**
 3. ~~**4** `parameters.py` + manifest stamp.~~ **Done 2026-08-18.**
-4. **3** session selectors.
+4. ~~**3** session selectors.~~ **Done 2026-08-18.**
 5. **1** Phase 10 — coverage measurement first, then the move, then the cleanup.
 6. **7b/7c + 2** the accessors and the curated API — last, once the module layout has
    stopped moving.
