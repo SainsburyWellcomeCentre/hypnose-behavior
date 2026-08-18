@@ -82,7 +82,30 @@ UNREPORTED_METRICS = (
 
 # The tables written beside `trial_data`, fingerprinted from the **written file** so the
 # save path added in 7b.4a / 7b.5 is covered rather than just the in-memory frame.
-SIDE_TABLES = ("position_data", "metrics_by_trial", "metrics_by_poke")
+#
+# The three `non_initiated_*` tables were added for Item 5, and the reason is section 26's
+# lesson in a new place: item 5 *deletes* one of them and *renames* another, and not one of
+# the six fingerprints this harness carried could see either. `verify_scripts` compares
+# `trial_data` and `metrics` alone, so it could not either. A change to what the pipeline
+# writes would have gone GREEN by nothing looking at the files it changed.
+#
+# A table absent on a session fingerprints as the md5 of `"ABSENT"` (below), which is what
+# makes them safe to list even though they are sparse: `non_initiated_odor1_attempts` exists
+# on 2 of the 9 coverage sessions and sub-048 carries none of the three, because they are not
+# written when empty. `"ABSENT"` records that deliberately, so a session that silently *stops*
+# writing one is a RED rather than a shorter fingerprint -- the section 2 rule.
+#
+# Populated before blessed (section 26): measured across the nine sessions before generating,
+# `non_initiated_sequences` and `non_initiated_FA` are populated on 8, `non_initiated_odor1_attempts`
+# on 2. None is empty everywhere, so no fixture canonises an empty result.
+SIDE_TABLES = (
+    "position_data",
+    "metrics_by_trial",
+    "metrics_by_poke",
+    "non_initiated_sequences",
+    "non_initiated_odor1_attempts",
+    "non_initiated_FA",
+)
 # ---------------------------------------------------------------------------
 
 
@@ -215,16 +238,15 @@ def fingerprint_session(subjid, date) -> dict:
 
         {'trial_data':         md5, 'trial_data_columns':         {col: md5},
          'metrics':            md5, 'metrics_keys':               {key: md5},
-         'position_data':      md5, 'position_data_columns':      {col: md5},
-         'metrics_by_trial':   md5, 'metrics_by_trial_columns':   {col: md5},
-         'metrics_by_poke':    md5, 'metrics_by_poke_columns':    {col: md5},
-         'unreported_metrics': md5, 'unreported_metrics_keys':    {name: md5}}
+         'unreported_metrics': md5, 'unreported_metrics_keys':    {name: md5},
+         <name>:              md5, f'{name}_columns':            {col: md5}
+                                     ... for every name in SIDE_TABLES}
 
     The overall md5s are the pass/fail signal; the per-column / per-key md5s let a
     mismatch report exactly *what* changed. Raises on any failure so a broken
     session is never silently fingerprinted.
 
-    **The three tables are fingerprinted from the written files** (Phase 7b.6), so the
+    **Every side table is fingerprinted from the written file** (Phase 7b.6), so the
     save path is covered and not merely the in-memory frame. Before this, `trial_data`
     and the reported metrics were the whole gate: `position_data.parquet` and the two
     metric tables were written by code no gate read back, and 18 registered metrics

@@ -1,19 +1,24 @@
 #!/usr/bin/env python
 """Golden-master regression: confirm the pipeline output is unchanged.
 
-Fingerprints six things for each coverage session in ``sessions.yml`` and compares
+Fingerprints nine things for each coverage session in ``sessions.yml`` and compares
 them against stored baselines in ``fixtures/``:
 
-  ``trial_data``          the canonical CSV
-  ``metrics``             the reported metrics dict (``run.REPORT``, 25 entries)
-  ``position_data``       the per-position side-table, as written
-  ``metrics_by_trial``    the per-trial metric table, as written
-  ``metrics_by_poke``     the per-poke metric table, as written
-  ``unreported_metrics``  the 16 registered metrics ``REPORT`` does not save
+  ``trial_data``                    the canonical CSV
+  ``metrics``                       the reported metrics dict (``run.REPORT``, 25 entries)
+  ``position_data``                 the per-position side-table, as written
+  ``metrics_by_trial``              the per-trial metric table, as written
+  ``metrics_by_poke``               the per-poke metric table, as written
+  ``non_initiated_sequences``       failed sampling attempts, as written
+  ``non_initiated_odor1_attempts``  failed position-1 attempts, as written
+  ``non_initiated_FA``              both of the above, annotated with FA outcome
+  ``unreported_metrics``            the 16 registered metrics ``REPORT`` does not save
 
-The last four were added in Phase 7b.6 and closed a real gap: the three tables were
-written by code no gate read back, and 18 registered metrics were computed by code no
-gate ran, so the GREENs that landed them measured *additivity* rather than coverage.
+Four of those were added in Phase 7b.6 and three more for Item 5, both times closing a
+real gap of the same shape: the tables were written by code no gate read back, and 18
+registered metrics were computed by code no gate ran, so the GREENs that landed them
+measured *additivity* rather than coverage. A fingerprint that never looks at a file
+cannot tell "unchanged" from "unwatched".
 
 On a mismatch it reports *what* changed (added / removed / changed columns, and
 added / removed / changed metric keys), so an intended change is easy to confirm as
@@ -56,6 +61,23 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(REPO / "src"))
 
 import _common  # noqa: E402
+
+
+# What `compare` walks, in report order. The side-table entries are **derived from
+# `_common.SIDE_TABLES`**, not spelled out again: `fingerprint_session` writes one
+# `<name>` / `<name>_columns` pair per entry there, and a second hand-maintained copy here
+# is exactly the duplication section 27 names -- the copy that decides whether a
+# fingerprint is *checked* could fall behind the copy that decides whether it is
+# *written*, leaving a table fingerprinted and silently never compared. One declaration
+# drives both. Adding a table is now a one-line change in `_common`.
+CHECKS = (
+    ("trial_data", "trial_data_columns", "column"),
+    ("metrics", "metrics_keys", "metric"),
+    # The side tables and the unreported metrics were added in Phase 7b.6. Before it, the
+    # written tables and the 18 unreported metrics had no coverage at all.
+    *((name, f"{name}_columns", "column") for name in _common.SIDE_TABLES),
+    ("unreported_metrics", "unreported_metrics_keys", "metric"),
+)
 
 
 def _load_sessions() -> list[dict]:
@@ -123,16 +145,7 @@ def compare(targets: set[str]) -> int:
             red += 1
             continue
         # overall md5 is the pass/fail signal; on mismatch, report what changed
-        for key, parts_key, label_word in (
-            ("trial_data", "trial_data_columns", "column"),
-            ("metrics", "metrics_keys", "metric"),
-            # Added in Phase 7b.6. Before it, the three written tables and the 18
-            # unreported metrics had no coverage at all.
-            ("position_data", "position_data_columns", "column"),
-            ("metrics_by_trial", "metrics_by_trial_columns", "column"),
-            ("metrics_by_poke", "metrics_by_poke_columns", "column"),
-            ("unreported_metrics", "unreported_metrics_keys", "metric"),
-        ):
+        for key, parts_key, label_word in CHECKS:
             # A fixture written before this key existed carries no baseline for it.
             # Say so rather than raising KeyError, and count it -- "no baseline" is not
             # a pass.
