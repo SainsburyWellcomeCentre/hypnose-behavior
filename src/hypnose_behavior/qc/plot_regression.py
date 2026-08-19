@@ -182,10 +182,12 @@ CASES = [
     # plus 22 lines of stdout. A case that draws nothing goes green in both trees
     # (section 26), so drawing something is the precondition, not the result.
     #
-    # `plot_movement_trace` is the one that CANNOT be covered: it needs an ezTrack
-    # `add_timestamps_to_tracking` CSV, and neither of the two coverage sessions
-    # with tracking (sub-040 20251124 / 20251229) has one. It raises identically
-    # in both trees, so adding it would be an ungated case, not a green one.
+    # `plot_movement_trace` was the one that could NOT be covered -- it resolved its
+    # own tracking path to a file format nothing produces, so it raised identically in
+    # both trees and a case would have been ungated rather than green (section 33).
+    # It now reads through `prep.load_tracking_frame` like every other movement
+    # plotter, so the coverage sessions' SLEAP tracking reaches it and the case below
+    # draws real data. Section 35.
     ("plot_choice_history", [40], {"dates": [20251124, 20251229]}),
     ("plot_cumulative_rewards_by_trial", [[40]], {"dates": [20251124, 20251229]}),
     ("plot_movement_by_trial_state", [40, 20251124], {}),
@@ -194,6 +196,11 @@ CASES = [
     ("plot_movement_with_behavior", [40, 20251124],
      {"mode": "time_windows", "time_windows": [("14:42:12", "14:42:55")]}),
     ("plot_movement_analysis_statistics", [40], {"dates": [20251124]}),
+    # `20251229` and not `20251124`, for the reason the case above it is windowed:
+    # measured, this plotter draws **467,407** points on 20251124 against **152,320**
+    # on 20251229, and one trace of a whole session discriminates no better for three
+    # times the JSON in each of the two trees.
+    ("plot_movement_trace", [40, 20251229], {}),
 ]
 
 # Runs inside the child process, against whichever tree is on sys.path.

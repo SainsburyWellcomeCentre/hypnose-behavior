@@ -13,9 +13,9 @@ DECISIONS section 13: the ``_infer_port`` / ``_last_poke_out`` /
 changes trace colour and grouping on 63.8% of trials. They were renamed rather
 than merged, and the names are the documentation. Do not merge them.
 
-``plot_movement_trace`` reads an ezTrack ``add_timestamps_to_tracking`` CSV that
-no QC coverage session has, so it is the one plotter here that no gate case can
-execute.
+All tracking here is read through ``prep.load_tracking_frame``, which is the one
+place a tracking file is located and read, so every plotter in this module sees the
+same frame from the same file. See ``DECISIONS.md`` section 35.
 """
 
 import pandas as pd
@@ -38,8 +38,6 @@ from hypnose_behavior.utils.helpers import (
     _get_from_cache,
     _update_cache,
     session_selectors,
-    find_tracking_file,
-    read_tracking_table,
 )
 from hypnose_behavior.io.layout import (
     derivatives,
@@ -50,6 +48,7 @@ from hypnose_behavior.io.loaders import (
     _load_trial_views,
 )
 from hypnose_behavior.visualization.prep import (
+    load_tracking_frame,
     resample_trace,
     smooth_xy,
 )
@@ -66,8 +65,13 @@ from hypnose_behavior.io.save import MOVEMENT_FIGURES_SUBDIR
 def plot_movement_trace(subjid, date, smooth_window=10, linewidth=1, alpha=0.5, figsize=(10, 10), 
                        xlim=None, ylim=None, invert_y=True, title=None, save_path=None):
     """
-    Plot animal movement trace from ezTrack location tracking CSV.
-    
+    Plot animal movement trace from the session's combined SLEAP tracking.
+
+    Reads through ``prep.load_tracking_frame``, the one place a tracking file is located
+    and read -- which is what makes this the same frame every other movement plotter
+    sees. Section 33 recorded this as the one plotter no gate case could execute; it
+    resolved its own path to a file nothing produces. It is gate-covered now.
+
     Parameters:
     -----------
     subjid : int
@@ -107,23 +111,13 @@ def plot_movement_trace(subjid, date, smooth_window=10, linewidth=1, alpha=0.5, 
     session_dir = session.path
     date_str = session.date  # used in the figure title below
 
-    # Find combined tracking CSV
     results_dir = session_dir / "saved_analysis_results"
     if not results_dir.exists():
         raise FileNotFoundError(f"Results directory not found: {results_dir}")
-    
-    # Look for combined tracking file (exclude macOS metadata files)
-    csv_path = find_tracking_file(results_dir, "*_combined_tracking_with_timestamps")
-    if csv_path is None:
-        raise FileNotFoundError(
-            f"No combined tracking file found in {results_dir}\n"
-            f"Run add_timestamps_to_tracking({subjid}, {date}) first to create it."
-        )
 
-    print(f"Loading tracking data from: {csv_path.name}")
-
-    # Load the tracking data (parquet or csv, with encoding fallback)
-    df = read_tracking_table(csv_path)
+    # One tracking loader for the whole of `visualization/` -- it finds the combined
+    # SLEAP file, reads parquet or csv, and aliases `centroid_x`/`centroid_y` to `X`/`Y`.
+    df = load_tracking_frame(results_dir)
 
     # Extract X and Y coordinates
     x = df['X'].values

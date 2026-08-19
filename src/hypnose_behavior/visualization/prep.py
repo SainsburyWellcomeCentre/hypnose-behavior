@@ -64,7 +64,8 @@ __all__ = [
     "_count_to_marker_size", "_nice_round",
     "_summary_save_suffix", "_darken", "_resolve_color", "_ordered_groups",
     "_coerce_tz_naive", "_load_protocol_from_summary",
-    "load_tracking_with_behavior", "_load_subject_trial_timeline",
+    "load_tracking_frame", "load_tracking_with_behavior",
+    "_load_subject_trial_timeline",
     # Phase 10 (follow-up Item 1): promoted out of `visualization_utils.py`
     # because each is used by two or more of the construct modules it was split
     # into -- section 3's rule, that a shared thing becomes a leaf rather than a
@@ -298,10 +299,41 @@ def _load_protocol_from_summary(results_dir: Path) -> str:
     return "Unknown"
 
 
+def load_tracking_frame(results_dir):
+    """The session's combined SLEAP tracking table, with `X`/`Y` normalised.
+
+    **The one place a tracking file is located and read.** It had two: this loader and
+    `movement/traces.plot_movement_trace`, which resolved its own path, and the two had
+    drifted -- only this one knew about SLEAP, so the plotter could find nothing on a
+    session this function reads happily. Section 13's rule, that a thing needed by two
+    modules becomes a leaf rather than a second copy.
+
+    **SLEAP is the only tracking source**, and the combined file is written by the SLEAP
+    pipeline in another repo, not here. A second, older source was removed in
+    2026-08-19; see `DECISIONS.md` section 35 for the measurement that made dropping it a
+    no-op on every gate session.
+
+    SLEAP writes `centroid_x` / `centroid_y`; everything downstream reads `X` / `Y`, so
+    they are aliased rather than renamed -- a file that already carries `X`/`Y` is left
+    exactly as it is.
+    """
+    tracking_file = find_tracking_file(results_dir, "*_combined_sleap_tracking_timestamps")
+    if tracking_file is None:
+        raise FileNotFoundError(
+            f"No combined SLEAP tracking file in {results_dir}. Produce the session's "
+            f"tracking first -- it is written by the SLEAP pipeline, not by this repo.")
+    tracking = read_tracking_table(tracking_file)
+    if 'X' not in tracking.columns and 'centroid_x' in tracking.columns:
+        tracking['X'] = tracking['centroid_x']
+    if 'Y' not in tracking.columns and 'centroid_y' in tracking.columns:
+        tracking['Y'] = tracking['centroid_y']
+    return tracking
+
+
 def load_tracking_with_behavior(subjid, date):
     """
     Load combined tracking data and behavior results for a session, using cache if available.
-    
+
     Parameters:
     -----------
     subjid : int
@@ -330,20 +362,7 @@ def load_tracking_with_behavior(subjid, date):
         server_root = get_server_root()
         derivatives_dir = get_derivatives_root()
         results_dir = derivatives.find_session(subjid, date=date).path / "saved_analysis_results"
-        tracking_file = find_tracking_file(results_dir, "*_combined_tracking_with_timestamps")
-        if tracking_file is None:
-            # Fallback to SLEAP combined file
-            tracking_file = find_tracking_file(results_dir, "*_combined_sleap_tracking_timestamps")
-        if tracking_file is None:
-            raise FileNotFoundError(
-                f"No combined tracking file found. Run add_timestamps_to_tracking({subjid}, {date}) first."
-            )
-        tracking = read_tracking_table(tracking_file)
-        # Normalize coordinate columns
-        if 'X' not in tracking.columns and 'centroid_x' in tracking.columns:
-            tracking['X'] = tracking['centroid_x']
-        if 'Y' not in tracking.columns and 'centroid_y' in tracking.columns:
-            tracking['Y'] = tracking['centroid_y']
+        tracking = load_tracking_frame(results_dir)
         tracking['time'] = pd.to_datetime(tracking['time'])
         behavior = load_session_results(subjid, date)
         tracking_labeled = tracking.copy()
