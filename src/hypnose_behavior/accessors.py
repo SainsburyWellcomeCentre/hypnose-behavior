@@ -1,0 +1,479 @@
+# Defers evaluation of PEP-604 annotations (`X | None`), matching the modules below.
+from __future__ import annotations
+
+"""A session handle: resolve once, then read its tables and compute its metrics.
+
+    s = hypnose_behavior.session(57, 20260709)   # resolves ONCE
+    s.trial_data(columns=None)                   # None = every column
+    s.position_data()
+    s.metrics(["decision_accuracy", "poke_durations"])
+
+**`metrics()` computes through the registry. It does not read `metrics_*.json`, and
+there is deliberately no sibling that does.** That file is an export and the record of
+an analysis run, never an input (`docs/DECISIONS.md` section 5). The temptation is real
+because `s.metrics([...])` *feels* like loading and the file is right there next to
+`trial_data.parquet` -- so, plainly: **do not "optimise" this into a disk read.** The
+saving would be 25 ms of CPU and one 17 KB file read, against 14.6 s for the mount walk
+the caller has already paid; what it would cost is the guarantee that two figures
+showing one quantity cannot disagree, which is the defect section 5 was written about
+after finding `decision_accuracy` obtainable both ways.
+
+Every metric is evaluated by `metric_analysis.run.metric_value`, which is the *same*
+function `visualization.prep._computed_metrics` calls, so a plotter and this handle
+cannot drift apart by construction rather than by agreement.
+
+### Resolve once
+
+`derivatives.find_session` costs **14.6 s on a cold mount**, against **29 ms** to
+compute every registered metric for the session it found (section 5). Five module-level
+`get(subjid, date, ...)` functions would therefore make a caller wanting `trial_data`
+plus two metrics pay that walk three times, and in a loop over a cohort it is the whole
+runtime. So resolution happens once, in `session()` / `sessions()`, and everything
+after it is a file read against a path already in hand.
+
+`Session.from_results_dir` is the cheaper door for a caller who has already walked the
+tree -- the same reason `io/load_results.load_results_dir` exists beside
+`load_session_results`, and the reason `io/parquet_peek`'s functions are path-based
+(section 29). Nothing here re-resolves.
+
+### Where it sits
+
+At the package root beside `frames.py` and `parameters.py`, but it is **not a leaf and
+must not be treated as one**. Those two import nothing from the package, which is what
+lets every layer stand on them (sections 3, 31). This is the opposite: it imports
+downward into `io/` and `metric_analysis/` and exists to be the *top* of the stack.
+
+> **The invariant: nothing inside the package may import this module.** The moment
+> something under `io/` or `metric_analysis/` reaches back up for the handle, the leaf
+> modules below inherit the whole import graph -- matplotlib is absent from it today,
+> but `harp`, `aeon` and `dotmap` are not.
+
+It is at the root rather than in `io/` or `metric_analysis/` because it spans them: it
+answers both "what did this session record" (layout knowledge, the 0.2 test) and "what
+do the metrics say about it" (analysis). `api.py` is its neighbour for the same reason.
+"""
+
+import difflib
+import inspect
+import warnings
+from pathlib import Path
+from typing import Iterable, List, Optional, Sequence, Union
+
+import pandas as pd
+
+from hypnose_behavior.io.layout import (
+    derivatives, parse_session_dirname, parse_subject_dirname,
+)
+from hypnose_behavior.io.load_results import load_results_dir
+from hypnose_behavior.io.parquet_peek import DEFAULT_ROWS, peek
+from hypnose_behavior.io.protocol_schema import (
+    mode_independent_columns, trial_data_columns,
+)
+from hypnose_behavior.metric_analysis.registry import REGISTRY
+# `metric_value` is the section 5 expression; importing `run` is also what *populates*
+# `REGISTRY`, since a metric registers itself where it is defined and `run` imports
+# every definition module for exactly that side effect (section 4).
+from hypnose_behavior.metric_analysis.run import REPORT, metric_value
+from hypnose_behavior.utils.helpers import session_selectors
+
+__all__ = ["Session", "session", "sessions", "metric_names"]
+
+
+# --------------------------------------------------------------------------------------
+# Naming things that do not exist
+# --------------------------------------------------------------------------------------
+
+def _closest(name: str, candidates: Iterable[str], label: str) -> str:
+    """`" Did you mean ...?"` for a name that missed, or `""` when nothing is close."""
+    close = difflib.get_close_matches(str(name), [str(c) for c in candidates], n=3)
+    if not close:
+        return ""
+    return f" Closest {label}: {', '.join(repr(c) for c in close)}."
+
+
+def _as_names(value, argument: str) -> List[str]:
+    """A list of names from an iterable of them, rejecting a bare string.
+
+    A `str` is iterable, so `columns="response_time_ms"` would otherwise be read as
+    eighteen one-character column names and fail with a message about `'r'`.
+    """
+    if isinstance(value, str):
+        raise TypeError(f"{argument}= takes a sequence of names, not a single string; "
+                        f"pass [{value!r}].")
+    return [v for v in value]
+
+
+# --------------------------------------------------------------------------------------
+# Which metrics can be asked for without inventing a figure choice
+# --------------------------------------------------------------------------------------
+
+def _unsuppliable_parameters(spec) -> tuple:
+    """Required parameters of `spec`'s core that nothing can supply for it.
+
+    Only meaningful for a metric with **no session wrapper**. A wrapper's whole job is
+    to dig session configuration out of `results` -- `hidden_rule_counts_by_odor`'s core
+    requires `hr_odors` and `hr_positions`, and its wrapper finds them in
+    `manifest`/`summary` (section 5) -- so a metric that has one is always askable, and
+    reporting its core's requirements would be reporting a solved problem.
+
+    Measured over all 43 registered metrics: this is non-empty for exactly two,
+    `rolling_reward_fraction` and `rolling_hr_reward_fraction`, which take `window`
+    positionally with no default. That is the same boundary `qc/regression.py` draws
+    when it fingerprints 16 of the 18 unreported metrics (section 26), reached
+    independently -- and it is section 5's line, that a window is a property of the
+    figure being drawn and not of the session.
+
+    A parameter with a *default* is not one of these: `fa_types=None` means
+    **unfiltered** and `aborted=False` means **completed**, both of which are definite
+    values a session has (section 25).
+    """
+    if spec.session is not None:
+        return ()
+    params = list(inspect.signature(spec.core).parameters.values())
+    n_frames = 2 if spec.frame == "trials+position_data" else 1
+    kinds = (inspect.Parameter.POSITIONAL_ONLY,
+             inspect.Parameter.POSITIONAL_OR_KEYWORD,
+             inspect.Parameter.KEYWORD_ONLY)
+    return tuple(p.name for p in params[n_frames:]
+                 if p.default is inspect.Parameter.empty and p.kind in kinds)
+
+
+def _resolve_spec(name: str):
+    """The `MetricSpec` for `name`, or a message saying precisely why there is none."""
+    spec = REGISTRY.get(name)
+    if spec is None:
+        # `hidden_rule_counts_by_odor` is saved as `hidden_rule_by_odor`, and it is the
+        # only metric whose registry name and `metrics_*.json` key differ. Someone
+        # reading a saved file will reach for the key, so say what it maps to rather
+        # than accepting it -- two spellings of one metric is how the two come apart.
+        for registered, other in REGISTRY.items():
+            if other.key == name:
+                raise KeyError(
+                    f"{name!r} is the metrics_*.json key for the metric {registered!r}; "
+                    f"ask for {registered!r}.")
+        raise KeyError(f"no registered metric {name!r}."
+                       + _closest(name, REGISTRY, "metric")
+                       + " See hypnose_behavior.api.metric_names().")
+
+    needed = _unsuppliable_parameters(spec)
+    if needed:
+        raise TypeError(
+            f"{name!r} needs {', '.join(repr(p) for p in needed)}, which is a property "
+            f"of the figure you are drawing and not of the session, so this accessor "
+            f"has no correct value to choose (docs/DECISIONS.md section 5). Call it "
+            f"directly with the choice you mean:\n"
+            f'    REGISTRY[{name!r}].call(s.results(), {needed[0]}=...)\n'
+            f"    from hypnose_behavior.metric_analysis.registry import REGISTRY")
+    return spec
+
+
+def metric_names(*, reported: Optional[bool] = None) -> List[str]:
+    """Every registered metric name, sorted. `reported=` narrows to `run.REPORT`.
+
+    `reported=True` gives the 25 metrics an analysis run saves into `metrics_*.json`;
+    `reported=False` gives the 18 it does not, which are registered and therefore
+    computable but are not part of the saved record (section 4).
+
+    **Two of them cannot be asked for through `Session.metrics`** and will raise:
+    `rolling_reward_fraction` and `rolling_hr_reward_fraction` need a `window`. That is
+    deliberate rather than an oversight -- see `_unsuppliable_parameters` -- so
+    `s.metrics(metric_names())` raises by design.
+    """
+    names = sorted(REGISTRY)
+    if reported is None:
+        return names
+    in_report = set(REPORT)
+    return [n for n in names if (n in in_report) is bool(reported)]
+
+
+# --------------------------------------------------------------------------------------
+# The handle
+# --------------------------------------------------------------------------------------
+
+class Session:
+    """One analysed session's saved directory, plus the metrics computed from it.
+
+    Build one with `session(...)`, `sessions(...)` or `Session.from_results_dir(...)`
+    rather than calling this directly; those are where resolution happens, and doing it
+    once is the point of the class.
+
+    Loading is lazy and cached: the constructor touches no file, and the first call that
+    needs data reads the directory once. `position_data` is lazier still, because
+    `SessionResults` defers it (section 5) -- a handle used only for `trial_data` never
+    materialises it.
+    """
+
+    def __init__(self, results_dir, *, ref=None):
+        self.results_dir = Path(results_dir)
+        self.ref = ref
+        self._loaded = None
+
+        if ref is not None:
+            self.subjid, self.date = ref.subjid, str(ref.date)
+            self.ses, self.session_index = ref.ses, ref.session_index
+        else:
+            # The directory name *is* the identity, so reading it invents nothing.
+            # `session_index` stays None on purpose: it is a rank within a listing and
+            # is only defined against one (sections 8 and 32), so producing it would
+            # mean walking the subject's tree -- the 14.6 s this class exists to avoid.
+            parsed = parse_session_dirname(self.results_dir.parent.name)
+            self.ses, self.date = parsed if parsed else (None, None)
+            self.subjid = parse_subject_dirname(self.results_dir.parent.parent.name)
+            self.session_index = None
+
+    @classmethod
+    def from_results_dir(cls, results_dir) -> "Session":
+        """A handle on a `saved_analysis_results` path you already hold.
+
+        The cheap door. Every plotter has already walked the derivatives tree, so
+        routing it back through the subject/date resolver would re-pay that walk per
+        session purely to arrive where it started -- the reason `load_results_dir`
+        exists beside `load_session_results` (section 5).
+        """
+        results_dir = Path(results_dir)
+        if not results_dir.exists():
+            raise FileNotFoundError(f"Results directory not found: {results_dir}")
+        return cls(results_dir)
+
+    # -- the loaded session ------------------------------------------------------------
+
+    def results(self):
+        """The `results` mapping every metric wrapper consumes, loaded once and cached.
+
+        Public because it is the escape hatch: a metric needing a figure parameter is
+        refused by `metrics()` (section 5) and is reached from here instead --
+        `REGISTRY["rolling_reward_fraction"].call(s.results(), window=20)` -- without
+        re-resolving the session or re-reading the directory.
+
+        `io/load_results.load_results_dir` emits the section 22 staleness warning on the
+        way, once per handle: a saved file missing columns the current schema declares
+        says so here rather than silently drawing an empty figure later.
+        """
+        if self._loaded is None:
+            self._loaded = load_results_dir(self.results_dir)
+        return self._loaded
+
+    def manifest(self) -> dict:
+        """`manifest.json`: the protocol mode (section 20), the provenance stamp
+        (section 19) and the scoring knobs applied (section 31)."""
+        return self.results().get("manifest", {}) or {}
+
+    def summary(self) -> dict:
+        """`summary.json`: the per-session counts and the *task schema* parameters this
+        session was configured with -- not the analysis knobs, which are the manifest's
+        `analysis_parameters` (section 31)."""
+        return self.results().get("summary", {}) or {}
+
+    def protocol_mode(self) -> Optional[str]:
+        """`standard` / `single_reward` / `odour_discrimination`, or None.
+
+        None means the file was written before Phase 7b recorded it, not that the
+        session had no protocol -- an absent marker is *unknown* (section 2). Guessing
+        one from the columns present would be circular, which is why the loader's schema
+        check falls back to `mode_independent_columns()` instead.
+        """
+        return self.manifest().get("protocol_mode")
+
+    # -- the measured tables -----------------------------------------------------------
+
+    def trial_data(self, columns: Optional[Sequence[str]] = None) -> pd.DataFrame:
+        """One row per trial. `columns=None` is every column.
+
+        Returns a copy, so a caller reshaping the frame cannot corrupt the cached one
+        that this handle's metrics are computed from.
+
+        **A requested column is checked against this session's frame, not against the
+        schema declaration**, and the distinction is not academic: measured on the
+        server, every saved session differs from `trial_data_columns(mode)` in *both*
+        directions -- carrying `presentations` and `fa_latency_ms`, which the current
+        declaration does not name, while lacking `fa_window_latency_ms` and
+        `completed_window_latency_ms`, which it does. Validating against the declaration
+        would refuse a column that is right there in the file and accept one that is
+        not. So any name is accepted as input, a new saved column works the day it is
+        written, and the only failure is "this session does not have it".
+
+        The declaration is used to *word* that failure, which is where it earns its
+        keep: a missing column the schema declares means the session predates it and
+        wants re-analysing (section 22), while one it does not declare is a typo --
+        `fr_laency_ms`, the slip section 21 gave `@dataclass(slots=True)` to catch on
+        the writing side, caught here on the reading side.
+        """
+        frame = self.results()["trial_data"]
+        if columns is None:
+            return frame.copy()
+        names = _as_names(columns, "columns")
+        self._check_trial_columns(frame, names)
+        return frame.loc[:, names].copy()
+
+    def position_data(self, columns: Optional[Sequence[str]] = None) -> pd.DataFrame:
+        """One row per `trial x position`, for this session's trials.
+
+        Read from `position_data.parquet` where it exists and derived from the trial
+        blobs where it does not, by `io/load_results.load_position_data` -- the single
+        seam that decides where the per-position facts come from, and which **filters
+        back to the trial frame** so a metric cannot silently widen (section 28). This
+        goes through `SessionResults`, so it is that one function and not a second
+        reader.
+
+        There is no `position_data_columns(mode)` to check against -- the field lists in
+        `frames.py` are global rather than per-mode -- so a requested column is checked
+        against the frame alone.
+        """
+        frame = self.results()["position_data"]
+        if columns is None:
+            return frame.copy()
+        names = _as_names(columns, "columns")
+        missing = [c for c in names if c not in frame.columns]
+        if missing:
+            raise KeyError(
+                f"{self}: position_data has no column(s) "
+                f"{', '.join(repr(c) for c in missing)}."
+                + _closest(missing[0], frame.columns, "column"))
+        return frame.loc[:, names].copy()
+
+    def _check_trial_columns(self, frame: pd.DataFrame, names: Sequence[str]) -> None:
+        missing = [c for c in names if c not in frame.columns]
+        if not missing:
+            return
+        mode = self.protocol_mode()
+        try:
+            declared = set(trial_data_columns(mode)) if mode else set(mode_independent_columns())
+        except ValueError:
+            # An unrecognised mode: the file cannot be reasoned about, so diagnose
+            # nothing rather than diagnose it wrongly (section 22 takes the same line).
+            declared = set()
+
+        stale = [c for c in missing if c in declared]
+        unknown = [c for c in missing if c not in declared]
+        parts = [f"{self}: trial_data has no column(s) "
+                 f"{', '.join(repr(c) for c in missing)}."]
+        if stale:
+            parts.append(
+                f" {', '.join(repr(c) for c in stale)} " +
+                ("is" if len(stale) == 1 else "are") +
+                " declared by the current schema, so this session was saved before "
+                "it existed -- re-run trial classification for it.")
+        if unknown:
+            parts.append(_closest(unknown[0], frame.columns, "column"))
+        raise KeyError("".join(parts))
+
+    # -- the metrics -------------------------------------------------------------------
+
+    def metrics(self, names: Iterable[str]) -> dict:
+        """Compute the named metrics for this session. **Each in its own shape.**
+
+            s.metrics(["decision_accuracy", "poke_durations"])
+            # {"decision_accuracy": (num, den, value),   <- the saved scalar shape
+            #  "poke_durations":    <DataFrame>}          <- a per-poke table
+
+        **The caller does not pick a grain.** The registry already knows each metric's
+        frame, grain and adapter, so one call returns a scalar, a Series and a DataFrame
+        side by side rather than making you choose the right one of three functions and
+        be silently wrong when you choose it badly.
+
+        Keyed by the name asked for, so the result maps 1:1 onto the request.
+
+        **Every name is resolved before any metric is computed**, so a typo in the
+        fifth name raises before four metrics have been evaluated -- and raises rather
+        than being skipped, unlike `visualization.prep._computed_metrics`, whose callers
+        pass a fixed key list and draw whatever comes back. Naming a metric by hand is a
+        typo when it misses, not a coverage choice.
+        """
+        if isinstance(names, str):
+            raise TypeError("metrics() takes a sequence of names; for one metric use "
+                            f"s.metric({names!r}).")
+        wanted = _as_names(names, "names")
+        specs = [_resolve_spec(n) for n in wanted]
+        results = self.results()
+        return {name: metric_value(spec, results) for name, spec in zip(wanted, specs)}
+
+    def metric(self, name: str):
+        """One metric's value. See `metrics`."""
+        return self.metrics([name])[name]
+
+    # -- looking at the files ----------------------------------------------------------
+
+    def peek(self, *, table: Optional[str] = None, column: Optional[str] = None,
+             rows: int = DEFAULT_ROWS, max_columns: Optional[int] = None) -> str:
+        """The `parquet_peek` report for this session's directory, as text.
+
+        Three narrowing views: the session's tables, then one line per column of one
+        table, then one column with its values (section 29). Returns the text rather
+        than printing it, as the tool does, so the caller decides where it goes.
+
+        This is why that tool's library functions are path-based: the handle already
+        holds the directory, so looking at the files costs no second resolution.
+        """
+        return peek(self.results_dir, table=table, column=column, rows=rows,
+                    max_columns=max_columns)
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __str__(self) -> str:
+        if self.subjid is None and self.date is None:
+            return f"Session({self.results_dir})"
+        ses = f" ses-{self.ses:03d}" if isinstance(self.ses, int) else ""
+        return f"Session(sub-{self.subjid:03d} {self.date}{ses})"
+
+
+# --------------------------------------------------------------------------------------
+# Resolution -- the expensive step, paid once
+# --------------------------------------------------------------------------------------
+
+def session(subjid, date=None, *, ses=None, index=None) -> Session:
+    """Resolve one analysed session and return a handle on it.
+
+        s = hypnose_behavior.session(57, 20260709)
+
+    Resolves against **derivatives**, the analysed tree, because everything the handle
+    offers is read from a saved analysis. Note that `index` therefore ranks the
+    subject's *analysed* sessions, which section 32 measured to be a different session
+    from rawdata's Nth on 7 of 8 subjects; `ses` is the selector that means the same
+    thing in both trees.
+
+    Raises immediately if the session does not resolve or holds no
+    `saved_analysis_results`, rather than deferring to the first data access -- the
+    failure belongs at the call the caller made.
+    """
+    ref = derivatives.find_session(subjid, date=date, ses=ses, index=index)
+    results_dir = ref.path / "saved_analysis_results"
+    if not results_dir.exists():
+        raise FileNotFoundError(
+            f"{ref.path.name} has no saved_analysis_results -- it is in the "
+            f"derivatives tree but has not been analysed. Run trial classification "
+            f"for it.")
+    return Session(results_dir, ref=ref)
+
+
+def sessions(subjid, *, dates=None, ses=None, index=None, date_range=None,
+             ses_range=None, index_range=None) -> List[Session]:
+    """Handles for every analysed session of `subjid` matching the selectors.
+
+    All six selectors (section 32), forwarded through `session_selectors` unchanged so
+    that nothing here interprets them. One tree walk for the whole selection, which is
+    the case the resolve-once design is really for: a loop calling `session()` per
+    session pays `find_session` per session, and on a cold mount that dominates
+    everything else the loop does.
+
+    A matched session with no `saved_analysis_results` is skipped **with a warning
+    naming it**, never silently: a selection that quietly returns fewer sessions than it
+    matched is how a cohort figure comes to be drawn from half the data.
+    """
+    refs = derivatives.find_sessions(
+        subjid, date=dates,
+        **session_selectors(ses=ses, index=index, date_range=date_range,
+                            ses_range=ses_range, index_range=index_range))
+    out, skipped = [], []
+    for ref in refs:
+        results_dir = ref.path / "saved_analysis_results"
+        if results_dir.exists():
+            out.append(Session(results_dir, ref=ref))
+        else:
+            skipped.append(ref.path.name)
+    if skipped:
+        warnings.warn(
+            f"{len(skipped)} of {len(refs)} matched session(s) have no "
+            f"saved_analysis_results and were skipped: {', '.join(skipped)}.",
+            RuntimeWarning, stacklevel=2)
+    return out
