@@ -2924,3 +2924,128 @@ does not fire on a one-session pool.
 - **`find_session` takes no negative index.** `session(57, index=-1)` raises
   `ValueError: Invalid session index '-1'`; the selectors are 1-based. Caught by running
   every example in the new README section rather than trusting it.
+
+---
+
+## 35. The speed threshold is written and read; ezTrack is gone *(pre-v2.0.0, 2026-08-19)*
+
+Two changes with one shape: a quantity that was being **derived twice** now has one
+producer and one recorded value, and a reader that resolved its own path now goes through
+the shared loader. Both were found by asking where a parameter lives, not by a gate.
+
+### The speed knobs do **not** belong in `parameters.py`
+
+They are `scripts/run_speed_analysis.py` flags -- `--bin-ms`, `--pre-buffer-s`,
+`--threshold-alpha`, `--threshold-beta` -- chosen per run. §31's file is for knobs you can
+change *only* by editing code, and its `scoring_parameters()` is stamped into
+`manifest.json` as what **trial classification** applied. Speed analysis is a separate
+later pass that does not write that manifest, so stamping them there would report values
+applied after the file was written -- §31's own "a stamp that disagrees with what ran is
+worse than no stamp". Same reasoning that keeps `modelling/switchpoint/`'s constants with
+their model.
+
+They now live as module constants in `metric_analysis/movement/speed_analysis.py`
+(`BIN_MS`, `PRE_BUFFER_S`, `MODE`, `THRESHOLD_ALPHA`, `THRESHOLD_BETA`,
+`BASELINE_WINDOW_S`), because they were **declared four times**: `speed_threshold`'s
+default, `compute_speed_analysis`'s, `visualization/movement/speed.py`'s, and the CLI's --
+with nothing making them agree. The CLI's defaults are now read from the module and its
+help text uses `%(default)s`, so what `--help` advertises and what runs cannot diverge.
+
+> **And the docstring said `6.0` where the code said `10.0`**, for both multipliers. Not a
+> behaviour change, but the number a reader would have taken away was wrong by 40%.
+
+### The claim that only one place computed the threshold was false
+
+`speed_analysis.py`'s module docstring has said since Phase 10: *"This is the only place
+the speed threshold is computed."* **It was not.** §33 removed the recompute from
+`plot_traces_with_speed_threshold` and left `plot_epoch_speeds_by_condition` deriving
+baseline `mu`/`sigma` from the stored speeds and applying **its own** `alpha`/`beta`.
+
+That plotter draws the threshold line on the same axes as `latency_s` and
+`speed_threshold_time`, which came from whatever `alpha`/`beta` the batch used. **A
+figure could draw a threshold no value on it was derived from, and nothing would say
+so** -- §14's "two derivations of one quantity", live. A leaf-style claim in a docstring
+that has quietly stopped being true is worse than none (§31).
+
+### So the file records what produced it
+
+`compute_speed_analysis` writes `THRESHOLD_COLUMNS` -- `baseline_mu`, `baseline_sigma`,
+`threshold_alpha`, `threshold_beta`, `speed_threshold` -- as constant columns on every row
+of `speed_analysis.parquet`. The plotter reads them and has **no `threshold_alpha` /
+`threshold_beta` parameters at all**; `threshold` survives as a pure draw/do-not-draw
+switch, which is a figure property (§5) rather than a value.
+
+**A file written before this carries none of them, and §2's rule decides what happens:
+absent means *unknown*, never "today's default".** `_saved_threshold` returns None, the
+baseline and threshold lines are **omitted**, and a `RuntimeWarning` names the remedy.
+Recomputing them would be inventing the very number the change exists to stop inventing.
+
+> **Consequence to expect: every speed figure loses its threshold lines until
+> `scripts/run_speed_analysis.py` is re-run for that session.** That is the intended
+> change, not a regression -- the lines that vanished were the ones nothing could vouch
+> for. `per_session[i]["baseline"]` also drops `alpha_mu` and `mu_plus_beta_sigma`; both
+> are arithmetic on the four recorded values, and nothing in the repo read them.
+
+### ezTrack is removed, and the plotter it stranded is now gated
+
+`plot_movement_trace` resolved its own tracking path and looked **only** for ezTrack's
+`*_combined_tracking_with_timestamps`. `prep.load_tracking_with_behavior` looked for the
+same thing but **fell back to SLEAP** -- so every other movement plotter found the file
+and drew, while this one raised on every session. `add_timestamps_to_tracking` was never
+defined in this repo, and no session on the server has that file.
+
+`prep.load_tracking_frame` is now the **one** place a tracking file is located and read
+(§13's rule: the thing two modules need becomes a leaf), the ezTrack lookup is gone from
+both, and `plot_movement_trace` goes through it.
+
+**Dropping the ezTrack lookup is a no-op on every gate session**: measured, neither
+coverage session (`sub-040 20251124` / `20251229`) carries an ezTrack file, so the first
+lookup already returned `None` and the SLEAP branch already ran. The 43 pre-existing
+`plot_regression` cases were green through it.
+
+> **§33's "`plot_movement_trace` can be covered by no gate case" is discharged.** It was
+> never about missing data -- the coverage sessions have SLEAP tracking, and the plotter
+> was looking for the wrong file. The gate is **44 cases**. The case runs on
+> `20251229` and not `20251124` for the reason §33 windowed `plot_movement_with_behavior`:
+> measured, 152,320 drawn points against 467,407, and one whole-session trace
+> discriminates no better for three times the JSON in each tree.
+
+### Evidence
+
+- **`plot_regression`, ezTrack commit: 44 cases, 43 green + the intended RED** --
+  `plot_movement_trace raise state changed`, `ref:` the ezTrack error, `new: (ran ok)`.
+  Value count **unchanged at 2,828,307**, which is what says the other 43 moved nothing
+  (the new case compares nothing while one tree raises).
+- **`plot_regression`, speed commit: 44 cases, `plot_epoch_speeds_by_condition`
+  1 added / 37 removed / **0 changed**.** The zero is the load-bearing number: no drawn
+  *data* moved. The 38 entries account for themselves exactly -- 3 condition figures x
+  (2 legend entries + 2 hlines x 2 points x 2 coords) = 30, plus the 7-key `baseline`
+  dict = 37 removed, and `+ baseline = None` = 1 added. `plot_movement_trace` green.
+  Value count **3,437,632**, up 609,325 = 152,320 points x 2 coords x 2 signings (§33
+  signs a returned figure twice).
+- **Probe GREEN 14/14** for the write, because no gate can reach `compute_speed_analysis`
+  -- it writes into `results_dir`, and `get_derivatives_root()` is the read-only server
+  (§28). Run against a scratchpad copy of `sub-040 20251124` with its SLEAP tracking:
+  the five columns written and constant on all 5,910 rows; `baseline_mu` and
+  `speed_threshold` equal to `speed_threshold()` recomputed from the same baseline
+  (35.6838 and 356.8378); and the plotter drawing exactly those two values.
+  **Proved to discriminate in both directions (§17):** rewriting the file's threshold to
+  2x **moved the drawn line** to 713.6756 with the old value absent and the label's alpha
+  following to 3.0 -- a recomputing plotter would not have moved -- while a file with the
+  columns dropped omitted the lines, warned once, and reported `baseline = None`.
+- `check_imports` **PASS** at every step.
+- Skipped on reachability: `regression` and `verbose_diff` (no metric, column or pipeline
+  stdout moved -- `speed_analysis.parquet` is in neither `_common.SIDE_TABLES` nor the
+  metrics dict), `verify_scripts` (no existing CLI surface changed; the flag *defaults*
+  moved to constants of equal value, verified through `--help`),
+  `position_data_lossless`, `ast_move_check` (not a move).
+
+### The probe was wrong twice before the code was
+
+Recorded because it is now four times in two items. Its first version called
+`compute_speed_analysis(verbose=...)`, which that function does not take. Its second read
+the plotter's return value as a **list**, when it returns
+`{"per_session": [...], "combined": {...}}` -- so it found no figures, and reported **six
+REDs against working code**. Both were probe defects with a plausible-looking failure.
+**A probe is not evidence until you know what it counts**, and the cheapest way to find
+out is to assert that it found something before asserting anything about what it found.

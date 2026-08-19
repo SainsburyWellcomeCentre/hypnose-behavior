@@ -496,8 +496,11 @@ carried here as a task:
   `api.py` now exists as the thing to point them at, which was the open question — but
   they are unchanged, because nothing gates a notebook and the user's call was to leave
   them loud.
-- **`plot_movement_trace` can be covered by no gate case** — it needs an ezTrack
-  `add_timestamps_to_tracking` CSV that no coverage session has (section 33).
+- ~~**`plot_movement_trace` can be covered by no gate case**~~ — **closed 2026-08-19,
+  section 35.** It was never about missing data: the coverage sessions have SLEAP
+  tracking and the plotter was looking for an ezTrack file that nothing produces. It now
+  reads through `prep.load_tracking_frame` like every other movement plotter, ezTrack is
+  gone from the repo, and the gate is **44 cases**.
 - **The manifest's `analysis_parameters` stamp is asserted by no gate** (section 31),
   with the condition for revisiting stated there: a third knob.
 - **`run_all_metrics` is not routed through `metric_value`** (section 34), because its
@@ -506,3 +509,38 @@ carried here as a task:
   no `protocol_mode`, no provenance stamp, position blobs still in `trial_data`. The
   accessors read those files correctly, and say what is missing when asked for a column
   that is not there; but the fixture sessions are the only ones current with this code.
+  **Since 2026-08-19 this also affects figures:** a `speed_analysis.parquet` written
+  before section 35 carries no recorded threshold, so the speed plotters omit the
+  baseline and threshold lines and say so, until `scripts/run_speed_analysis.py` is
+  re-run for that session.
+
+---
+
+## Before v2.0.0 — three items raised outside this plan *(2026-08-19)*
+
+1. ~~**Speed-analysis knobs into `parameters.py`?**~~ **Answered: no**, and done
+   differently — they are CLI flags, so section 31's file is the wrong home. Module
+   constants in `speed_analysis.py` instead, the threshold is now recorded in
+   `speed_analysis.parquet` and read rather than recomputed in a figure, and the
+   docstring that said `6.0` where the code said `10.0` is fixed. Section 35.
+2. ~~**Remove ezTrack**~~ — **done**, and it closed the uncoverable-plotter note above.
+   Section 35.
+3. **Split `saved_analysis_results/` into subfolders** — **deferred past v2.0.0, the
+   user's call.** Measured for scoping and recorded here so it need not be re-derived:
+
+   | | measurement |
+   |---|---|
+   | files in one session dir | **41**, of which **17 are tracking** (10 sleap csv, 6 `.slp`, 1 combined) |
+   | sites hardcoding `"saved_analysis_results"` | **44** |
+   | sites naming a file inside it | ~28 |
+   | writers | **3** (`io/save_results.py`, `metric_analysis/run.py`, `movement/speed_analysis.py`) |
+   | anything centralising a table path | **none** — which is *why* the number is 44 |
+
+   **Do it before the server re-analysis, not after**, or the tree is re-analysed twice.
+   Two stages: introduce `table_path(results_dir, name)` returning today's flat path and
+   repoint the sites (every gate stays GREEN because nothing moves), then flip the seam
+   to subfolders with a flat fallback — section 2's rule, since every existing session is
+   flat. **`movement/` cannot be done unilaterally**: this repo writes no tracking file,
+   so that folder needs the SLEAP repo to write into it. Figures are already outside
+   (`session_dir / "figures"`), and `indices/` is already a subfolder, so the precedent
+   exists.
