@@ -56,7 +56,9 @@ whole reason it is stated here as well as at the accessor is that this module is
 someone would add the convenience.
 """
 
-from hypnose_behavior.accessors import Session, metric_names, session, sessions
+from hypnose_behavior.accessors import (
+    Session, metric_names, pooled, pooled_metrics, session, sessions,
+)
 from hypnose_behavior.io.layout import SessionRef, derivatives, rawdata
 from hypnose_behavior.io.load_results import (
     SessionResults, load_position_data, load_results_dir,
@@ -74,9 +76,16 @@ from hypnose_behavior.utils.helpers import session_selectors
 __all__ = [
     # -- a session, resolved once (item 7b) --------------------------------------------
     "session",                  # session(subjid, date) -> Session
-    "sessions",                 # every analysed session matching the six selectors
+    "sessions",                 # every analysed session of one or more subjects
     "Session",                  # .trial_data / .position_data / .metrics / .peek
     "metric_names",             # what you may ask `Session.metrics` for
+
+    # -- a cohort, in one frame --------------------------------------------------------
+    # `subjid`/`date`/`ses` are stamped on and nothing else is rewritten, so a pooled row
+    # is byte-identical to the session's own. `global_trial_id` therefore stays
+    # non-unique across sessions -- key on (subjid, date, global_trial_id), section 28.
+    "pooled",                   # trial_data / position_data over many sessions
+    "pooled_metrics",           # one row per session, one column per metric
 
     # -- reading a directory you already hold ------------------------------------------
     # The cheap door, for a caller that has walked the tree itself. `load_position_data`

@@ -8,6 +8,12 @@ from __future__ import annotations
     s.position_data()
     s.metrics(["decision_accuracy", "poke_durations"])
 
+and the same over a cohort, one tree walk per subject:
+
+    hs = sessions([57, 40], date_range=(20260101, 20260731))
+    pooled(hs, "trial_data", columns=["response_time_ms"])   # + subjid/date/ses
+    pooled_metrics(hs, ["decision_accuracy"])                # one row per session
+
 **`metrics()` computes through the registry. It does not read `metrics_*.json`, and
 there is deliberately no sibling that does.** That file is an export and the record of
 an analysis run, never an input (`docs/DECISIONS.md` section 5). The temptation is real
@@ -76,7 +82,17 @@ from hypnose_behavior.metric_analysis.registry import REGISTRY
 from hypnose_behavior.metric_analysis.run import REPORT, metric_value
 from hypnose_behavior.utils.helpers import session_selectors
 
-__all__ = ["Session", "session", "sessions", "metric_names"]
+__all__ = ["Session", "session", "sessions", "metric_names", "pooled", "pooled_metrics"]
+
+# Prepended to every pooled frame, in this order. `trial_data` and `position_data` carry
+# none of them: measured across the fixtures, the only ids either frame holds are
+# `global_trial_id`, `trial_id` and `run_id` (section 28).
+_IDENTITY = ("subjid", "date", "ses")
+
+# What `pooled` will read. The per-grain metric tables are deliberately absent: they are
+# an export and a record of an analysis run, never an input (section 25).
+_POOLABLE = ("trial_data", "position_data")
+_EXPORT_ONLY = ("metrics_by_trial", "metrics_by_poke", "non_initiated_attempts")
 
 
 # --------------------------------------------------------------------------------------
@@ -446,34 +462,215 @@ def session(subjid, date=None, *, ses=None, index=None) -> Session:
     return Session(results_dir, ref=ref)
 
 
-def sessions(subjid, *, dates=None, ses=None, index=None, date_range=None,
+def sessions(subjids, *, dates=None, ses=None, index=None, date_range=None,
              ses_range=None, index_range=None) -> List[Session]:
-    """Handles for every analysed session of `subjid` matching the selectors.
+    """Handles for every analysed session matching the selectors, across one or more
+    subjects.
+
+        for s in sessions([57, 40], date_range=(20260101, 20260731)):
+            ...
 
     All six selectors (section 32), forwarded through `session_selectors` unchanged so
-    that nothing here interprets them. One tree walk for the whole selection, which is
-    the case the resolve-once design is really for: a loop calling `session()` per
-    session pays `find_session` per session, and on a cold mount that dominates
-    everything else the loop does.
+    that nothing here interprets them. **One tree walk per subject**, which is the case
+    the resolve-once design is really for: a loop calling `session()` per session pays
+    `find_session` per session, and on a cold mount that dominates everything else the
+    loop does.
+
+    > **Resolving per subject is what makes `index` mean something here.** Section 32
+    > had to *refuse* `--index` in `batch_process.py`, because
+    > `batch_run_all_metrics_with_merge` takes one `dates` list for all subjects, so an
+    > index resolved across a cohort over-selects -- `--subjids 53 58 --index-range 1 5`
+    > would give subject 58 any of *its* sessions whose date fell inside 53's first five.
+    > That cannot happen here: each subject is resolved on its own, so `index` is "each
+    > subject's Nth **analysed** session". It is still tree-relative -- section 32
+    > measured `--index N` naming a different session in rawdata and derivatives on 7 of
+    > 8 subjects -- so `ses` remains the selector that chains between trees.
 
     A matched session with no `saved_analysis_results` is skipped **with a warning
     naming it**, never silently: a selection that quietly returns fewer sessions than it
     matched is how a cohort figure comes to be drawn from half the data.
     """
-    refs = derivatives.find_sessions(
-        subjid, date=dates,
-        **session_selectors(ses=ses, index=index, date_range=date_range,
-                            ses_range=ses_range, index_range=index_range))
-    out, skipped = [], []
-    for ref in refs:
-        results_dir = ref.path / "saved_analysis_results"
-        if results_dir.exists():
-            out.append(Session(results_dir, ref=ref))
-        else:
-            skipped.append(ref.path.name)
+    wanted = [subjids] if isinstance(subjids, (str, int)) else list(subjids)
+    selectors = session_selectors(ses=ses, index=index, date_range=date_range,
+                                  ses_range=ses_range, index_range=index_range)
+    out, skipped, matched = [], [], 0
+    for subjid in wanted:
+        for ref in derivatives.find_sessions(subjid, date=dates, **selectors):
+            matched += 1
+            results_dir = ref.path / "saved_analysis_results"
+            if results_dir.exists():
+                out.append(Session(results_dir, ref=ref))
+            else:
+                skipped.append(ref.path.name)
     if skipped:
         warnings.warn(
-            f"{len(skipped)} of {len(refs)} matched session(s) have no "
+            f"{len(skipped)} of {matched} matched session(s) have no "
             f"saved_analysis_results and were skipped: {', '.join(skipped)}.",
             RuntimeWarning, stacklevel=2)
     return out
+
+
+# --------------------------------------------------------------------------------------
+# Pooling a cohort -- identity stamped on, nothing rewritten
+# --------------------------------------------------------------------------------------
+
+def _stamped(frame: pd.DataFrame, handle: Session) -> pd.DataFrame:
+    """`frame` with `subjid` / `date` / `ses` prepended, refusing to overwrite."""
+    clash = [c for c in _IDENTITY if c in frame.columns]
+    if clash:
+        raise ValueError(
+            f"{handle}: the frame already carries {', '.join(repr(c) for c in clash)}, "
+            f"which pooling would overwrite. Rename before pooling.")
+    out = frame.copy()
+    for name, value in reversed(list(zip(_IDENTITY, (handle.subjid, handle.date, handle.ses)))):
+        out.insert(0, name, value)
+    return out
+
+
+def _warn_ragged(frames: Sequence[pd.DataFrame], table: str) -> None:
+    """Say so when the sessions do not agree on their columns.
+
+    A ragged `pd.concat` fills the difference with nulls and reports nothing, so a
+    cohort mixing protocol modes -- whose `trial_data` genuinely carries different
+    column families (section 21) -- or mixing sessions analysed either side of a schema
+    change silently gains columns that are null for most of it.
+    """
+    sets = [set(f.columns) for f in frames]
+    partial = sorted(set().union(*sets) - set.intersection(*sets))
+    if partial:
+        shown = ", ".join(partial[:8]) + (f", ... (+{len(partial) - 8})" if len(partial) > 8 else "")
+        warnings.warn(
+            f"pooled {table}: {len(partial)} column(s) are on some of the {len(frames)} "
+            f"sessions and not others, so they are null for the rest: {shown}. The "
+            f"sessions differ in protocol mode, or were analysed either side of a schema "
+            f"change.", RuntimeWarning, stacklevel=3)
+
+
+def _warn_widened(frames: Sequence[pd.DataFrame], pool: pd.DataFrame, table: str) -> None:
+    """Say so when `concat` widened a column's dtype.
+
+    **Section 21's trap, arriving at a pooled concat.** A column absent from one session,
+    or all-null on it and therefore typed `object`, widens the whole pooled column: on
+    two fixture sessions `sequence_rewarded` goes `bool -> object`,
+    `hidden_rule_location` `int64 -> object` and `hidden_rule_success_position`
+    `float64 -> object`.
+
+    **No value moves** -- measured cell by cell on those three, 0 of 339 / 273 / 273
+    differ once compared dtype-blind, with identical null counts. But an `object` column
+    of `True`/`False` is not a boolean mask, so a caller who indexes with it gets a
+    different answer than they would from the session's own frame, and pandas says
+    nothing. Naming the columns is what turns that from silent into a choice.
+    """
+    # The test is `sources != {target}`, not `target not in sources`. The narrower form
+    # was tried and under-reports: `hidden_rule_location` is `object` on a session with
+    # no hidden rule (all-null, hence untyped -- section 21) and `int64` on one with,
+    # so `object` is "an input dtype" and the pooled `object` looked unchanged -- while
+    # a reader of the second session's rows plainly sees `int64 -> object`. A guard
+    # narrower than the hazard reports a pass for something still surprising; measured,
+    # it named 1 of the 3 columns that actually moved.
+    widened = []
+    for col in pool.columns:
+        if col in _IDENTITY:
+            continue
+        sources = {str(f[col].dtype) for f in frames if col in f.columns}
+        target = str(pool[col].dtype)
+        if sources != {target}:
+            widened.append(f"{col} ({'/'.join(sorted(sources))} -> {target})")
+    if widened:
+        shown = ", ".join(widened[:6]) + (f", ... (+{len(widened) - 6})" if len(widened) > 6 else "")
+        warnings.warn(
+            f"pooled {table}: {len(widened)} column(s) changed dtype at the concat, "
+            f"because the sessions disagree on type or the column is missing from some "
+            f"of them: {shown}. No value moved -- but an object column of True/False is "
+            f"not a boolean mask, so cast before using one as one.",
+            RuntimeWarning, stacklevel=3)
+
+
+def pooled(handles: Iterable[Session], table: str = "trial_data",
+           columns: Optional[Sequence[str]] = None) -> pd.DataFrame:
+    """One frame over many sessions, with `subjid` / `date` / `ses` prepended.
+
+        hs = sessions([57, 40], date_range=(20260101, 20260731))
+        pooled(hs, "trial_data", columns=["response_time_ms"])
+
+    **Identity is stamped; no value is rewritten.** Every value is the value that
+    session's own accessor returns -- measured, 0 cells of 612 differ. What *can* change
+    is a **dtype**: `pd.concat` widens a column the sessions disagree on or that some of
+    them lack, so `bool` can arrive as `object`. `_warn_widened` names those columns
+    rather than leaving it to be discovered. In particular `global_trial_id` is left
+    exactly as saved, which means it is **not unique in a pooled frame** -- measured on
+    two sessions, 612 rows carry 339 distinct ids, so 273 collide. That is section 28's
+    finding, that a pooled frame has no key separating two sessions' trials, and the
+    remedy is the key `(subjid, date, global_trial_id)` rather than a synthetic id: a
+    second identity for one trial is the thing section 13 exists to prevent, and it
+    would exist only in pooled frames and never in a saved file.
+
+    > **Do not group a rate metric off this frame by averaging per-session values.** A
+    > rate is not a per-trial quantity (section 1): pool the numerator and denominator
+    > contributions with `metrics.common.reduce_rate`. That is the defect two rolling
+    > accuracies disagreed over for years.
+
+    `table` is `trial_data` or `position_data`. The per-grain metric tables are refused
+    on purpose: they are an export and a record, never an input (section 25).
+
+    Raises on an empty selection rather than returning an empty frame -- a cohort call
+    that silently pools zero sessions looks exactly like one that succeeded.
+    """
+    handles = list(handles)
+    if not handles:
+        raise ValueError("pooled() needs at least one session; the selection matched "
+                         "none. Check the selectors, or the subject's analysed sessions "
+                         "with sessions(subjid).")
+    if table in _EXPORT_ONLY:
+        raise ValueError(
+            f"{table!r} is an export and the record of an analysis run, never an input "
+            f"(docs/DECISIONS.md section 25). Compute it: pooled_metrics(handles, [...]) "
+            f"or s.metrics([...]). Poolable tables: {', '.join(_POOLABLE)}.")
+    if table not in _POOLABLE:
+        raise ValueError(f"pooled() reads {' or '.join(_POOLABLE)}, not {table!r}.")
+
+    frames = [_stamped(getattr(h, table)(columns=columns), h) for h in handles]
+    _warn_ragged(frames, table)
+    pool = pd.concat(frames, ignore_index=True)
+    _warn_widened(frames, pool, table)
+    return pool
+
+
+def pooled_metrics(handles: Iterable[Session], names: Iterable[str]) -> pd.DataFrame:
+    """One row per session, one column per metric, plus `subjid` / `date` / `ses`.
+
+        pooled_metrics(sessions(57), ["decision_accuracy", "global_FA_rate"])
+
+    The shape most cohort figures want: a metric over sessions. Computed through the
+    registry for every session, so it is section 5 compliant for the same reason
+    `Session.metrics` is -- there is no path here that reads `metrics_*.json`.
+
+    **Each cell holds exactly what `Session.metrics` returned, unflattened.** That is
+    deliberate and it is the part to read before using the frame:
+
+    - A **rate** arrives as `(numerator, denominator, value)`, not as a number. Taking
+      element 2 per session and averaging across sessions is wrong -- section 1's rule,
+      that a rate is not a per-trial quantity and must be reduced from its
+      contributions (`metrics.common.reduce_rate`). Nothing here flattens for you,
+      because a flattening rule quietly applied is how that defect returns.
+    - A **table-shaped** metric (`poke_durations`, `hr_abort_poke_gap`) arrives as a
+      DataFrame in a cell. That is legal and rarely what you want; `pooled(handles,
+      "position_data")` is usually the frame you were reaching for.
+
+    Sessions are evaluated in the order given, and every name is validated against the
+    registry once, before any session is loaded.
+    """
+    handles = list(handles)
+    if not handles:
+        raise ValueError("pooled_metrics() needs at least one session; the selection "
+                         "matched none.")
+    wanted = _as_names(names, "names")
+    for name in wanted:            # fail on a typo before loading anything
+        _resolve_spec(name)
+
+    rows = []
+    for handle in handles:
+        row = dict(zip(_IDENTITY, (handle.subjid, handle.date, handle.ses)))
+        row.update(handle.metrics(wanted))
+        rows.append(row)
+    return pd.DataFrame(rows, columns=list(_IDENTITY) + wanted)
