@@ -4,7 +4,7 @@ from __future__ import annotations
 
 """Sequence-position figures.
 
-DECISIONS section 10: ``presentations`` answers "what did the rig deliver" and
+``presentations`` answers "what did the rig deliver" and
 ``poke_source`` answers "what did the animal sample". A per-position denominator
 here counts the first.
 """
@@ -56,7 +56,7 @@ def plot_position_completion_rate(
     - Each completed trial (`is_aborted == False`) contributes one completed-count
       to every position 1..max_pos.
     - Each aborted trial (`is_aborted == True`) contributes one completed-count
-      to positions 1..last_odor_position − 1 and one aborted-count at
+      to positions 1..last_odor_position - 1 and one aborted-count at
       last_odor_position.
     - Completion rate at position p =
           completed[p] / (completed[p] + aborted[p]) * 100

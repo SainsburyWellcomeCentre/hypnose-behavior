@@ -1,5 +1,3 @@
-# Defers evaluation of PEP-604 annotations (`X | None`), keeping this module
-# importable on Python 3.9 for repos pinned there (hypnose-eeg-preprocessing).
 from __future__ import annotations
 
 """What a saved trial record *is* -- the single declaration of `trial_data`'s schema.
@@ -10,9 +8,7 @@ declarations here. A session's columns depend on which branch of `classify_trial
 ran, so the schema is per protocol mode, and `resolve_mode` decides that mode once
 rather than at each site that needs it.
 
-**This module imports nothing from the package -- the standard library only.** Every
-layer imports it, so the day it imports back, `trial_classification -> io` and
-`io/save_results -> io` become real cycles. See DECISIONS.md section 20.
+**This module imports nothing from the package -- the standard library only.**
 """
 
 from dataclasses import dataclass, fields
@@ -76,19 +72,15 @@ def resolve_mode(*, is_odour_discrimination: bool, is_single_reward: bool) -> st
     does, by construction, so both being true is a structural fault in the session as
     it was run.
 
-    **Raise, never warn.** Continuing writes a `trial_data` whose schema is undefined --
-    the odour-discrimination branch runs first and skips the false-response scoring, so
-    the four determinacy columns would be silently absent from a file that still looked
-    complete. Raising makes the broken session name itself, write no derivative, and let
-    the batch finish. See DECISIONS.md section 20.
+    **Raise, never warn.** Raising makes the broken session name itself, write no derivative, and let
+    the batch finish. 
     """
     if is_odour_discrimination and is_single_reward:
         raise ConflictingProtocolError(
-            "session is flagged as BOTH odour-discrimination and single-reward, which is "
+            "session is flagged as BOTH odour-discrimination and single-reward,"
             "impossible by design: odour discrimination presents a sequence of length 1 "
-            "and the single-reward protocol requires at least 2 positions. The stage's "
-            "protocol name contains 'odourdiscrimination' and the schema sets "
-            "'isSingleRewardProtocol'. This is a structural fault in the session as it "
+            "and the single-reward protocol requires at least 2 positions."
+            "'This is a structural fault in the session as it "
             "was run -- fix the task schema or the stage name before analysing it; the "
             "saved schema is undefined while both hold."
         )

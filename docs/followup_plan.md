@@ -29,7 +29,7 @@ Terminal entry points in `scripts/`. No back-compat shims; all imports canonical
 
 | repo | package | role |
 |---|---|---|
-| **hypnose-behavior-analysis** | `hypnose_behavior` | behavioural analysis (this repo) |
+| **hypnose-behavior** | `hypnose_behavior` | behavioural analysis (this repo) |
 | hypnose-somnotate | `hypnose_somnotate` | EEG sleep scoring (v1.0.0) |
 | hypnose-eeg-analysis | `hypnose_eeg` | EEG analysis (coming) |
 | neuropixel analysis | `hypnose_ephys` | ephys (planned) |
@@ -96,7 +96,7 @@ format, CSV a convenience that is **off by default**.
 
   ```bash
   PY=~/miniconda3/envs/hypnose-analysis-test/bin/python
-  QC=~/repos/harris_lab/hypnose/hypnose-behavior-analysis/src/hypnose_behavior/qc
+  QC=~/repos/harris_lab/hypnose/hypnose-behavior/src/hypnose_behavior/qc
   $PY -u $QC/regression.py
   ```
 

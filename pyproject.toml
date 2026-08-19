@@ -3,7 +3,7 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hypnose-behavior-analysis"
+name = "hypnose-behavior"
 version = "1.0.0"
 description = "Analysis tools for hypnose experiments"
 readme = "README.md"

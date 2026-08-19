@@ -34,7 +34,7 @@ ever reached -- which matters because the real one resolves under
 Usage
 -----
   PY=~/miniconda3/envs/hypnose-analysis-test/bin/python
-  QC=~/repos/harris_lab/hypnose/hypnose-behavior-analysis/src/hypnose_behavior/qc
+  QC=~/repos/harris_lab/hypnose/hypnose-behavior/src/hypnose_behavior/qc
 
   $PY -u $QC/figure_provenance.py
   $PY -u $QC/figure_provenance.py --only plot_decision_accuracy

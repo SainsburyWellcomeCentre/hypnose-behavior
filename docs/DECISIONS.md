@@ -1065,9 +1065,18 @@ plausible-looking wrong answer rather than an error:
   `package_version` returns `None`. Passing `__name__` also sidesteps the §9 wrapper hazard
   entirely, because nothing is being captured.
 
-`package_version` maps the import package to the distribution via `packages_distributions()`;
-the naive underscore-to-hyphen guess returns `None` here, since `hypnose_behavior` ships from
-`hypnose-behavior-analysis`. Measured: `{'commit': 'b3f2497-dirty', 'version': '1.0.0'}`.
+`package_version` maps the import package to the distribution via `packages_distributions()`,
+**not** by swapping underscores for hyphens. That guess happens to land now that the
+distribution is `hypnose-behavior` (renamed from `hypnose-behavior-analysis`, 2026-08-19) —
+but it is a coincidence of this repo, not a rule: the two names are independent, and the
+guess returned `None` here until the rename. It stays a fallback for Python 3.9, which has
+no `packages_distributions()`. Measured: `{'commit': 'b3f2497-dirty', 'version': '1.0.0'}`.
+
+**The rename's real hazard is a stale `dist-info`.** `pip` does not remove the old
+`hypnose_behavior_analysis-*.dist-info` when reinstalling under the new name, and
+`packages_distributions()['hypnose_behavior']` then lists both, with `package_version`
+returning whichever comes first — silently stamping figures with the old version. Uninstall
+the old distribution by name before reinstalling.
 
 **Both keys are always written, even as `null`.** A reader can then tell "written before
 provenance existed" (no key) from "written by code whose commit could not be resolved"

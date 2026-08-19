@@ -18,24 +18,14 @@ import pandas as pd
 
 from hypnose_behavior.io.paths import get_rawdata_root, get_derivatives_root
 from hypnose_behavior.utils.helpers import vprint
-# One provenance implementation, so the stamp in a saved manifest and the one embedded
-# in a saved figure cannot drift apart.
 from hypnose_helpers.provenance import provenance
-# The single declaration of what `trial_data` holds -- see `io/protocol_schema.py`.
 from hypnose_behavior.io.protocol_schema import (
     ABORT_COLUMNS, ASSEMBLED_COLUMNS, POSITION_BLOB_COLUMNS, RESPONSE_TIME_COLUMNS,
     trial_data_columns,
 )
-# The one derivation of the long per-position frame, shared with `io/load_results.py`.
-# A package-root leaf; keep it one -- DECISIONS.md section 3.
 from hypnose_behavior.frames import build_position_data
-# The hardcoded scoring knobs, stamped into the manifest below. Also a package-root leaf.
 from hypnose_behavior.parameters import scoring_parameters
-# One rule for rewarded/unrewarded/timeout, shared with trial_classification. `outcome` is
-# a leaf, so this is not a cycle.
 from hypnose_behavior.trial_classification.outcome import classify_completed_trial, TIMEOUT
-# Generic serialisation lives in hypnose-helpers; re-exported here because callers
-# import these names from this module.
 from hypnose_helpers.io.serialize import (  # noqa: F401
     _json_safe, _json_default, _normalize_df_for_io,
 )
@@ -146,21 +136,12 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     """
     out_dir, info = resolve_derivatives_output_dir(root)
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Which record the classifier built, and therefore which columns this session should
-    # carry. Absent if `classification` did not come through `classify_trials`; nothing is
-    # then conformed and no mode is stamped, since guessing one would put a wrong schema in
-    # the manifest.
     protocol_mode = classification.get("protocol_mode") if isinstance(classification, dict) else None
 
     manifest = {
         "created_at": datetime.now().isoformat(),
-        # Manifest only. The regression fingerprints `trial_data` and the metrics dict
-        # and never reads this file, so the stamp cannot cause a spurious RED.
+        # Manifest only.
         **_analysis_provenance(),
-        # The hardcoded scoring knobs this run applied, by introspection over
-        # `parameters.py` so it cannot disagree with what ran. **Keep it out of
-        # `summary.json`'s `params`**, which holds per-session *schema* values.
         "analysis_parameters": scoring_parameters(),
         # Which schema this file follows, so a reader checks it against the right field
         # set instead of guessing from the columns it happens to find. Absent on older
@@ -213,15 +194,6 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
         # Derive outcome categories from supply/poke counts (avoids response-time dependency)
         derived_outcomes = trial_df.apply(_derive_outcome, axis=1)
         trial_df["response_time_category"] = derived_outcomes.where(derived_outcomes.notna(), trial_df.get("response_time_category"))
-
-        # Ensure every column this protocol's schema declares exists, so the table's shape
-        # is a function of the protocol rather than of which branches this session's trials
-        # happened to take. Columns are added, never reordered.
-        #
-        # **`ASSEMBLED_COLUMNS` must stay excluded** -- the three lines below own them, and
-        # creating them here as NaN breaks both: `run_id`'s fallback is guarded on the
-        # column being *absent*, so it would stay null, and `global_trial_id` would be
-        # appended at the end instead of inserted at the front.
         expected = [c for c in trial_data_columns(protocol_mode) if c not in ASSEMBLED_COLUMNS] \
             if protocol_mode else extra_abort_cols + extra_rt_cols
         for col in expected:
@@ -285,19 +257,6 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
         classification["trial_data"] = trial_df
     else:
         classification["trial_data"] = pd.DataFrame()
-
-    # The only saved form of the per-position record: one row per `trial x position`, with
-    # `poke_source` and the three provenance flags as real typed columns.
-    #
-    # **Build it from the in-memory `trial_df`, not at load time.** The blobs are
-    # JSON-encoded on their way into `trial_data.parquet`, so a load-time derivation gets
-    # its five timestamp fields back as ISO strings where this carries real `datetime64`.
-    # Must run after `global_trial_id` is assigned above.
-    #
-    # **`strict=True` here and nowhere else:** these blobs came from this run's classifier,
-    # so an uncarried field means somebody added one and did not carry it. Read paths stay
-    # lenient because they also run over sessions older than these field lists. See
-    # DECISIONS.md section 27.
     classification["position_data"] = build_position_data(
         classification["trial_data"], strict=True)
 
@@ -335,21 +294,9 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
         except Exception as e:
             vprint(verbose, f"[save] WARNING: failed writing {name}: {e}")
             return False
-
-    # Save only the streamlined set: trial_data, its per-position side-table, and the
-    # non-initiated table.
-    #
-    # **`non_initiated_attempts` is the only non-initiated table saved**: its two inputs,
-    # `non_initiated_sequences` and `non_initiated_odor1_attempts`, are each contained in it
-    # by construction (DECISIONS.md section 30). Both stay in `classification` regardless --
-    # they feed that concat, and `summary.py` and `merge.py` report their counts.
     for k in ("trial_data", "position_data", "non_initiated_attempts"):
         df = classification.get(k) if isinstance(classification, dict) else None
         if k == "trial_data" and isinstance(df, pd.DataFrame) and not df.empty:
-            # The blobs do not go to disk -- they were expanded into `position_data` above.
-            # **Drop them here, on the way to the file, never from `classification`:** that
-            # dict is returned to the caller, and `print_merged_session_summary` and
-            # `qc/position_data_lossless.py` both read the blobs off it afterwards.
             df = df.drop(columns=list(POSITION_BLOB_COLUMNS), errors="ignore")
         if _save_df(k, df):
             saved_any = True

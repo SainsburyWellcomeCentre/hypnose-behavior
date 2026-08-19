@@ -6,7 +6,7 @@ from __future__ import annotations
     from hypnose_behavior.api import session
     s = session(57, 20260709)
 
-**Hand-maintained, and that is the whole design.** Every name below was chosen; nothing
+**Hand-maintained.** Every name below was chosen; nothing
 arrives here by being importable. Anything not listed -- the workers, the plotters'
 private helpers, anything with a leading underscore -- is internal and moves without
 notice.

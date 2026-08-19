@@ -1,14 +1,6 @@
 # Defers evaluation of PEP-604 annotations (`X | None`), keeping this module
 # importable on Python 3.9 for repos pinned there (hypnose-eeg-preprocessing).
 from __future__ import annotations
-
-"""Sampling-time and poke-duration figures.
-
-DECISIONS section 1: ``plot_sampling_times_analysis``'s panels 1-4 depend on
-``_mean_sd_by`` using ``np.mean``/``np.std`` rather than the pandas reductions.
-Summation style is part of the quantity -- do not tidy it.
-"""
-
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D

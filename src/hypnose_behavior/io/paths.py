@@ -1,15 +1,9 @@
-# Defers evaluation of PEP-604 annotations (`X | None`), keeping this module
-# importable on Python 3.9 for repos pinned there (hypnose-eeg-preprocessing).
 from __future__ import annotations
 
 from pathlib import Path
 
 from hypnose_helpers.io.paths import DataLocations, RAW_SUBDIR, DERIV_SUBDIR, env_path
 
-# The data-location *mechanism* (profile format, precedence, active selection) lives in
-# hypnose-helpers; only the knowledge of where THIS repo keeps its config and its legacy
-# data dir stays here.
-#
 # Resolution order for the data roots (highest priority first):
 #   1. HYPNOSE_* environment variables  (deliberate override: CI, the QC sandbox, one-offs)
 #   2. the active data-location profile  (configs/data_locations.yml + the per-machine
@@ -21,11 +15,11 @@ from hypnose_helpers.io.paths import DataLocations, RAW_SUBDIR, DERIV_SUBDIR, en
 
 def get_repo_root() -> Path:
     """
-    Returns the root of the hypnose-behavior-analysis repository,
+    Returns the root of the hypnose-behavior repository,
     assuming standard src/ layout.
     """
     return Path(__file__).resolve().parents[3]
-    # paths.py → io → hypnose_behavior → src → hypnose-behavior-analysis
+    # paths.py → io → hypnose_behavior → src → hypnose-behavior
 
 
 _locations = DataLocations(

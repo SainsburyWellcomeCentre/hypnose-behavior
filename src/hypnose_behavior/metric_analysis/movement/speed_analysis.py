@@ -44,16 +44,7 @@ __all__ = ["binned_speed", "compute_speed_analysis", "run_speed_analysis_batch",
 # --------------------------------------------------------------------------------------
 # The speed-analysis defaults, in one place
 # --------------------------------------------------------------------------------------
-#
-# **These do not belong in `hypnose_behavior/parameters.py`.** That file is for knobs
-# changeable only by editing code, and its `scoring_parameters()` is stamped into
-# `manifest.json` as what *trial classification* applied. Every one of these is a
-# `scripts/run_speed_analysis.py` flag chosen per run, and speed analysis is a separate
-# later pass that does not write that manifest. See DECISIONS.md section 35.
-#
-# **One declaration, read by the CLI's defaults too**, so what `--help` advertises and
-# what runs cannot diverge. The plotter holds none of them: it reads what produced the
-# file.
+
 BIN_MS = 100
 PRE_BUFFER_S = 1.0
 MODE = "mean"
@@ -63,8 +54,7 @@ BASELINE_WINDOW_S = (-0.15, -0.05)   # seconds relative to last poke-out
 
 # Written as constant columns on every row of `speed_analysis.parquet`, so a reader can
 # tell what threshold produced that file's `speed_threshold_time` / `latency_s` instead
-# of assuming today's defaults. A file written before 2026-08-19 carries none of them,
-# and section 2's rule applies: absent means *unknown*, never "the current default".
+# of assuming today's defaults.
 THRESHOLD_COLUMNS = ("baseline_mu", "baseline_sigma", "threshold_alpha",
                      "threshold_beta", "speed_threshold")
 
@@ -132,17 +122,6 @@ def run_speed_analysis_batch(
     inclusive (start, end) tuple). Only sessions with existing data are passed
     to compute_speed_analysis. Returns a list of (subjid, date) processed and
     prints a summary when verbose=True.
-
-    ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow
-    the selection further; they intersect with ``dates`` and with each other, and
-    resolve through ``session_selectors`` rather than by slicing a listing --
-    section 8's rule, and the shape section 32 had to remove from
-    ``batch_analyze_sessions``.
-
-    **This resolves derivatives**, so ``index`` is the rank among *analysed*
-    sessions. Section 32 measured that to be a different session from rawdata's
-    Nth on 7 of 8 subjects, so an index is not portable between the two trees;
-    ``ses`` is.
     """
 
     select = session_selectors(

@@ -8,7 +8,7 @@ from __future__ import annotations
 (``plot_latency_over_time``, ``plot_iti_over_time``) are in this module, so
 section 3's promote-what-is-shared rule does not apply to them.
 
-DECISIONS section 16: ``avg_response_time`` reads the **movement** latency (b),
+``avg_response_time`` reads the **movement** latency (b),
 measured from the animal's last cue-port exit -- not the window-relative one.
 """
 

@@ -73,7 +73,7 @@ flags any `global_trial_id` that is in no category or in more than one.
 - `criterion` = −½·(Φ⁻¹(H′) + Φ⁻¹(F′)) — response bias independent of sensitivity. >0 conservative (tends to withhold), <0 liberal (tends to respond). Separates "discriminates" from "just got cautious".
 - `balanced_accuracy` = ½·(H + (1−F)) — single intuitive accuracy weighting both classes equally; robust to the 25/75 imbalance. 0.5 = chance, 1 = perfect.
 
-### Tier 2 — keeping it honest
+### Tier 2 
 
 - `earned_reward_rate` = rewarded_hit / n_go — fraction of rewarded trials that actually collected reward; the behavioral bottom line. Gap vs hit_rate = non-productive responding (wrong-port + anticipatory).
 - `port_accuracy` = rewarded_hit / (rewarded_hit + port_error_hit) — A-vs-B identity discrimination among completed responded rewarded trials; separate axis from go/no-go.

@@ -8,6 +8,84 @@ This repository is utilised for processing and visualising data acquired from Hy
 
 - Analysing and visualising behavioral metrics
 
+## How to Use
+
+1. Clone the repository
+
+Within your working directory use a terminal to clone the repo to your local folder:
+
+```git clone github.com/SainsburyWellcomeCentre/hypnose-behavior```
+
+2. Create and activate the conda environment using the environment.yml file
+
+```conda env create -f environment.yml```
+```conda activate hypnose-behavior```
+
+> **`hypnose-helpers` is a required dependency** and is not on PyPI, so install it from a
+> clone before this package. It owns the data-location mechanism (`io/paths.py`), the
+> figure styles and the shared layout/selector parsing:
+>
+> ```
+> git clone github.com/SainsburyWellcomeCentre/hypnose-helpers
+> pip install -e /path/to/hypnose-helpers
+> ```
+>
+> Without it, `import hypnose_behavior.io.paths` fails outright — this is a hard
+> dependency, not the optional/lazy kind hypnose-somnotate uses.
+
+3. Install hypnose-behavior as a editable install
+
+- In the repo's main folder, run `pip install -e ".[behavioral]"`.
+
+- This install all helpers. pip install -e . omits the behavioral dependencies (like swc-aeon or harp). 
+
+- The split exists because swc-aeon==0.1.0 requires python ≥3.11, while somnotate (sibling repo) is bound to Python 3.9. 
+    the split allows for cross-repo compatibility of core functions. 
+
+4. Add the environment as a kernel to run notebooks
+
+```python -m ipykernel install --user --name=hypnose-behavior --display-name="Hypnose Analysis"```
+
+5. Select data location
+
+```bash
+python scripts/set_data_location.py --list          # show profiles
+python scripts/set_data_location.py server-mac      # activate one (writes the local file)
+python scripts/set_data_location.py --show          # print the resolved roots (+ warns if missing)
+```
+- You can add more data locations (descriptions of where the pipeline reads `rawdata` and writes `derivatives`) in the configs/data_locations.yml file (shared). 
+
+6. (Optional) Symlink: 
+
+Replaces by 5., but kept as an option (e.g., to see rawdata tree in repo). 
+
+1. Windows (requires Ceph server mounted at Z:):
+
+- Open a PowerShell Terminal as Administrator
+
+- cd into hypnose-behavior (repo main folder)
+
+- Remove any possible existing items in the symlink folder by running  ```Remove-Item -LiteralPath .\data\rawdata -Recurse -Force```
+
+- Non-persistently map the mounted server for this session by running ```net use Z: "\\ceph-gw02.hpc.swc.ucl.ac.uk\harris" /persistent:no```
+ 
+- Confirm path exists by running ```Test-Path "Z:\hypnose\rawdata" ``` should return True
+
+- Create SymLink to ceph data storage by running ```New-Item -ItemType SymbolicLink -Path ".\data\rawdata" -Target "Z:\hypnose\rawdata" ```
+
+- SymLink should appear in the repo folder
+
+2. macOS (requires server mounted as /Volumes/harris)
+
+- cd into hyopnose-analysis (repo main folder)
+
+- remove existing symlink or folders by running ```rm -rf ./data/rawdata```
+
+- create data directory by running ```mkdir -p ./data```
+
+- create the synmlink to ceph by running: ```ln -s /Volumes/harris/hypnose/rawdata ./data/rawdata```
+
+
 ## Repository structure
 
 ```
@@ -37,10 +115,10 @@ src/hypnose_behavior/
 
 The importable package is `hypnose_behavior` (e.g. `from hypnose_behavior.trial_classification.run import batch_analyze_sessions`).
 
-## Getting the data out: `hypnose_behavior.api`
+## Using saved data in other repos: `hypnose_behavior.api`
 
 **If you are writing another repo (EEG, ephys, a one-off notebook) and want this
-repo's numbers, this section is all you need.** `api.py` is the hand-maintained
+repo's saved output data, this section is all you need.** `api.py` is the hand-maintained
 public surface; everything else is internal and moves without notice.
 
 ```python
@@ -123,13 +201,13 @@ not that something failed.)
 - **`metrics()` computes; it never reads `metrics_*.json`.** That file is an export and
   the record of an analysis run, not an input — so a metric you ask for here is always
   current with the code, even on a session analysed months ago. Do not "optimise" it
-  into a file read (`docs/DECISIONS.md` §5).
+  into a file read.
 - **A rate metric is a `(numerator, denominator, value)` triple, not a number.** Do not
   average the third element across sessions — pool the contributions with
-  `metric_analysis.metrics.common.reduce_rate` (§1).
+  `metric_analysis.metrics.common.reduce_rate`.
 - **`global_trial_id` is not unique in a pooled frame.** It restarts per session, so key
   on `(subjid, date, global_trial_id)`; measured, two sessions give 612 rows carrying
-  339 distinct ids (§28).
+  339 distinct ids.
 - **Sessions saved before the current restructure have different columns**, and asking
   for one they lack raises and says which case it is — "declared by the current schema,
   re-run trial classification" versus "unknown column, did you mean…".
@@ -138,77 +216,6 @@ Figures are deliberately **not** in `api` — importing them pulls matplotlib, w
 repo wanting a number should not pay for. They live at
 `hypnose_behavior.visualization.<module>`.
 
-## How to Use
-
-1. Clone the repository
-
-Within your working directory use a terminal to clone the repo to your local folder:
-
-```git clone github.com/SainsburyWellcomeCentre/hypnose-behavior-analysis```
-
-2. Create and activate the conda environment using the environment.yml file
-
-```conda env create -f environment.yml```
-```conda activate hypnose-behavior-analysis```
-
-> **`hypnose-helpers` is a required dependency** and is not on PyPI, so install it from a
-> clone before this package. It owns the data-location mechanism (`io/paths.py`), the
-> figure styles and the shared layout/selector parsing:
->
-> ```
-> git clone github.com/SainsburyWellcomeCentre/hypnose-helpers
-> pip install -e /path/to/hypnose-helpers
-> ```
->
-> Without it, `import hypnose_behavior.io.paths` fails outright — this is a hard
-> dependency, not the optional/lazy kind hypnose-somnotate uses.
-
-> **Installing by hand?** Use the `behavioral` extra — `pip install -e ".[behavioral]"`.
-> A bare `pip install -e .` gives the *base* install (analysis code, figure styles,
-> data-location helpers) but omits the behavioural/video stack (`swc-aeon`,
-> `harp-python`, `moviepy`, `opencv-python`), so the loaders and readers will fail with
-> `ModuleNotFoundError: aeon` / `harp`. If that happens, rerun with the extra.
-> `environment.yml` already uses it, so the command above is complete on its own.
->
-> The split exists because `swc-aeon==0.1.0` requires Python ≥3.11. Keeping it out of
-> the base dependencies lets repos pinned to older Python — `hypnose-eeg-preprocessing`
-> is on 3.9 via pomegranate/somnotate — install this package and reuse
-> `hypnose_behavior.io.paths` and `hypnose_behavior.io.save` (the shared figure styles), which need
-> nothing from that stack.
-
-3. Add the environment as a kernel to run notebooks
-
-```python -m ipykernel install --user --name=hypnose-behavior-analysis --display-name="Hypnose Analysis"```
-
-5. Symlink: 
-
-Directories in this repo are resolved with a symlink inside /data pointing to the mounted server containing data. Depending on local structure of mounting the server, the symlink may need adjusting. 
-
-1. Windows (requires Ceph server mounted at Z:):
-
-- Open a PowerShell Terminal as Administrator
-
-- cd into hypnose-behavior-analysis (repo main folder)
-
-- Remove any possible existing items in the symlink folder by running  ```Remove-Item -LiteralPath .\data\rawdata -Recurse -Force```
-
-- Non-persistently map the mounted server for this session by running ```net use Z: "\\ceph-gw02.hpc.swc.ucl.ac.uk\harris" /persistent:no```
- 
-- Confirm path exists by running ```Test-Path "Z:\hypnose\rawdata" ``` should return True
-
-- Create SymLink to ceph data storage by running ```New-Item -ItemType SymbolicLink -Path ".\data\rawdata" -Target "Z:\hypnose\rawdata" ```
-
-- SymLink should appear in the repo folder
-
-2. macOS (requires server mounted as /Volumes/harris)
-
-- cd into hyopnose-analysis (repo main folder)
-
-- remove existing symlink or folders by running ```rm -rf ./data/rawdata```
-
-- create data directory by running ```mkdir -p ./data```
-
-- create the synmlink to ceph by running: ```ln -s /Volumes/harris/hypnose/rawdata ./data/rawdata```
 
 ## File Copying using robocop: 
 
@@ -233,7 +240,7 @@ python scripts/batch_process.py            --subjids 53 --date-range 20260501 20
 
 The trial_classification notebook runs the trial classification. The functions it uses live in `src/hypnose_behavior/trial_classification/`: `run.py` for the session/batch entry points, and `detect_trials.py` / `classify_trials.py` / `response_times.py` / `aborted_trials.py` for the stages themselves. 
 
-batch_analyze_sessions can run on any combination of dates and subjids to run analysis on several subjects or dates at ones. If one parameter is None, it will run on all subjects for date(s) provided or all dates for subject(s) provided. Results are saved as json and csv combination. A summary txt file is saved per session analyzed. 
+batch_analyze_sessions can run on any combination of dates and subjids to run analysis on several subjects or dates at ones. If one parameter is None, it will run on all subjects for date(s) provided or all dates for subject(s) provided. Results are saved as parquet with optional csv. A summary txt file is saved per session analyzed. 
 
 plot_valve_and_poke_events can be used to visualize all valve states, with option to specify a time window. 
 

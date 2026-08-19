@@ -33,37 +33,7 @@ __all__ = ["compare_models", "model_fitted_p", "MODEL_ORDER"]
 
 def compare_models(s: Sequence[int] | np.ndarray, qlearning_fit: Optional[dict] = None) -> dict:
     """Fit all five models and score them with AIC and BIC (lower is better).
-
-    The models, in increasing flexibility: ``constant`` (k=1), ``switch`` (k=3), ``logistic``
-    (k=4), ``switch2`` (k=5), and ``qlearning``. Two nesting relations hold and are worth
-    checking on any real fit: ``constant <= switch`` and ``switch <= logistic`` in loglik.
-    ``switch2`` is monotone-gated (``p1 <= p2 <= p3``), so it does *not* nest the single switch
-    and may be ``-inf`` when no monotone split exists.
-
-    ``qlearning`` is the mechanistic null, fitted as ``QLEARN_DEFAULT_VARIANT``; its ``k`` is
-    that variant's. It nests nothing here, and it winning would be a *finding*: it would mean
-    the rise in P(SHORT) is as well described by incremental value learning as by a step. The
-    other variants are fitted separately by ``fit_qlearning_variants`` and overlaid on the
-    model-comparison figure, rather than charged a row of this table each.
-
-    ``qlearning_fit`` lets a caller that has *already* fitted the Q-learning variants hand the
-    relevant one in, instead of paying for a second multi-start of the same variant on the same
-    sequence. It must be a fit of this same sequence; its ``k_params`` is used as given, so
-    passing a different variant deliberately changes what the ``qlearning`` row means.
-
-    ``AIC = 2k - 2 * loglik`` and ``BIC = k * ln(n) - 2 * loglik``. BIC penalizes the extra
-    parameters harder, so it is the stricter test of "there really was a switch".
-
-    Models reporting ``implemented = False`` are scored (so they appear in the table) but are
-    never eligible to win.
-
-    Caveat -- the parameter counts understate the switch models' flexibility. ``switch``
-    searches ~n candidate split points and ``switch2`` ~n^2/2, but they are charged only k=3
-    and k=5, as if ``tau`` were an ordinary parameter. AIC and BIC are therefore *generous* to
-    them relative to the logistic, and more so to ``switch2`` than to ``switch``. Treat a
-    narrow BIC win for a switch model as suggestive, not decisive. The planned fix is a
-    cross-validated predictive likelihood, which prices the search honestly; not done yet.
-
+    
     Returns
     -------
     dict

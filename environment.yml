@@ -1,4 +1,4 @@
-name: hypnose-behavior-analysis
+name: hypnose-behavior
 channels:
   - conda-forge
   - defaults

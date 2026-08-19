@@ -23,28 +23,15 @@ from hypnose_helpers.viz.metadata import read_figure_metadata  # noqa: F401  (re
 from hypnose_helpers.provenance import provenance as _provenance
 
 
-# This module deliberately applies NO style at import: two packages mutating global
-# rcParams at module scope means whoever imports last silently wins. Apply a style
+# This module deliberately applies NO style at import. Apply a style
 # explicitly at the top of a notebook or script:
 #
 #     use_style()                  # nature (the default)
 #     use_style("presentation")    # presentation (also caps y-ticks)
 #     with plt.rc_context(nature_style()): ...   # scoped, as scripts/modelling does
-#
-# `pdf.fonttype`/`ps.fonttype` = 42 (editable PDF text rather than Type 3) is part of
-# every style dict, and save_figure enforces it regardless, so saved PDFs are safe even
-# when no style has been applied.
 
-
-# Optional hook letting a *consuming* repo with a different derivatives layout
-# reuse save_figure without wrapping it. Registered once at import; save_figure
-# then resolves through it instead of resolve_figure_dir(). None = use the
-# default hypnose-behavior-analysis layout below.
 _FIGURE_DIR_RESOLVER = None
 
-# Subdirectory for figures drawn from SLEAP tracking. Lives here rather than in
-# `visualization/movement/` so the four modules using it share a leaf instead of
-# importing a peer; they already import `save_figure` from here, so it costs no edge.
 MOVEMENT_FIGURES_SUBDIR = "movement_figures"
 
 

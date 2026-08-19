@@ -2,29 +2,7 @@
 # importable on Python 3.9 for repos pinned there (hypnose-eeg-preprocessing).
 from __future__ import annotations
 
-"""How long the animal sampled: poke durations, and what it did with the valve.
-
-``manual_vs_auto_stop_preference`` is here rather than in a ``valve.py``
-(confirmed 2026-08-05): splitting valve durations at 1000 ms measures whether the
-animal withdrew before the valve closed, which is a sampling decision. It is the
-one metric reading ``position_valve_times``, a *superset* of the other two blobs,
-so it is also the one that would gain rows if the provenance filter were dropped.
-
-**Summation style is part of the metric.** The two pooled ``avg_sampling_time_*``
-metrics accumulate ``total += x`` left to right; ``avg_sampling_time_odor_x``
-calls ``np.mean`` on a per-odor list, which sums pairwise. The two disagree in
-the last ULP over a few hundred values -- enough to move the metrics md5, and
-invisible in any printed output. ``_sequential_mean`` exists to reproduce the
-first. Do not tidy either into ``Series.mean()``, and the same goes for
-``_mean_sd_by``, which resolved the one reduction the poke-duration metrics had
-to pick (settled 2026-08-06).
-
-``avg_sampling_time_aborted_sequence`` excludes the abort event itself -- the
-entry whose ``index_in_trial`` equals the trial's ``last_event_index``.
-``presentations`` also carries an ``is_last_event`` flag which agrees with that
-rule on all 9 fixture sessions, but it is a *different* rule, and 4a reproduces
-today's values rather than a rule that happens to match.
-"""
+"""How long the animal sampled: poke durations, and what it did with the valve."""
 
 import numpy as np
 import pandas as pd

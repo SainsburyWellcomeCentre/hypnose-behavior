@@ -124,8 +124,7 @@ def _stamp(manifest: dict, key: str) -> str:
 
     Section 19 writes `commit` and `version` **always, even as `None`**, precisely so a
     reader can tell "written before provenance existed" (no key) from "written by code
-    whose commit could not be resolved" (`null`). Collapsing the two here would throw
-    away the distinction the manifest went to the trouble of recording.
+    whose commit could not be resolved" (`null`). Not collapsing both here. 
     """
     if key not in manifest:
         return "absent"
@@ -135,12 +134,6 @@ def _stamp(manifest: dict, key: str) -> str:
 
 def _manifest_header(results_dir: Path) -> list[str]:
     """One line naming what wrote this directory, or nothing if there is no manifest.
-
-    `manifest.json` is written for every session and carries the section 19 audit stamp
-    plus the section 20 protocol mode. "Which code wrote this, under which schema" is a
-    large part of "what is in this file", and it costs one small JSON read of a file
-    already sitting beside the parquet.
-
     Absent for a stray parquet outside a `saved_analysis_results/`, which is a normal
     thing to peek at -- so its absence is silent rather than an error.
     """
@@ -168,13 +161,6 @@ def _manifest_header(results_dir: Path) -> list[str]:
 
 def _maybe_text(series: pd.Series) -> bool:
     """Whether this column could hold text at all.
-
-    A guard in front of the JSON sniff, and it must not be `dtype == object`. Under
-    pandas 3.0 a string column round-trips through parquet as the **`str`** dtype, not
-    as `object`, so an object-only gate silently never fires -- measured: `odor_sequence`
-    reported as a plain `str` column with its JSON undetected, which is precisely the
-    misleading answer `_is_json_column` exists to prevent. Testing what the column is
-    *not* keeps working whichever storage dtype pandas picks next.
     """
     return not (
         pd.api.types.is_numeric_dtype(series)
@@ -186,18 +172,6 @@ def _maybe_text(series: pd.Series) -> bool:
 
 def _is_json_column(series: pd.Series) -> bool:
     """True when the column holds JSON *text* rather than the values it encodes.
-
-    Load-bearing, not decoration. `io/save_results._save_df` writes the frame that
-    `_normalize_df_for_io` returns, and that JSON-encodes every object column holding a
-    dict/list/tuple/set/ndarray -- **to the parquet as well as to the CSV**. So
-    `odor_sequence` is on disk as the string `'["OdorG","OdorE","OdorB"]'`, not as a
-    list. Reporting that as a plain string column, next to one truncated value, is
-    misleading about exactly the columns anyone opening this tool wants to inspect.
-
-    Sniffed from the values rather than read from the `.schema.json` sidecar: that
-    sidecar records the same list, but is written **only when `save_csv=True`**
-    (section 23), so every session written by current code lacks it. Deriving the answer
-    from the data makes it independent of a flag nobody set.
     """
     values = series.dropna()
     if values.empty:
@@ -285,11 +259,6 @@ def _table_report(path: Path, max_columns: int | None = None) -> str:
             "values": _describe_values(series, n_unique),
         })
 
-    # An all-null column is this repo's characteristic silent failure -- section 22
-    # exists because a column that quietly vanished left a blank figure and no error,
-    # and section 21 records eight columns that are all-null *by design*. The per-column
-    # non-null count says it once; this says it again where it cannot be missed among
-    # sixty lines. Meaningless on an empty table, where every column is trivially null.
     if n_rows:
         empty = [s["name"] for s in stats if s["non_null"] == 0]
         if empty:
@@ -324,14 +293,8 @@ def _table_report(path: Path, max_columns: int | None = None) -> str:
 def _column_report(path: Path, column: str, rows: int = DEFAULT_ROWS) -> str:
     names = _column_names(path)
     if column not in names:
-        # Raising on a name that is not there, rather than returning an empty view, is
-        # the section 21 lesson: `rec.fr_laency_ms = ...` silently invented a column of
-        # NaNs, and a peek tool that answered a typo with "0 non-null" would be the
-        # same failure wearing a different hat.
         near = difflib.get_close_matches(column, names, n=3, cutoff=0.6)
         if near:
-            # A good suggestion makes the full list noise -- on `trial_data` it is 73
-            # names, which buries the answer it is printed next to.
             hint = (f" Did you mean: {', '.join(near)}? "
                     f"Drop --column to list all {len(names)}.")
         else:
@@ -377,10 +340,6 @@ def _column_report(path: Path, column: str, rows: int = DEFAULT_ROWS) -> str:
         for index, value in head.items():
             text = "<null>" if pd.isna(value) else _truncate(str(value), _DETAIL_VALUE_CHARS)
             lines.append(f"  {str(index):>7}  {text}")
-        # Many of these columns are legitimately sparse -- `response_time_ms` is defined
-        # on 63 of 339 trials on `sub-057` -- so the first screenful of a row-ordered
-        # listing can be entirely null while the column is fine. Say so, rather than
-        # leaving "all null" as the impression the listing gives.
         if non_null and not head.notna().any():
             lines.append(f"  (all of the first {len(head)} rows are null; "
                          f"{non_null} non-null value(s) appear later)")

@@ -16,7 +16,7 @@ question is always "did *this* change move a curve", which is a two-tree diff.
 Usage
 -----
   PY=~/miniconda3/envs/hypnose-analysis-test/bin/python
-  QC=~/repos/harris_lab/hypnose/hypnose-behavior-analysis/src/hypnose_behavior/qc
+  QC=~/repos/harris_lab/hypnose/hypnose-behavior/src/hypnose_behavior/qc
 
   $PY -u $QC/plot_regression.py                 # working tree vs HEAD
   $PY -u $QC/plot_regression.py --ref f72d201   # ... vs any revision

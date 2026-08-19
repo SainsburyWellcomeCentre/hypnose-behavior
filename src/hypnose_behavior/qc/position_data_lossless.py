@@ -37,7 +37,7 @@ it never reads the archive and never writes to the server.
 Usage
 -----
   PY=~/miniconda3/envs/hypnose-analysis-test/bin/python
-  QC=~/repos/harris_lab/hypnose/hypnose-behavior-analysis/src/hypnose_behavior/qc
+  QC=~/repos/harris_lab/hypnose/hypnose-behavior/src/hypnose_behavior/qc
 
   $PY -u $QC/position_data_lossless.py                 # all sessions in sessions.yml
   $PY -u $QC/position_data_lossless.py 053:20260520    # just one
