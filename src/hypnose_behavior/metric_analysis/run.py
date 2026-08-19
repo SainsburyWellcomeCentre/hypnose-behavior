@@ -47,7 +47,8 @@ from hypnose_behavior.metric_analysis.metrics import (  # noqa: F401
 )
 from hypnose_behavior.metric_analysis.metrics.false_alarm import fa_abortion_stats_session
 
-__all__ = ["run_all_metrics", "batch_run_all_metrics_with_merge", "REPORT"]
+__all__ = ["run_all_metrics", "batch_run_all_metrics_with_merge", "metric_value",
+           "REPORT"]
 
 # The order metrics are reported in, and therefore the order of every
 # `metrics_<subj>_<date>.txt` on disk. Deliberately **not** derived from
@@ -108,6 +109,54 @@ def _report_fa_abortion_stats(results):
     print("\nFA Abortion Stats by Odor and Position:")
     print(shown[2].to_string(index=False) if hasattr(shown[2], 'to_string') else shown[2])
     return payload
+
+
+def metric_value(spec, results):
+    """One registered metric's value for one session. **Computes; never reads a file.**
+
+    The single definition of the expression `docs/DECISIONS.md` section 5 requires a
+    consumer to evaluate a metric with. It was previously written out by hand in two
+    places -- the `REPORT` loop below and `visualization.prep._computed_metrics` -- and
+    section 5 kept them in step by saying so in prose. Follow-up item 7c added a third
+    consumer (`hypnose_behavior.accessors.Session.metrics`), at which point prose stops
+    being enough: section 27's rule is that a second spelling of one declaration is how
+    the two come to disagree.
+
+    **The rule has one branch, and the registry makes it single-valued.** Measured over
+    all 43 registered metrics: a `session` wrapper exists for exactly the 25 in `REPORT`
+    and for none of the 18 outside it, and the same is true of `adapter`. So:
+
+    - **has a wrapper** -> `adapter(session(results))`, which is what `run_all_metrics`
+      saves and therefore what `metrics_*.json` holds. Not `spec.call`: several cores
+      take session configuration as keywords (`hidden_rule_counts_by_odor` needs
+      `hr_odors`/`hr_positions`, which `spec.call` cannot supply and which digging out
+      of `manifest`/`summary` is precisely the wrapper's job), and the adapter is part
+      of the saved shape rather than a formatting flourish.
+    - **has none** -> `spec.call(results)` at its declared defaults, which is the same
+      expression `qc/_common._unreported_metrics_fingerprint` fingerprints those 16 with.
+      So what this returns for an unreported metric is what the golden master watches.
+
+    `fa_abortion_stats` is special-cased here for the reason it is special-cased in both
+    of the places this replaces: it reports three tables rather than a value, so it fits
+    neither shape.
+
+    **Wrappers print; this suppresses it** -- a consumer is asking for a value, not for a
+    report. That is why `run_all_metrics` deliberately does **not** call this: its loop's
+    stdout *is* `metrics_<subj>_<date>.txt`, so routing it through a function that
+    swallows stdout would empty that file.
+
+    Raises whatever the metric raises. The two rolling metrics take `window`
+    positionally with no default, so they raise `TypeError` here; that is the section 5
+    line -- a window is a property of a figure, not of a session -- and callers that
+    should say so more clearly are expected to check before calling.
+    """
+    with contextlib.redirect_stdout(io.StringIO()):
+        if spec.name == "fa_abortion_stats":
+            return _report_fa_abortion_stats(results)
+        if spec.session is not None:
+            value = spec.session(results)
+            return spec.adapter(value) if spec.adapter else value
+        return spec.call(results)
 
 
 # --------------------------------------------------------------------------------------

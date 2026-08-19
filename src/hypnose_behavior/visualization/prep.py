@@ -40,8 +40,6 @@ import pandas as pd
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
 import ast
-import contextlib
-import io
 import json
 
 import matplotlib.colors as mcolors
@@ -50,7 +48,7 @@ from hypnose_behavior.io.layout import derivatives, normalize_subjid
 from hypnose_behavior.io.load_results import load_results_dir, load_session_results
 from hypnose_behavior.io.loaders import _load_trial_views
 from hypnose_behavior.metric_analysis.metrics.hidden_rule import hr_odor_associations
-from hypnose_behavior.metric_analysis.run import REGISTRY, _report_fa_abortion_stats
+from hypnose_behavior.metric_analysis.run import REGISTRY, metric_value
 from hypnose_behavior.io.paths import (
     get_derivatives_root, get_rawdata_root, get_server_root,
 )
@@ -571,11 +569,19 @@ def _computed_metrics(results_dir: Path, keys: Iterable[str]) -> dict:
 
     `adapter(session(results))` is deliberately the *same expression* `run.py`
     uses to build the file, so what a plotter now computes and what would have
-    been saved cannot drift apart by construction. The wrapper is used rather
-    than the bare core because several cores take session configuration as
-    keywords -- `hidden_rule_counts_by_odor` wants `hr_odors`/`hr_positions` --
-    and knowing how to dig those out of `results` is precisely the wrapper's job.
-    Its printing is suppressed: this asks for a value, not a report.
+    been saved cannot drift apart by construction. Follow-up item 7c made that
+    structural rather than prose: the expression, its `fa_abortion_stats`
+    special case and its stdout suppression are `run.metric_value`, which the
+    session handle calls too, so there is one definition and not three copies
+    kept in step by a paragraph (`DECISIONS.md` sections 5 and 27).
+
+    **The lenient miss stays here and is not shared.** A key naming no
+    registered metric is skipped rather than raised on, which is what plotters
+    have always relied on -- they ask for a fixed key list and draw whatever
+    comes back. `Session.metrics` raises instead, because a caller naming a
+    metric by hand has made a typo, not a coverage choice; that is the same
+    strict-at-one-end / lenient-at-the-other split as
+    `build_position_data(strict=)` (section 27).
     """
     results = load_results_dir(results_dir)
     metrics = {}
@@ -583,17 +589,7 @@ def _computed_metrics(results_dir: Path, keys: Iterable[str]) -> dict:
         name = _metric_name_for_key(key)
         if name is None:
             continue
-        spec = REGISTRY[name]
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            # `fa_abortion_stats` reports three tables rather than a value, so it
-            # does not fit the wrapper -> adapter shape and `run.py` special-cases
-            # it too. Calling the same builder keeps the shapes identical.
-            if key == "fa_abortion_stats":
-                metrics[key] = _report_fa_abortion_stats(results)
-                continue
-            value = spec.session(results)
-        metrics[key] = spec.adapter(value) if spec.adapter else value
+        metrics[key] = metric_value(REGISTRY[name], results)
     return metrics
 
 
