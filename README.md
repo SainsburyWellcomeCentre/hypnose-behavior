@@ -16,6 +16,10 @@ data/rawdata             symlink to the read-only data on the server; all output
 notebooks/               analysis/visualisation notebooks (import from src; no definitions)
 scripts/                 terminal entry points (thin CLI wrappers; no analysis logic)
 src/hypnose_behavior/
+    api.py               THE PUBLIC SURFACE -- what other repos may import (see below)
+    accessors.py         the session handle behind it (session/sessions/pooled)
+    frames.py            per-position frame building; a leaf, stdlib + pandas only
+    parameters.py        the hardcoded scoring knobs, stamped into manifest.json
     io/                  data loading, saving, paths (readers, loaders, load_results, save, save_results, paths)
     trial_classification/ trial detection + classification, in three layers: leaves
                          (windows, outcome, params, hidden_rule, index) <- workers
@@ -24,7 +28,7 @@ src/hypnose_behavior/
                          summary. Workers never import each other. 
     metric_analysis/     behavioural metric calculation: metrics/ (definitions, one
                          module per behavioural construct), run/merge/summary
-                         (orchestration), frames, resolvers, registry
+                         (orchestration), resolvers, registry
     visualization/       figure-making (valve/poke, metrics, pred-seq, movement)
     utils/               small shared helpers
     qc/                  quality control: data validation + golden-master regression tools (see below)
@@ -32,6 +36,107 @@ src/hypnose_behavior/
 ```
 
 The importable package is `hypnose_behavior` (e.g. `from hypnose_behavior.trial_classification.run import batch_analyze_sessions`).
+
+## Getting the data out: `hypnose_behavior.api`
+
+**If you are writing another repo (EEG, ephys, a one-off notebook) and want this
+repo's numbers, this section is all you need.** `api.py` is the hand-maintained
+public surface; everything else is internal and moves without notice.
+
+```python
+from hypnose_behavior.api import session, sessions, pooled, pooled_metrics
+```
+
+### One session
+
+```python
+s = session(57, 20260709)        # or session(57, ses=40) / session(57, index=1)
+```
+
+That resolution walks the derivatives tree **once** (~14.6 s on a cold mount, ~0.2 s
+warm). Everything below is a file read against the path it found — nothing re-resolves.
+
+```python
+s.trial_data()                                        # one row per trial, every column
+s.trial_data(columns=["response_time_ms", "is_aborted"])
+s.position_data()                                     # one row per trial x position
+s.metrics(["decision_accuracy", "poke_durations"])    # {name: value}, computed
+s.metric("decision_accuracy")                         # just the one
+
+s.manifest(), s.summary(), s.protocol_mode()          # what this session is
+print(s.peek(table="trial_data"))                     # one line per column, to read
+s.subjid, s.date, s.ses, s.results_dir                # where it came from
+```
+
+### Many sessions
+
+`sessions(...)` takes one subject or a list, and all six selectors
+(`dates`, `ses`, `index`, `date_range`, `ses_range`, `index_range`). One tree walk per
+subject.
+
+```python
+for s in sessions(57, date_range=(20260101, 20260731)):
+    print(s.date, s.metric("decision_accuracy"))
+
+hs = sessions([57, 40, 46], ses_range=(30, 60))
+```
+
+### One column across many sessions
+
+```python
+hs = sessions([57, 40], date_range=(20260101, 20260731))
+
+df = pooled(hs, "trial_data", columns=["response_time_ms"])
+#   subjid  date      ses  response_time_ms
+#   57      20260709  40   812.4
+#   ...
+#   40      20251124  21   640.1
+
+pooled(hs, "position_data")                     # same, per trial x position
+pooled_metrics(hs, ["decision_accuracy"])       # one ROW per session, one COLUMN per metric
+```
+
+`subjid` / `date` / `ses` are prepended; nothing else is touched, so a pooled row is
+value-identical to that session's own frame.
+
+(Many columns are legitimately sparse — `response_time_ms` is defined on completed
+trials only — so a `.head()` of all-NaN usually means the first few trials were aborts,
+not that something failed.)
+
+### What do I need → what do I call
+
+| I want | call |
+|---|---|
+| one session's trials | `session(57, 20260709).trial_data()` |
+| two columns of it | `.trial_data(columns=["a", "b"])` |
+| its per-position record | `.position_data()` |
+| a metric, or several | `.metrics(["decision_accuracy", ...])` |
+| what metrics exist | `metric_names()` — or `metric_names(reported=True)` for the 25 saved ones |
+| every session of a subject | `sessions(57)` |
+| a cohort | `sessions([57, 40], date_range=(20260101, 20260731))` |
+| one column over a cohort | `pooled(hs, "trial_data", columns=["response_time_ms"])` |
+| one metric over a cohort | `pooled_metrics(hs, ["decision_accuracy"])` |
+| what is actually in a saved file | `print(s.peek())`, or `scripts/parquet_peek.py` |
+
+### Four things to note:
+
+- **`metrics()` computes; it never reads `metrics_*.json`.** That file is an export and
+  the record of an analysis run, not an input — so a metric you ask for here is always
+  current with the code, even on a session analysed months ago. Do not "optimise" it
+  into a file read (`docs/DECISIONS.md` §5).
+- **A rate metric is a `(numerator, denominator, value)` triple, not a number.** Do not
+  average the third element across sessions — pool the contributions with
+  `metric_analysis.metrics.common.reduce_rate` (§1).
+- **`global_trial_id` is not unique in a pooled frame.** It restarts per session, so key
+  on `(subjid, date, global_trial_id)`; measured, two sessions give 612 rows carrying
+  339 distinct ids (§28).
+- **Sessions saved before the current restructure have different columns**, and asking
+  for one they lack raises and says which case it is — "declared by the current schema,
+  re-run trial classification" versus "unknown column, did you mean…".
+
+Figures are deliberately **not** in `api` — importing them pulls matplotlib, which a
+repo wanting a number should not pay for. They live at
+`hypnose_behavior.visualization.<module>`.
 
 ## How to Use
 

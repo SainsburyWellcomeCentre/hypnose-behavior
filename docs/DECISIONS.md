@@ -2719,3 +2719,208 @@ report a MISSING it was meant to tolerate.
   column or printed pipeline output moved), `position_data_lossless` (no field list moved),
   `verify_scripts` (no existing CLI surface changed; the new script is additive and gated by
   its own probe).
+
+---
+
+## 34. The session handle, and the public surface it is reached through *(Items 7b/7c/2, 2026-08-19)*
+
+`hypnose_behavior/accessors.py` -- `session(57, 20260709)` resolves **once**, then
+`trial_data(columns=)`, `position_data(columns=)`, `metrics([...])`, `peek()` and
+`results()` are file reads against the path it found. `sessions([57, 40], ...)` does the
+same for a cohort, one tree walk per subject, and `pooled` / `pooled_metrics` put a cohort
+in one frame. `hypnose_behavior/api.py` is the hand-maintained surface naming what the
+other repos may import.
+
+### `metric_value` -- §5's expression now has one definition, not three
+
+`adapter(session(results))` was written out by hand in `run_all_metrics`' loop and in
+`prep._computed_metrics`, and §5 kept them in step **by saying so in prose**. A third
+consumer is where that stops being enough (§27), so it is now
+`metric_analysis.run.metric_value(spec, results)`, which `prep._computed_metrics` and
+`Session.metrics` both call.
+
+**The rule has one branch, and the registry makes it single-valued.** Measured over all
+43 registered metrics: a `session` wrapper exists for **exactly** the 25 in `REPORT` and
+for **none** of the 18 outside it, and the same is true of `adapter`.
+
+| | expression | who else uses it |
+|---|---|---|
+| has a wrapper (25) | `adapter(session(results))` | `run_all_metrics` -- so it is what `metrics_*.json` holds |
+| has none (18) | `spec.call(results)` at declared defaults | `qc/_common._unreported_metrics_fingerprint` -- so it is what the golden master watches |
+
+So the handle is not a third path; it is the union of the two that already existed, with
+no overlap. `fa_abortion_stats` stays special-cased inside it, for the reason it is
+special-cased in both places it replaces.
+
+> **`run_all_metrics` is deliberately NOT repointed onto it.** Its loop's stdout *is*
+> `metrics_<subj>_<date>.txt`, and `metric_value` suppresses stdout because a consumer
+> asking for a value is not asking for a report. Routing the reporting path through it
+> would empty that file. Unifying the last one means threading a `quiet` flag through and
+> is a `verbose_diff`-gated change; it was out of this item's scope, not overlooked.
+
+**Gate:** `plot_regression` **GREEN, 43 cases counted, 2,828,307 drawn values** --
+byte-equal to the figure §33 recorded, so the re-plumb moved nothing.
+
+### Two plan premises did not survive measurement
+
+**1. §5's parameter counts are swapped.** §5 says "three metrics take a `window` and two
+take an `fa_types` filter". Measured across the registry: **two** take a `window`
+(`rolling_reward_fraction`, `rolling_hr_reward_fraction`, both **positional with no
+default**), **three** take `fa_types`, one takes `fr_types` and one reported metric takes
+`fa_type='FA_time_in'`. The count was wrong; **§26's boundary is the one that holds** and
+is what the handle implements -- *a required parameter with no default* raises, because
+there is no value to choose; a parameter with a default does not, because `fa_types=None`
+is *unfiltered* and `aborted=False` is *completed* (§25). That is the same two metrics
+`regression` cannot fingerprint, arrived at independently.
+
+`hidden_rule_counts_by_odor` has required parameters and **must not** raise: its wrapper
+digs `hr_odors`/`hr_positions` out of `manifest`/`summary` (§5). So the test is
+`required parameters AND no wrapper`, and it was proved to fail selectively (§17): it
+refuses the two rolling metrics and returns a `dict` for `hidden_rule_counts_by_odor`.
+
+**2. "Validate requested column names against `trial_data_columns(mode)`" is wrong in
+both directions.** Measured on the server, `sub-057`'s two newest analysed sessions:
+
+```
+ses-059_date-20260806     file 57 columns          declared 57
+  IN FILE, NOT DECLARED (5): fa_latency_ms, poke_window_end, position_poke_times,
+                             position_valve_times, presentations
+  DECLARED, NOT IN FILE (5): completed_window_latency_ms, fa_response_time_ms,
+                             fa_window_latency_ms, fallback_reason, sequence_start_corrected
+```
+
+Validating against the declaration would **refuse `presentations`**, a column right there
+in the file, and **accept `fa_window_latency_ms`**, which is not. So:
+
+> **Any column name is accepted as input; the only rejection is "not a column of *this*
+> session's frame".** No allow-list, so a new saved column works the day it is written and
+> a pre-restructure session's extra columns stay readable.
+
+`trial_data_columns(mode)` is used only to **word** the failure, which is where it earns
+its keep: *declared but absent* -> "saved before this column existed, re-run trial
+classification" (§22's case), *not declared either* -> "unknown column, closest match…".
+That is what separates "not yet re-analysed" from a typo -- §21's `fr_laency_ms`, caught
+on the reading side.
+
+### Item 2: no eager re-exports, and the lazy form measured rather than argued
+
+Settled and unchanged: **no eager re-exports in any package `__init__.py`.** What is new
+is that `hypnose_behavior/__init__.py` now forwards **four** names (`session`, `sessions`,
+`Session`, `metric_names`) to `api` through PEP 562's module `__getattr__`, which runs
+only on attribute access. Measured before and after -- the item's stated gate:
+
+| import | modules | seconds | matplotlib / harp |
+|---|---|---|---|
+| `hypnose_behavior` | **39** | 0.003 | no / no |
+| `hypnose_behavior.frames` | **614** | 0.476 | **no / no** |
+| `hypnose_behavior.parameters` | **41** | 0.001 | no / no |
+| `hypnose_behavior.api` | 1,326 | 0.765 | **no** / yes |
+
+`import hypnose_behavior` does not load `api`; touching `hb.session` does, and
+`hb.session is api.session`. `from hypnose_behavior import frames` still works because
+`__getattr__` raises `AttributeError` for anything off the list, which is what lets
+Python fall through to importing the submodule.
+
+**Four names, not everything `api` exports** -- the root is a shortcut to the handle, not
+a second copy of the surface (§27). And `check_imports` **skips `__init__.py`**, so the
+forwarder is exercised by hand rather than by that gate.
+
+**`api.py` pulls no matplotlib, and that is a constraint on what may go in it.** The
+plotters are named in its docstring and deliberately not imported: a repo wanting a number
+should not pay for a drawing library. `load_session_results` is also left out -- it
+resolves *and* loads on every call, which is the thing item 7b exists to stop -- as is
+`frames.build_position_data`, which would offer a second per-position source that skips
+`load_position_data`'s filter back to the caller's trials (§28).
+
+### Pooling a cohort: identity is stamped, and nothing else is touched
+
+`pooled(handles, table, columns=)` prepends `subjid` / `date` / `ses` and concatenates.
+Two things it does **not** do, each for a recorded reason:
+
+- **It does not rewrite `global_trial_id`.** Measured on two sessions: 612 rows carry
+  **339 distinct ids, 273 colliding** -- §28's "a pooled frame has no key that separates
+  two sessions' trials", reproduced. The key is `(subjid, date, global_trial_id)`. A
+  synthetic uid was considered and rejected: it is a second identity for one trial (§13)
+  and would exist only in pooled frames, never in a saved file.
+- **It does not flatten a metric.** `pooled_metrics` puts the metric's own value in the
+  cell, so a rate arrives as `(numerator, denominator, value)`. Taking element 2 per
+  session and averaging is §1's defect -- a rate is not a per-trial quantity; pool the
+  contributions with `metrics.common.reduce_rate`. A flattening rule quietly applied here
+  is how that returns, and it would also be a second spelling of
+  `prep._extract_metric_value`.
+
+**No value moves; a dtype can.** Measured cell by cell, **0 of 39,564** pooled cells
+differ from the sessions' own frames -- but three columns widened at the concat:
+`sequence_rewarded` `bool -> object`, `hidden_rule_location` `int64 -> object`,
+`hidden_rule_success_position` `float64 -> object`. That is §21's "a column of nothing but
+None carries no type" arriving at a pooled concat, and it matters because **an `object`
+column of True/False is not a boolean mask** while pandas says nothing. `_warn_widened`
+names them.
+
+> **The first version of that guard under-reported, and the shape of the mistake is the
+> one to remember.** Its test was `pooled dtype not in the input dtypes`. But
+> `hidden_rule_location` is `object` on a session with no hidden rule (all-null, hence
+> untyped) and `int64` on one with, so `object` *was* an input dtype and the pooled
+> `object` read as unchanged -- while a reader of the second session's rows plainly sees
+> `int64 -> object`. It named **1 of the 3** columns that moved. The test is now
+> `sources != {target}`. **A guard narrower than the hazard reports a pass for something
+> still broken** -- §27's rule with the inequality reversed, and it was caught only
+> because the probe measured the same quantity a second way and the two counts disagreed.
+
+Ragged column sets warn too: pooling a `standard` and a `single_reward` session names the
+12 columns present on one and null on the other, since the modes genuinely write different
+column families (§21). An empty selection **raises** rather than returning an empty frame
+-- a cohort call that silently pools zero sessions looks exactly like one that succeeded
+(§33's rule for `run_speed_analysis`).
+
+`sessions()` resolves **per subject**, which is what makes `index` meaningful here:
+§32 had to *refuse* `--index` in `batch_process.py` because
+`batch_run_all_metrics_with_merge` takes one `dates` list for all subjects, so a
+cohort-wide index over-selects. Resolving per subject is the `sessions={subjid: [dates]}`
+shape §32 said would be needed, and it cannot make that mistake.
+
+### The gate, and why it is `check_imports` plus a probe
+
+`regression`, `plot_regression`, `verbose_diff`, `verify_scripts`, `figure_provenance`,
+`position_data_lossless` and `ast_move_check` **cannot reach a new module that nothing
+imports** -- §29's situation, measured before any code was written. `plot_regression`
+became reachable, and mandatory, the moment `prep._computed_metrics` was repointed; it was
+run and is above. The rest would have produced a green meaning "I did not look".
+
+So the acceptance control is `check_imports` **PASS** plus a probe against **two sessions
+analysed by the current code into a scratchpad derivatives root** -- not against the
+server, whose sessions predate the restructure (§29, and confirmed here: no
+`protocol_mode`, no `commit`, blobs still present). **PROBE GREEN 79/79**, the load-bearing
+ones being:
+
+- `trial_data` and `position_data`: **loaded md5 == saved md5**, `DataFrame.equals`, dtypes
+  identical, on both sessions (339x70 / 273x58 and 867x20 / 1019x20);
+- **`s.metrics(REPORT)` == the `metrics_*.json` the same run exported, 25/25 identical, 0
+  differ**, on both sessions -- §5's "what a consumer computes and what would have been
+  saved cannot drift" demonstrated rather than asserted;
+- **1 tree walk to resolve, 0 further** across six accessor calls;
+- all 41 askable metrics evaluate, with only `hr_abort_poke_gap` empty on `sub-057` --
+  which is §26's "it needs a hidden rule", not a defect.
+
+**Every check was proved able to fail (§17).** The byte-identity comparison reports a
+difference when one cell is nulled; the value comparison catches exactly one changed cell;
+the resolve-once counter reads 2 for two `session()` calls; the required-parameter guard
+refuses the rollings and passes `hidden_rule_counts_by_odor`; the ragged-column warning
+does not fire on a one-session pool.
+
+> **And the probe itself failed first, twice, in the way this document keeps recording.**
+> Its resolve-once counter patched `find_session` *and* `find_sessions` -- but
+> `find_session` delegates to `find_sessions`, so one walk counted as two and it reported a
+> RED against working code. Then its row-exactness check used `DataFrame.equals`, which is
+> dtype-sensitive, and reported a RED for the widening above where no value had moved.
+> **A probe is not evidence until you know what it counts.**
+
+### Two smaller things measured in passing
+
+- **`parquet_peek` already filters AppleDouble files** (`._trial_data.parquet`) and has
+  since Item 7a. A report that it did not came from a naive `glob("*.parquet")` in a
+  scratch script, not from the tool. Verified against a server session: the raw glob
+  returns both, `_parquet_files` returns one. No change was needed and none was made.
+- **`find_session` takes no negative index.** `session(57, index=-1)` raises
+  `ValueError: Invalid session index '-1'`; the selectors are 1-based. Caught by running
+  every example in the new README section rather than trusting it.

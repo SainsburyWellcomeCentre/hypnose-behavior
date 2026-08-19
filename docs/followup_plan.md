@@ -106,7 +106,9 @@ format, CSV a convenience that is **off by default**.
 
 - **Never filter gate output.** Grepping for RED hides `[ERROR]`; grepping for the summary
   hides the `+/-/~` lines that say what moved.
-- **`plot_regression`'s banner is not its result — COUNT THE CASES.** A full run lists 38.
+- **`plot_regression`'s banner is not its result — COUNT THE CASES.** A full run lists
+  **43**, and reports **~2.83 M drawn values**. A case count says a case *ran*, not that
+  it drew anything.
 - **`REGRESSION RED: N` with no `[RED]` lines above it is a dropped mount**, not a
   regression. `[ERROR]` and `[NO BASELINE]` count into the same total.
 - **Never run two mount-heavy jobs at once** — the overlap exhausts the SMB client handle
@@ -191,6 +193,20 @@ module-level side effects and `__file__`-derived state, which is why the move ga
 ---
 
 ## Item 2 — a curated public API surface (not `__init__` re-exports)
+
+**Done 2026-08-19**, with items 7b/7c. `hypnose_behavior/api.py`, 25 hand-picked names,
+and **nothing in it pulls matplotlib** — which is now a constraint on what may be added,
+not an accident. `hypnose_behavior/__init__.py` forwards four names (`session`,
+`sessions`, `Session`, `metric_names`) via PEP 562's lazy `__getattr__`, the form this
+item permits. See `DECISIONS.md` section 34.
+
+**The gate was "import-time cost measured before and after", and it is unchanged:**
+`import hypnose_behavior` **39 modules / 0.003 s**, `hypnose_behavior.frames` **614**
+with no matplotlib, harp, aeon or dotmap, `hypnose_behavior.api` 1,326 — paid only when
+touched. `check_imports` **does not check `__init__.py`**, so the forwarder was exercised
+by hand.
+
+*Original brief below.*
 
 **Delivers.** One explicit, hand-maintained module (`hypnose_behavior/api.py`) naming what
 other repos may use. Implemented by item 7.
@@ -376,6 +392,30 @@ views (session inventory -> one line per column -> one column with values). See
 `DECISIONS.md` section 29 for what it settled, including why it is not a `qc/` tool and
 why it does not read the `.schema.json` sidecar.
 
+**7b/7c. Done 2026-08-19** — `hypnose_behavior/accessors.py`, reached through `api.py`
+(item 2, above). The handle, `sessions([...])` for a cohort, and `pooled` /
+`pooled_metrics`; the README gained a task-oriented "what do I need → what do I call"
+section. See `DECISIONS.md` section 34.
+
+**Two of this item's premises did not survive measurement, and both are recorded there.**
+Section 5's "three metrics take a `window` and two take an `fa_types`" is **swapped** —
+two take a `window`, both required with no default, and section 26's boundary
+(*required parameter and no wrapper*) is the one that holds. And "validate requested
+column names against `trial_data_columns(mode)`" is wrong **in both directions**: measured
+on the server, every saved session both carries columns the declaration does not name and
+lacks ones it does, so validation is against *this session's frame* and the declaration is
+used only to word the error.
+
+**The gate was reachability, measured before writing code.** Seven of the eight QC tools
+cannot see a module nothing imports (section 29). `plot_regression` became reachable —
+and mandatory — only because `prep._computed_metrics` was repointed onto the new shared
+`run.metric_value`: **GREEN, 43 cases, 2,828,307 drawn values**. The rest is
+`check_imports` PASS plus a **79/79 probe** against two sessions analysed by current code
+into a scratchpad root, whose load-bearing checks are that loaded md5 == saved md5 and
+that `s.metrics(REPORT)` equals the `metrics_*.json` the same run exported, 25/25.
+
+*Original brief below.*
+
 **7b. A session handle and the measured-data accessors.**
 
 ```python
@@ -429,7 +469,40 @@ was obtainable two ways and two figures disagreed.
 4. ~~**3** session selectors.~~ **Done 2026-08-18.**
 5. ~~**1** Phase 10 — coverage measurement first, then the move, then the cleanup.~~
    **Done 2026-08-18.**
-6. **7b/7c + 2** the accessors and the curated API — last, once the module layout has
-   stopped moving. **It has: Item 1 was the last thing that moved it.**
+6. ~~**7b/7c + 2** the accessors and the curated API — last, once the module layout has
+   stopped moving.~~ **Done 2026-08-19.**
 
 Item 6 needs no work: it is a decision, recorded above.
+
+---
+
+## All seven items are closed
+
+| item | state |
+|---|---|
+| 1 — split `visualization_utils.py` | done 2026-08-18, section 33 |
+| 2 — curated public API | done 2026-08-19, section 34 |
+| 3 — session selectors | done 2026-08-18, section 32 |
+| 4 — `parameters.py` | done 2026-08-18, section 31 |
+| 5 — collapse `non_initiated_*` | done 2026-08-18, section 30 |
+| 6 — disposition of Phases 8/9 | a decision, recorded above; no work |
+| 7a / 7b / 7c — peek tool, handle, metric accessor | done 2026-08-18 / 2026-08-19, sections 29 and 34 |
+
+**What is open, and deliberately so** — each is recorded where it was measured, not
+carried here as a task:
+
+- **The two visualization notebooks are broken by design** (section 33): they do
+  `from ...visualization_utils import *` against a module that no longer exists.
+  `api.py` now exists as the thing to point them at, which was the open question — but
+  they are unchanged, because nothing gates a notebook and the user's call was to leave
+  them loud.
+- **`plot_movement_trace` can be covered by no gate case** — it needs an ezTrack
+  `add_timestamps_to_tracking` CSV that no coverage session has (section 33).
+- **The manifest's `analysis_parameters` stamp is asserted by no gate** (section 31),
+  with the condition for revisiting stated there: a third knob.
+- **`run_all_metrics` is not routed through `metric_value`** (section 34), because its
+  loop's stdout *is* the metrics `.txt`.
+- **The server has not been re-analysed.** Every saved session predates the restructure —
+  no `protocol_mode`, no provenance stamp, position blobs still in `trial_data`. The
+  accessors read those files correctly, and say what is missing when asked for a column
+  that is not there; but the fixture sessions are the only ones current with this code.
