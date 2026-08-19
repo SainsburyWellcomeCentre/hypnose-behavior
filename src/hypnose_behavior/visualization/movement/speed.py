@@ -9,10 +9,16 @@ Carved out of ``movement_analysis_utils.py`` in restructure_2 Phase 10
 
 Both **read** ``speed_analysis.parquet``, written by
 ``metric_analysis.movement.speed_analysis.compute_speed_analysis``. Neither
-computes it: a session without that file is reported and skipped. The threshold
-has one definition -- ``metric_analysis.movement.speed_analysis.speed_threshold``
--- because a plotted threshold that disagrees with the one used to compute the
-saved latencies is invisible in any output (audit finding 7).
+computes anything: a session without that file is reported and skipped, and the
+threshold is the one the file records rather than one derived here.
+
+That last part was only half true until 2026-08-19. Phase 10 removed
+``plot_traces_with_speed_threshold``'s recompute but left
+``plot_epoch_speeds_by_condition`` deriving baseline mu/sigma from the stored
+speeds and applying **its own** alpha/beta -- so it drew a threshold line that
+could disagree with the ``latency_s`` and ``speed_threshold_time`` on the same
+axes, which is invisible in any output (audit finding 7). See ``DECISIONS.md``
+section 35.
 """
 
 import pandas as pd
@@ -35,11 +41,28 @@ from hypnose_behavior.io.loaders import (
 )
 from hypnose_behavior.visualization.prep import smooth_xy
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
-from hypnose_behavior.metric_analysis.movement.speed_analysis import speed_threshold
+from hypnose_behavior.metric_analysis.movement.speed_analysis import THRESHOLD_COLUMNS
 from hypnose_behavior.io.save import save_figure
 import re
+import warnings
 import numpy as np
 from hypnose_behavior.io.save import MOVEMENT_FIGURES_SUBDIR
+
+
+def _saved_threshold(df_speed):
+    """The threshold `compute_speed_analysis` recorded in this file, or None.
+
+    `speed_analysis.parquet` carries `THRESHOLD_COLUMNS` as constant columns from
+    2026-08-19. A file written before that has none of them, and `DECISIONS.md`
+    section 2's rule applies: an absent marker means *unknown*, never "today's
+    default" -- so this returns None and the caller omits the lines rather than
+    drawing a threshold no saved latency was derived from.
+    """
+    if any(c not in df_speed.columns for c in THRESHOLD_COLUMNS):
+        return None
+    row = df_speed.iloc[0]
+    stats = {c: row[c] for c in THRESHOLD_COLUMNS}
+    return None if pd.isna(stats["baseline_mu"]) else stats
 
 
 
@@ -56,8 +79,6 @@ def plot_epoch_speeds_by_condition(
     fa_label_filter=None,
     mode: str = "mean",
     threshold: bool = True,
-    threshold_alpha: float = 10.0,
-    threshold_beta: float = 10.0,
     figsize=(8, 5),
     save: bool = False,
     verbose: bool = True,
@@ -126,10 +147,10 @@ def plot_epoch_speeds_by_condition(
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
     bin_s = bin_ms / 1000.0
-    baseline_window = (-0.15, -0.05)
 
     per_session = []
     combined_data = {"rewarded": [], "unrewarded": [], "fa": []}
+    _warned_missing_threshold = False
 
     for ses_dir in ses_dirs:
         date_str = ses_dir.name.split("_date-")[-1]
@@ -150,17 +171,22 @@ def plot_epoch_speeds_by_condition(
         if not conds_with_data:
             continue
 
-        # Baseline stats from stored speeds
-        baseline_mask = (df_speed["bin_mid_s"] >= baseline_window[0]) & (df_speed["bin_mid_s"] <= baseline_window[1])
-        baseline_vals = df_speed.loc[baseline_mask, "speed"].dropna().to_numpy()
-        # One definition of the threshold, shared with compute_speed_analysis --
-        # which is what produced the latencies this figure draws (finding 7).
-        stats = speed_threshold(baseline_vals, alpha=threshold_alpha,
-                                beta=threshold_beta, enabled=threshold)
-        baseline_mean, baseline_sd = stats["mu"], stats["sigma"]
-        thr_alpha_mu = stats["alpha_mu"]
-        thr_mu_plus_beta_sigma = stats["mu_plus_beta_sigma"]
-        thr_max = stats["max_alpha_mu_mu_plus_beta_sigma"]
+        # The threshold is READ, never recomputed. `compute_speed_analysis` owns it and
+        # is what produced the `speed_threshold_time` / `latency_s` on these same axes;
+        # recomputing here with this function's own alpha/beta drew a line that could
+        # disagree with the latencies beside it, and nothing would have said so.
+        stats = _saved_threshold(df_speed)
+        baseline_mean = stats["baseline_mu"] if stats else None
+        baseline_sd = stats["baseline_sigma"] if stats else None
+        thr_max = stats["speed_threshold"] if stats else None
+        if threshold and stats is None and not _warned_missing_threshold:
+            warnings.warn(
+                f"sub-{subjid} {date_str}: speed_analysis.parquet predates the recorded "
+                f"threshold ({', '.join(THRESHOLD_COLUMNS)}), so the baseline and "
+                f"threshold lines are omitted rather than recomputed from this figure's "
+                f"own settings. Re-run scripts/run_speed_analysis.py to restore them.",
+                RuntimeWarning, stacklevel=2)
+            _warned_missing_threshold = True
 
         figs_by_cond = {}
         for cond in conds_with_data:
@@ -197,7 +223,9 @@ def plot_epoch_speeds_by_condition(
             if threshold and baseline_mean is not None:
                 ax_t.axhline(baseline_mean, color="red", linestyle="-", linewidth=1.5, label="baseline μ")
                 if thr_max is not None:
-                    ax_t.axhline(thr_max, color="#2F4F4F", linestyle="--", linewidth=1.4, label=f"max(αμ, μ+βσ), α={threshold_alpha:g}, β={threshold_beta:g}")
+                    ax_t.axhline(thr_max, color="#2F4F4F", linestyle="--", linewidth=1.4,
+                                 label=f"max(αμ, μ+βσ), α={stats['threshold_alpha']:g}, "
+                                       f"β={stats['threshold_beta']:g}")
 
             ax_t.set_title(f"{cond} — sub {subjid}, {date_str} ({mode})")
             ax_t.set_xlabel("Time from last poke-out (s)")
@@ -216,15 +244,14 @@ def plot_epoch_speeds_by_condition(
         per_session.append({
             "date": date_str,
             "fig_traces": figs_by_cond,
+            # Reported exactly as the file records it -- this figure derives none of it.
             "baseline": {
                 "mu": baseline_mean,
                 "sigma": baseline_sd,
-                "alpha": threshold_alpha,
-                "beta": threshold_beta,
-                "alpha_mu": thr_alpha_mu,
-                "mu_plus_beta_sigma": thr_mu_plus_beta_sigma,
+                "alpha": stats["threshold_alpha"],
+                "beta": stats["threshold_beta"],
                 "max_alpha_mu_mu_plus_beta_sigma": thr_max,
-            } if threshold else None,
+            } if (threshold and stats) else None,
         })
 
     combined_figs = {}

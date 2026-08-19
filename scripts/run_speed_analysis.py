@@ -38,9 +38,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from hypnose_behavior.metric_analysis.movement import speed_analysis
 from hypnose_behavior.metric_analysis.movement.speed_analysis import (
     run_speed_analysis_batch,
 )
+
+# The flag defaults are read from `speed_analysis`, never re-typed here: the value that
+# reaches the analysis and the value `--help` advertises are then the same one.
 
 
 def _resolve_dates(args):
@@ -71,21 +75,21 @@ def main() -> int:
                     help="inclusive ses range")
     ap.add_argument("--index-range", nargs=2, metavar=("START", "END"), default=None,
                     help="inclusive session-index range (derivatives)")
-    ap.add_argument("--bin-ms", type=int, default=100,
-                    help="speed bin width in ms (default 100)")
-    ap.add_argument("--pre-buffer-s", type=float, default=1.0,
-                    help="seconds before last poke-out to include (default 1.0)")
+    ap.add_argument("--bin-ms", type=int, default=speed_analysis.BIN_MS,
+                    help="speed bin width in ms (default %(default)s)")
+    ap.add_argument("--pre-buffer-s", type=float, default=speed_analysis.PRE_BUFFER_S,
+                    help="seconds before last poke-out to include (default %(default)s)")
     ap.add_argument("--fa-labels", nargs="*", default=None,
                     help="FA labels to include, e.g. FA_time_in FA_time_out "
                          "(default: FA_time_in)")
-    ap.add_argument("--mode", choices=("mean", "max"), default="mean",
-                    help="per-bin aggregation (default mean)")
+    ap.add_argument("--mode", choices=("mean", "max"), default=speed_analysis.MODE,
+                    help="per-bin aggregation (default %(default)s)")
     ap.add_argument("--no-threshold", action="store_true",
                     help="report baseline mu/sigma but compute no combined threshold")
-    ap.add_argument("--threshold-alpha", type=float, default=10.0,
-                    help="multiplier for mu in vthresh = max(alpha*mu, mu+beta*sigma)")
-    ap.add_argument("--threshold-beta", type=float, default=10.0,
-                    help="multiplier for sigma in vthresh")
+    ap.add_argument("--threshold-alpha", type=float, default=speed_analysis.THRESHOLD_ALPHA,
+                    help="multiplier for mu in vthresh = max(alpha*mu, mu+beta*sigma) (default %(default)s)")
+    ap.add_argument("--threshold-beta", type=float, default=speed_analysis.THRESHOLD_BETA,
+                    help="multiplier for sigma in vthresh (default %(default)s)")
     ap.add_argument("--quiet", action="store_true", help="suppress per-session logging")
     args = ap.parse_args()
 

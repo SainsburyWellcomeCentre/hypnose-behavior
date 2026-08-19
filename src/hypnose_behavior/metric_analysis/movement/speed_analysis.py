@@ -50,7 +50,41 @@ from hypnose_behavior.utils.helpers import (
     session_selectors,
 )
 
-__all__ = ["binned_speed", "compute_speed_analysis", "run_speed_analysis_batch"]
+__all__ = ["binned_speed", "compute_speed_analysis", "run_speed_analysis_batch",
+           "speed_threshold", "THRESHOLD_COLUMNS"]
+
+
+# --------------------------------------------------------------------------------------
+# The speed-analysis defaults, in one place
+# --------------------------------------------------------------------------------------
+#
+# **Not `hypnose_behavior/parameters.py`.** That file is for knobs you can only change by
+# editing code, and its `scoring_parameters()` is stamped into `manifest.json` as what
+# *trial classification* applied (section 31). These are neither: every one is a
+# `scripts/run_speed_analysis.py` flag (`--bin-ms`, `--pre-buffer-s`,
+# `--threshold-alpha`, `--threshold-beta`), chosen per run, and speed analysis is a
+# separate later pass that does not write that manifest -- so stamping them there would
+# claim the session was scored with values applied after the file was written, which
+# section 31 calls worse than no stamp at all.
+#
+# They live here because they were duplicated: `10.0` appeared as `speed_threshold`'s
+# default, as `compute_speed_analysis`'s, and again in
+# `visualization/movement/speed.py`, with nothing making the three agree -- and the
+# docstring below said `6.0`. One declaration, and the plotter no longer holds one at
+# all: it reads what produced the file.
+BIN_MS = 100
+PRE_BUFFER_S = 1.0
+MODE = "mean"
+THRESHOLD_ALPHA = 10.0
+THRESHOLD_BETA = 10.0
+BASELINE_WINDOW_S = (-0.15, -0.05)   # seconds relative to last poke-out
+
+# Written as constant columns on every row of `speed_analysis.parquet`, so a reader can
+# tell what threshold produced that file's `speed_threshold_time` / `latency_s` instead
+# of assuming today's defaults. A file written before 2026-08-19 carries none of them,
+# and section 2's rule applies: absent means *unknown*, never "the current default".
+THRESHOLD_COLUMNS = ("baseline_mu", "baseline_sigma", "threshold_alpha",
+                     "threshold_beta", "speed_threshold")
 
 
 def _binned_speed(tracking_df, t_zero, t_end, pre_buffer_s, bin_s, mode):
@@ -101,13 +135,13 @@ def run_speed_analysis_batch(
     date_range=None,
     ses_range=None,
     index_range=None,
-    bin_ms: int = 100,
-    pre_buffer_s: float = 1.0,
+    bin_ms: int = BIN_MS,
+    pre_buffer_s: float = PRE_BUFFER_S,
     fa_label_filter=None,
-    mode: str = "mean",
+    mode: str = MODE,
     threshold: bool = True,
-    threshold_alpha: float = 10.0,
-    threshold_beta: float = 10.0,
+    threshold_alpha: float = THRESHOLD_ALPHA,
+    threshold_beta: float = THRESHOLD_BETA,
     verbose: bool = True,
 ):
     """Run compute_speed_analysis over all available subject/date combinations.
@@ -195,8 +229,8 @@ def run_speed_analysis_batch(
     return processed
 
 
-def speed_threshold(baseline_values, *, alpha: float = 10.0, beta: float = 10.0,
-                    enabled: bool = True) -> dict:
+def speed_threshold(baseline_values, *, alpha: float = THRESHOLD_ALPHA,
+                    beta: float = THRESHOLD_BETA, enabled: bool = True) -> dict:
     """Baseline speed statistics and the movement-onset threshold.
 
     ``vthresh = max(alpha * mu, mu + beta * sigma)`` over the speeds in the
@@ -231,13 +265,13 @@ def compute_speed_analysis(
     subjid,
     dates=None,
     *,
-    bin_ms: int = 100,
-    pre_buffer_s: float = 1.0,
+    bin_ms: int = BIN_MS,
+    pre_buffer_s: float = PRE_BUFFER_S,
     fa_label_filter=None,
-    mode: str = "mean",
+    mode: str = MODE,
     threshold: bool = True,
-    threshold_alpha: float = 10.0,
-    threshold_beta: float = 10.0,
+    threshold_alpha: float = THRESHOLD_ALPHA,
+    threshold_beta: float = THRESHOLD_BETA,
 ):
     """Compute cue-port speed epochs aligned to last poke-out for rewarded, unrewarded, and FA trials.
 
@@ -265,9 +299,9 @@ def compute_speed_analysis(
         in the session, and overlay baseline plus the single threshold line
         vthresh = max(alpha*mu, mu+beta*sigma).
     threshold_alpha : float
-        Multiplier for mu when threshold is enabled (default 6.0).
+        Multiplier for mu when threshold is enabled (default THRESHOLD_ALPHA).
     threshold_beta : float
-        Multiplier for sigma when threshold is enabled (default 6.0).
+        Multiplier for sigma when threshold is enabled (default THRESHOLD_BETA).
     figsize : tuple
         Figure size for per-session plots.
 
@@ -304,7 +338,7 @@ def compute_speed_analysis(
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
     bin_s = bin_ms / 1000.0
-    baseline_window = (-0.15, -0.05)  # seconds relative to last poke-out
+    baseline_window = BASELINE_WINDOW_S
     start_target_s = -bin_ms / 2000.0  # target mid-bin time (e.g., -0.05s for 100 ms bins)
 
     def _safe_dt(val):
@@ -764,6 +798,15 @@ def compute_speed_analysis(
                 rec["path_length_px"] = path_map.get(tid, np.nan)
                 rec["travel_time_s"] = travel_map.get(tid, np.nan)
                 rec["tortuosity"] = tort_map.get(tid, np.nan)
+
+        # The threshold that produced the latencies above, recorded on every row so a
+        # reader never has to assume today's defaults (THRESHOLD_COLUMNS).
+        for rec in epoch_records:
+            rec["baseline_mu"] = baseline_mean
+            rec["baseline_sigma"] = baseline_sd
+            rec["threshold_alpha"] = threshold_alpha
+            rec["threshold_beta"] = threshold_beta
+            rec["speed_threshold"] = thr_max
 
         analysis_path = results_dir / "speed_analysis.parquet"
         try:
