@@ -1,10 +1,10 @@
-# Data-location profiles (committed, shared across machines).
+# Data-location profiles (on github, shared across machines).
 #
 # Pick which one is active PER MACHINE with:
 #     python scripts/set_data_location.py <name>      # e.g. server-mac | server-windows | local_1
-# That writes configs/data_locations.local.yml (git-ignored), so your choice is never committed.
+# That writes configs/data_locations.local.yml (git-ignored), as a local setting.
 #
-# hypnose.io.paths resolves the data roots in this order:
+# hypnose_behavior.io.paths resolves the data roots in this order:
 #     HYPNOSE_* env vars  >  active profile (below)  >  legacy data/rawdata symlink
 #
 # Each profile needs `rawdata`; `derivatives` defaults to the sibling of `rawdata` if omitted.

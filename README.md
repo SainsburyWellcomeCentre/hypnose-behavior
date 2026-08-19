@@ -8,64 +8,62 @@ This repository is utilised for processing and visualising data acquired from Hy
 
 - Analysing and visualising behavioral metrics
 
-## Repository structure
-
-```
-configs/                 user-facing setup configs (rig/olfactometer .yml)
-data/rawdata             symlink to the read-only data on the server; all output -> derivatives
-notebooks/               analysis/visualisation notebooks (import from src; no definitions)
-scripts/                 terminal entry points (thin CLI wrappers; no analysis logic)
-src/hypnose/
-    io/                  data loading, saving, paths (readers, loaders, save, save_results, paths)
-    trial_classification/ trial detection + classification (classification_utils, detect_trials/stage/settings, merge, summary, run)
-    metric_analysis/     behavioural metric calculation (metrics_utils)
-    visualization/       figure-making (valve/poke, metrics, pred-seq, movement)
-    utils/               small shared helpers
-    qc/                  quality control: data validation + golden-master regression tools (see below)
-    resources/device_schemas/  harp schemas (behavior.yml, olfactometer.yml), loaded as package data
-```
-
-The importable package is `hypnose` (e.g. `from hypnose.trial_classification.run import batch_analyze_sessions`).
-
 ## How to Use
 
 1. Clone the repository
 
 Within your working directory use a terminal to clone the repo to your local folder:
 
-```git clone github.com/SainsburyWellcomeCentre/hypnose-analysis```
+```git clone github.com/SainsburyWellcomeCentre/hypnose-behavior```
 
 2. Create and activate the conda environment using the environment.yml file
 
 ```conda env create -f environment.yml```
-```conda activate hypnose-analysis```
+```conda activate hypnose-behavior```
 
-> **Installing by hand?** Use the `behavioral` extra — `pip install -e ".[behavioral]"`.
-> A bare `pip install -e .` gives the *base* install (analysis code, figure styles,
-> data-location helpers) but omits the behavioural/video stack (`swc-aeon`,
-> `harp-python`, `moviepy`, `opencv-python`), so the loaders and readers will fail with
-> `ModuleNotFoundError: aeon` / `harp`. If that happens, rerun with the extra.
-> `environment.yml` already uses it, so the command above is complete on its own.
+> **`hypnose-helpers` is a required dependency** and is not on PyPI, so install it from a
+> clone before this package. It owns the data-location mechanism (`io/paths.py`), the
+> figure styles and the shared layout/selector parsing:
 >
-> The split exists because `swc-aeon==0.1.0` requires Python ≥3.11. Keeping it out of
-> the base dependencies lets repos pinned to older Python — `hypnose-eeg-preprocessing`
-> is on 3.9 via pomegranate/somnotate — install this package and reuse
-> `hypnose.io.paths` and `hypnose.io.save` (the shared figure styles), which need
-> nothing from that stack.
+> ```
+> git clone github.com/SainsburyWellcomeCentre/hypnose-helpers
+> pip install -e /path/to/hypnose-helpers
+> ```
+>
+> Without it, `import hypnose_behavior.io.paths` fails outright — this is a hard
+> dependency, not the optional/lazy kind hypnose-somnotate uses.
 
-3. Add the environment as a kernel to run notebooks
+3. Install hypnose-behavior as a editable install
 
-```python -m ipykernel install --user --name=hypnose-analysis --display-name="Hypnose Analysis"```
+- In the repo's main folder, run `pip install -e ".[behavioral]"`.
 
-5. Symlink: 
+- This install all helpers. pip install -e . omits the behavioral dependencies (like swc-aeon or harp). 
 
-Directories in this repo are resolved with a symlink inside /data pointing to the mounted server containing data. Depending on local structure of mounting the server, the symlink may need adjusting. 
+- The split exists because swc-aeon==0.1.0 requires python ≥3.11, while somnotate (sibling repo) is bound to Python 3.9. 
+    the split allows for cross-repo compatibility of core functions. 
+
+4. Add the environment as a kernel to run notebooks
+
+```python -m ipykernel install --user --name=hypnose-behavior --display-name="Hypnose Analysis"```
+
+5. Select data location
+
+```bash
+python scripts/set_data_location.py --list          # show profiles
+python scripts/set_data_location.py server-mac      # activate one (writes the local file)
+python scripts/set_data_location.py --show          # print the resolved roots (+ warns if missing)
+```
+- You can add more data locations (descriptions of where the pipeline reads `rawdata` and writes `derivatives`) in the configs/data_locations.yml file (shared). 
+
+6. (Optional) Symlink: 
+
+Replaces by 5., but kept as an option (e.g., to see rawdata tree in repo). 
 
 1. Windows (requires Ceph server mounted at Z:):
 
 - Open a PowerShell Terminal as Administrator
 
-- cd into hypnose-analysis (repo main folder)
+- cd into hypnose-behavior (repo main folder)
 
 - Remove any possible existing items in the symlink folder by running  ```Remove-Item -LiteralPath .\data\rawdata -Recurse -Force```
 
@@ -87,6 +85,138 @@ Directories in this repo are resolved with a symlink inside /data pointing to th
 
 - create the synmlink to ceph by running: ```ln -s /Volumes/harris/hypnose/rawdata ./data/rawdata```
 
+
+## Repository structure
+
+```
+configs/                 user-facing setup configs (rig/olfactometer .yml)
+data/rawdata             symlink to the read-only data on the server; all output -> derivatives
+notebooks/               analysis/visualisation notebooks (import from src; no definitions)
+scripts/                 terminal entry points (thin CLI wrappers; no analysis logic)
+src/hypnose_behavior/
+    api.py               THE PUBLIC SURFACE -- what other repos may import (see below)
+    accessors.py         the session handle behind it (session/sessions/pooled)
+    frames.py            per-position frame building; a leaf, stdlib + pandas only
+    parameters.py        the hardcoded scoring knobs, stamped into manifest.json
+    io/                  data loading, saving, paths (readers, loaders, load_results, save, save_results, paths)
+    trial_classification/ trial detection + classification, in three layers: leaves
+                         (windows, outcome, params, hidden_rule, index) <- workers
+                         (detect_trials, classify_trials, response_times,
+                         aborted_trials) <- run; plus detect_stage/settings, merge,
+                         summary. Workers never import each other. 
+    metric_analysis/     behavioural metric calculation: metrics/ (definitions, one
+                         module per behavioural construct), run/merge/summary
+                         (orchestration), resolvers, registry
+    visualization/       figure-making (valve/poke, metrics, pred-seq, movement)
+    utils/               small shared helpers
+    qc/                  quality control: data validation + golden-master regression tools (see below)
+    resources/device_schemas/  harp schemas (behavior.yml, olfactometer.yml), loaded as package data
+```
+
+The importable package is `hypnose_behavior` (e.g. `from hypnose_behavior.trial_classification.run import batch_analyze_sessions`).
+
+## Using saved data in other repos: `hypnose_behavior.api`
+
+**If you are writing another repo (EEG, ephys, a one-off notebook) and want this
+repo's saved output data, this section is all you need.** `api.py` is the hand-maintained
+public surface; everything else is internal and moves without notice.
+
+```python
+from hypnose_behavior.api import session, sessions, pooled, pooled_metrics
+```
+
+### One session
+
+```python
+s = session(57, 20260709)        # or session(57, ses=40) / session(57, index=1)
+```
+
+That resolution walks the derivatives tree **once** (~14.6 s on a cold mount, ~0.2 s
+warm). Everything below is a file read against the path it found — nothing re-resolves.
+
+```python
+s.trial_data()                                        # one row per trial, every column
+s.trial_data(columns=["response_time_ms", "is_aborted"])
+s.position_data()                                     # one row per trial x position
+s.metrics(["decision_accuracy", "poke_durations"])    # {name: value}, computed
+s.metric("decision_accuracy")                         # just the one
+
+s.manifest(), s.summary(), s.protocol_mode()          # what this session is
+print(s.peek(table="trial_data"))                     # one line per column, to read
+s.subjid, s.date, s.ses, s.results_dir                # where it came from
+```
+
+### Many sessions
+
+`sessions(...)` takes one subject or a list, and all six selectors
+(`dates`, `ses`, `index`, `date_range`, `ses_range`, `index_range`). One tree walk per
+subject.
+
+```python
+for s in sessions(57, date_range=(20260101, 20260731)):
+    print(s.date, s.metric("decision_accuracy"))
+
+hs = sessions([57, 40, 46], ses_range=(30, 60))
+```
+
+### One column across many sessions
+
+```python
+hs = sessions([57, 40], date_range=(20260101, 20260731))
+
+df = pooled(hs, "trial_data", columns=["response_time_ms"])
+#   subjid  date      ses  response_time_ms
+#   57      20260709  40   812.4
+#   ...
+#   40      20251124  21   640.1
+
+pooled(hs, "position_data")                     # same, per trial x position
+pooled_metrics(hs, ["decision_accuracy"])       # one ROW per session, one COLUMN per metric
+```
+
+`subjid` / `date` / `ses` are prepended; nothing else is touched, so a pooled row is
+value-identical to that session's own frame.
+
+(Many columns are legitimately sparse — `response_time_ms` is defined on completed
+trials only — so a `.head()` of all-NaN usually means the first few trials were aborts,
+not that something failed.)
+
+### What do I need → what do I call
+
+| I want | call |
+|---|---|
+| one session's trials | `session(57, 20260709).trial_data()` |
+| two columns of it | `.trial_data(columns=["a", "b"])` |
+| its per-position record | `.position_data()` |
+| a metric, or several | `.metrics(["decision_accuracy", ...])` |
+| what metrics exist | `metric_names()` — or `metric_names(reported=True)` for the 25 saved ones |
+| every session of a subject | `sessions(57)` |
+| a cohort | `sessions([57, 40], date_range=(20260101, 20260731))` |
+| one column over a cohort | `pooled(hs, "trial_data", columns=["response_time_ms"])` |
+| one metric over a cohort | `pooled_metrics(hs, ["decision_accuracy"])` |
+| what is actually in a saved file | `print(s.peek())`, or `scripts/parquet_peek.py` |
+
+### Four things to note:
+
+- **`metrics()` computes; it never reads `metrics_*.json`.** That file is an export and
+  the record of an analysis run, not an input — so a metric you ask for here is always
+  current with the code, even on a session analysed months ago. Do not "optimise" it
+  into a file read.
+- **A rate metric is a `(numerator, denominator, value)` triple, not a number.** Do not
+  average the third element across sessions — pool the contributions with
+  `metric_analysis.metrics.common.reduce_rate`.
+- **`global_trial_id` is not unique in a pooled frame.** It restarts per session, so key
+  on `(subjid, date, global_trial_id)`; measured, two sessions give 612 rows carrying
+  339 distinct ids.
+- **Sessions saved before the current restructure have different columns**, and asking
+  for one they lack raises and says which case it is — "declared by the current schema,
+  re-run trial classification" versus "unknown column, did you mean…".
+
+Figures are deliberately **not** in `api` — importing them pulls matplotlib, which a
+repo wanting a number should not pay for. They live at
+`hypnose_behavior.visualization.<module>`.
+
+
 ## File Copying using robocop: 
 
 For local analysis, use files copied from ceph to local machine. Use robocopy in powershell: robocopy "Z:\hypnose\rawdata\sub-045_id-284" "E:\rawdata\sub-045_id-284" /E /MT:32 /R:5 /W:5 /LOG:C:\Users\HarrisLab\Desktop\robocopy_log.txt /TEE /NP
@@ -104,13 +234,13 @@ python scripts/run_metrics_analysis.py     --subjids 53 --dates 20260528
 python scripts/batch_process.py            --subjids 53 --date-range 20260501 20260531
 ```
 
-`--subjids` and `--dates` are optional (omit to run all); use `--date-range START END` for an inclusive range. Run trial classification before metric analysis (metrics read the saved classification results). The scripts validate that data exists first (`hypnose.io.validate.validate_subject`) and are thin wrappers over `hypnose.trial_classification.run.batch_analyze_sessions` and `hypnose.metric_analysis.metrics_utils.batch_run_all_metrics_with_merge`.
+`--subjids` and `--dates` are optional (omit to run all); use `--date-range START END` for an inclusive range. Run trial classification before metric analysis (metrics read the saved classification results). The scripts validate that data exists first (`hypnose_behavior.io.validate.validate_subject`) and are thin wrappers over `hypnose_behavior.trial_classification.run.batch_analyze_sessions` and `hypnose_behavior.metric_analysis.run.batch_run_all_metrics_with_merge`.
 
 1. Trial Classification
 
-The trial_classification notebook runs the trial classification. All functions used in this notebook are in the classification_utils.py file. 
+The trial_classification notebook runs the trial classification. The functions it uses live in `src/hypnose_behavior/trial_classification/`: `run.py` for the session/batch entry points, and `detect_trials.py` / `classify_trials.py` / `response_times.py` / `aborted_trials.py` for the stages themselves. 
 
-batch_analyze_sessions can run on any combination of dates and subjids to run analysis on several subjects or dates at ones. If one parameter is None, it will run on all subjects for date(s) provided or all dates for subject(s) provided. Results are saved as json and csv combination. A summary txt file is saved per session analyzed. 
+batch_analyze_sessions can run on any combination of dates and subjids to run analysis on several subjects or dates at ones. If one parameter is None, it will run on all subjects for date(s) provided or all dates for subject(s) provided. Results are saved as parquet with optional csv. A summary txt file is saved per session analyzed. 
 
 plot_valve_and_poke_events can be used to visualize all valve states, with option to specify a time window. 
 
@@ -175,7 +305,8 @@ Reward Information
     - supply2_count (int): In rewarded trials, 1 or 0 indicating whether first poke happened at supply port 2
     - total_supply_count (int): In rewarded trials, 1 or NaN indicating whether a supply port poke happened
     - poke_window_end (timestamp ISO 8601): Time when the reward window ended, indicating timeout or unrewarded trial
-    - response_time_ms (float): In rewarded, unrewarded, or timeout trials, time between odor cue port poke out and first supply port poke
+    - response_time_ms (float): In rewarded, unrewarded, or timeout trials, time between the animal's LAST odor cue port poke out before the reward poke, and that reward poke. This is the movement latency -- if the animal returns to the cue port after the sequence completes (resampling, or checking for another odor), that resampling time is not charged to the response.
+    - completed_window_latency_ms (float): The same reward poke measured from AwaitReward, i.e. from where the experiment PC starts its response-time counter. This is what the response window is built on and what decides unrewarded vs timeout; response_time_ms answers how fast the animal moved, this one answers whether it responded in time. The two differ whenever the animal was still at the cue port when the counter started.
     - response_time_category (string): Categorical label for completed sequences: "rewarded", "unrewarded", or "timeout_delayed"
 
 Non-Rewarded Trial Information
@@ -202,7 +333,8 @@ False Alarm Information
 
     - fa_label (string): In aborted trials, false alarm classification: "fa_time_in" (within response time window), "fa_time_out" (up to 3x the response time window), "fa_late" (later than that), or "nFA" (no false alarm)
     - fa_time (timestamp ISO 8601): In false alarm trials, when the false alarm happened (supply port poke)
-    - fa_latency_ms (float): Time between leaving odor cue port and poking either supply port in aborted trials
+    - fa_window_latency_ms (float): Time between the abortion (last cue port poke out inside the trial) and poking either supply port. This is the window-relative time and it is what fa_label buckets.
+    - fa_response_time_ms (float): The same false alarm measured from the animal's last cue port poke out before the poke. Excludes any resampling between giving up and false-alarming, which the two differ by on ~44% of false alarms.
     - fa_port (int): In false alarm trials, port ID (1 for A, 2 for B) of first supply port poke
 
 Single-Reward Protocol / False Response Information
@@ -223,7 +355,8 @@ Single-Reward Protocol / False Response Information
     - false_response (boolean): For COMPLETED non-rewarded sequences only. True if the animal went to a reward port before the next trial initiation (analogous to a false alarm, but for a completed no-go sequence); False if it correctly withheld.
     - fr_label (string): False-response classification, mirroring fa_label: "FR_time_in" (reward poke within the response time window), "FR_time_out" (up to 3x the response time window), "FR_late" (later than that, before the next trial), or "nFR" (no reward poke, i.e. correct withholding). NOTE: when the schema's responseTime is effectively unlimited (e.g. 99999 s) every reward poke falls into FR_time_in; the timing buckets are only informative with a finite responseTime.
     - fr_time (timestamp ISO 8601): In false_response trials, when the false response happened (first reward port poke).
-    - fr_latency_ms (float): In false_response trials, time between sequence completion (await_reward) and the first reward port poke.
+    - fr_window_latency_ms (float): In false_response trials, time between sequence completion (await_reward) and the first reward port poke. Window-relative, and what fr_label buckets.
+    - fr_response_time_ms (float): The same poke measured from the animal's last cue port poke out before it. Excludes resampling after the sequence completed, which happens on ~57% of false responses.
     - fr_port (int): In false_response trials, port ID (1 for A, 2 for B) of the first reward port poke.
     - fr_odor_identity (string): In false_response trials, identity of the first reward port poked (A or B).
     - fr_window_end (timestamp ISO 8601): End of the search window for a false response (first cue-port poke after the next trial initiation).
@@ -237,9 +370,9 @@ Single-Reward Protocol / False Response Information
 
 2. Behavioral Metric Calculation
 
-The metrics_analysis notebook runs the behavioral metric calculation. All functions used in this notebook are in the metrics_utils.py file. 
+The metrics_analysis notebook runs the behavioral metric calculation. The definitions live in `metric_analysis/metrics/`, one module per behavioural construct (`accuracy`, `false_alarm`, `sequence`, `hidden_rule`, `sampling`, `timing`), plus `movement.py` and `sing_rew_metrics.py`.
 
-To add another metric calculation, add the definition as an independent function, and call it within run_all_metrics. 
+To add another metric: write a pure `f(frame) -> value` core in the module for its construct, decorate it `@metric(frame="trials" | "position_data" | "trials+position_data")`, and give it a thin `*_session(results)` wrapper decorated `@session_metric(core)` if it should print. To have it saved to `metrics_*.json`, give the core a `title=` and add its name to `REPORT` in `metric_analysis/run.py`. 
 
 batch_run_all_metrics_with_merge can run on any combination of dates and subjids. Further, a protocol filter can be applied to only run on sessions under same protocol (within or across subjects). 
 
@@ -247,7 +380,7 @@ Results are saved per session and merged for all sessions analyzed, either withi
 
 Results are saved as a json and csv file combination with a summary txt file. 
 
-## Quality control (`src/hypnose/qc/`)
+## Quality control (`src/hypnose_behavior/qc/`)
 
 The `qc` package holds tools to run **after major changes** to confirm the analysis output is unaffected (or to mark what changed, if intended). Run them in the project conda environment.
 
@@ -255,19 +388,19 @@ The `qc` package holds tools to run **after major changes** to confirm the analy
 
 - **`regression.py`** — golden-master value regression. For a fixed set of coverage sessions (`sessions.yml`) it fingerprints `trial_data` (canonical CSV) and the metrics dict and md5-compares against stored baselines in `fixtures/`. It reads the read-only rawdata and writes only to a temp dir (never the server).
   ```
-  python src/hypnose/qc/regression.py            # compare against fixtures (exit 0 = GREEN)
-  python src/hypnose/qc/regression.py --generate # regenerate baselines (only when a change is intended)
+  python src/hypnose_behavior/qc/regression.py            # compare against fixtures (exit 0 = GREEN)
+  python src/hypnose_behavior/qc/regression.py --generate # regenerate baselines (only when a change is intended)
   ```
 
 - **`verify_scripts.py`** — runs the actual terminal scripts via subprocess and md5-checks their `trial_data` + metrics against the same fixtures (covers the CLI arg wiring, which the function-level regression does not).
   ```
-  python src/hypnose/qc/verify_scripts.py
+  python src/hypnose_behavior/qc/verify_scripts.py
   ```
 
 - **`check_imports.py`** — static checker: disassembles every function and flags any referenced global that isn't imported (catches missing-import NameErrors that only surface at call time). Run on the whole package or a single module/file.
   ```
-  python src/hypnose/qc/check_imports.py                                   # whole package
-  python src/hypnose/qc/check_imports.py hypnose.trial_classification.run  # one module
+  python src/hypnose_behavior/qc/check_imports.py                                   # whole package
+  python src/hypnose_behavior/qc/check_imports.py hypnose_behavior.trial_classification.run  # one module
   ```
 
 A RED regression means output changed — revert/fix, or, if the change was intended, regenerate the fixtures in a separate reviewed commit. Fixtures are only valid in the pinned environment recorded in `fixtures/env.json`.

@@ -1,0 +1,66 @@
+# Sessions used as golden-master regression cases for the restructuring.
+# Chosen for CODE-PATH coverage, not at random:
+#   - single_reward      : schema has non-rewarded sequences -> false_response path
+#                          (_get_single_reward_info -> True) + sing_rew_metrics
+#   - standard           : every candidate sequence rewarded at its final position
+#                          -> false-response logic never entered
+#   - odourdiscrimination: stage name contains "odourdiscrimination" -> special-case
+#                          path in detect_trials
+#   - multi_run          : >1 run for the date -> exercises merge_classifications
+#   - hidden_rule        : hiddenrule / location-suffixed protocol -> hidden-rule
+#                          detection, incl. _drop_final_hidden_rule_index
+#   - preseq             : pred-seq triples task
+#
+# Re-baselined 2026-08-03 (previous set dated 2026-07-03, ~41 commits stale). These
+# 8 sessions were re-run by hand on 2026-08-03, so their current output is known-good.
+#
+# Coverage of the set below (ses number in brackets):
+#   single_reward        sub-057 20260709 (ses-040)  singrew-task-stage7, 2/8 rewarded
+#   standard             sub-046 20260306 (ses-061)  quintuples, 240/240 rewarded
+#                        sub-053 20260520 (ses-020)  doubles, 10/10 rewarded
+#                        sub-061/056/059/048/040     all standard as well
+#   odourdiscrimination  sub-061 20260729 (ses-015)  bare "odourdiscrimination-stage4"
+#                        sub-056 20260427 (ses-004)  "Schemas\...\...-stage2" path form
+#   multi_run            sub-048 20260306 (ses-062)  3 runs, one with unreadable
+#                                                    SessionSettings (stage "Unknown")
+#                        sub-040 20251124 (ses-021)  3 runs
+#   hidden_rule          sub-048 20260306 (ses-062)  location0123, seq len 5
+#                        sub-040 20251229 (ses-046)  location0123, single run
+#                        sub-040 20251124 (ses-021)  location01234 -> final pos dropped
+#   preseq               sub-059 20260612 (ses-036)  preseq-triples-stage1
+#
+# Sequence lengths covered: 1 (odourdiscrimination), 3 (singrew / preseq), 5 (quintuples).
+#
+# Each restructuring step must keep trial_data + metrics md5 identical for all of these.
+sessions:
+  - subjid: "061"
+    date: "20260729"
+    label: odourdiscrimination_stage4
+  - subjid: "057"
+    date: "20260709"
+    label: single_reward_singrew_task_stage7
+  - subjid: "059"
+    date: "20260612"
+    label: preseq_triples_stage1
+  - subjid: "056"
+    date: "20260427"
+    label: odourdiscrimination_stage2_schema_path
+  - subjid: "046"
+    date: "20260306"
+    label: standard_quintuples_no_hidden_rule
+  # Carried over from the pre-2026-08-03 set (not re-run by hand). Kept because it is
+  # the only session covering sequenceLength 2, and the only one whose stage name says
+  # "singrew" while its schema rewards every sequence -- the guard that
+  # sing_rew_metrics.is_singrew_session() prefers the manifest flag over the name.
+  - subjid: "053"
+    date: "20260520"
+    label: standard_doubles_all_rewarded
+  - subjid: "048"
+    date: "20260306"
+    label: multi_run_hidden_rule_location0123
+  - subjid: "040"
+    date: "20251229"
+    label: hidden_rule_location0123_stage6
+  - subjid: "040"
+    date: "20251124"
+    label: hidden_rule_pos12345_finalpos_bug

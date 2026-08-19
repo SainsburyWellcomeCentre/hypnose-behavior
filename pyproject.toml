@@ -3,8 +3,8 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hypnose-analysis"
-version = "1.0.0"
+name = "hypnose-behavior"
+version = "2.0.0"
 description = "Analysis tools for hypnose experiments"
 readme = "README.md"
 requires-python = ">=3.9,<3.13"
@@ -46,9 +46,9 @@ where = ["src"]
 [tool.setuptools.package-data]
 # device_schemas carries an __init__.py (importlib.resources.files() cannot resolve a
 # namespace package on Python 3.9), so it is a package in its own right and its data
-# is keyed by that package name. The legacy `hypnose` key is kept as a belt-and-braces
-# fallback for older setuptools resolution.
-"hypnose.resources.device_schemas" = ["*.yml"]
-hypnose = [
+# is keyed by that package name. The top-level `hypnose_behavior` key is kept as a
+# belt-and-braces fallback for older setuptools resolution.
+"hypnose_behavior.resources.device_schemas" = ["*.yml"]
+hypnose_behavior = [
     "resources/device_schemas/*.yml",
 ]
