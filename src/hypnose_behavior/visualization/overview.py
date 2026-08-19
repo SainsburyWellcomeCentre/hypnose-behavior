@@ -4,9 +4,6 @@ from __future__ import annotations
 
 """The cross-metric overview figure.
 
-Carved out of ``visualization_utils.py`` in restructure_2 Phase 10 (follow-up
-Item 1). Source-only move -- no behaviour change.
-
 ``plot_behavior_metrics`` draws any registered metric by name, so it is the one
 plotter that is about no single behavioural construct. DECISIONS section 5: it
 computes through the registry and never reads ``metrics_*.json``.

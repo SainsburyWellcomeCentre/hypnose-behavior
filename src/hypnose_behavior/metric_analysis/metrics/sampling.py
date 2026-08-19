@@ -205,21 +205,12 @@ def poke_durations(position_data, *, aborted=False):
     `presentations` with the abort event excluded -- the same sources, and the
     same exclusion, the canonical `avg_sampling_time_*` metrics use.
 
-    **Filtered on `poke_source`, not on `poke_time_ms > 0`.** The four extractors
-    in `visualization/` each carried a `> 0` filter; measured across all 9 fixture
-    sessions it dropped nothing, because a ~0 ms position used to be omitted by
-    the writer entirely. Now that those positions are written, a bare `> 0` test
-    would exclude them but still average in the grace entries, whose durations are
-    synthesised rather than measured. `_real_pokes` excludes both, and leaves a
-    pre-marker session's value untouched.
-
-    **Carries `global_trial_id`** (Phase 7b.5), so a poke can be joined back to the
-    trial it belongs to -- without it `metrics_by_poke.parquet` would be a table of
-    anonymous observations, which is most of the point of writing it. Emitted via
-    `reindex` so the column set is the same four whether or not the frame carries
-    the id, rather than a function of what this session happened to have. Every
-    consumer selects by name (`_mean_sd_by` groups on `position`/`odor_name`), so
-    the extra column is additive for them.
+    - **Filter on `poke_source`, never on `poke_time_ms > 0`.** A bare `> 0` test still
+      averages in the grace entries, whose durations are synthesised rather than
+      measured. `_real_pokes` excludes both, and leaves a pre-marker session untouched.
+    - **Carries `global_trial_id`**, so a poke joins back to its trial. Emitted via
+      `reindex` so the column set is the same four whether or not the frame carries the
+      id, rather than a function of what this session happened to have.
     """
     empty = pd.DataFrame(columns=["global_trial_id", "position", "odor_name", "poke_time_ms"])
     if aborted:
@@ -244,11 +235,10 @@ def poke_durations(position_data, *, aborted=False):
 def _mean_sd_by(frame, key):
     """Mean, population SD and count of `poke_time_ms` per `key`.
 
-    `np.mean` / `np.std` on each group's array, deliberately **not** the pandas
-    reductions. Both are the population SD, but the two sum in a different order
-    and disagree in the last ULP -- measured, that moved 28 drawn values in
-    `plot_sampling_times_analysis` alone. This is the same "summation style is
-    part of the metric" trap the audit records for `avg_sampling_time_*`.
+    **`np.mean` / `np.std` on each group's array, never the pandas reductions.** Both
+    give the population SD, but they sum in a different order and disagree in the last
+    ULP, which moves drawn values in `plot_sampling_times_analysis`. Summation style is
+    part of the metric -- do not tidy this. See DECISIONS.md section 1.
     """
     if frame.empty:
         return pd.DataFrame(columns=["mean", "sd", "n"])
@@ -264,7 +254,7 @@ def _mean_sd_by(frame, key):
 
 @metric(frame="position_data")
 def poke_duration_by_position(position_data, *, aborted=False):
-    """Mean and population SD of `poke_time_ms` per position. Checklist 3."""
+    """Mean and population SD of `poke_time_ms` per position."""
     return _mean_sd_by(poke_durations(position_data, aborted=aborted), "position")
 
 
@@ -272,7 +262,7 @@ def poke_duration_by_position(position_data, *, aborted=False):
 def poke_duration_by_odor(position_data, *, aborted=False):
     """Mean and population SD of `poke_time_ms` per odor.
 
-    Checklist 4 in its `aborted=True` form: the canonical
+    In its `aborted=True` form the canonical
     `avg_sampling_time_aborted_sequence` pools every aborted trial into one
     scalar, and no per-odor version existed. With `aborted=False` it is the
     per-odor completed-trial mean, i.e. `avg_sampling_time_odor_x` with an SD
@@ -283,7 +273,7 @@ def poke_duration_by_odor(position_data, *, aborted=False):
 
 @metric(frame="position_data")
 def trial_poke_span(position_data):
-    """Wall-clock span of a trial's odor-sampling phase, in ms. Checklist 17.
+    """Wall-clock span of a trial's odor-sampling phase, in ms.
 
     `poke_odor_end` at the deepest position minus `poke_odor_start` at position 1.
     Distinct from `trial_poke_total`: the span contains the travel between ports,
@@ -313,7 +303,7 @@ def trial_poke_span(position_data):
 
 @metric(frame="position_data")
 def trial_poke_total(position_data):
-    """Sum of `poke_time_ms` across a trial's positions, in ms. Checklist 21.
+    """Sum of `poke_time_ms` across a trial's positions, in ms.
 
     Related to `avg_sampling_time_completed_sequence` but per trial rather than a
     session mean.

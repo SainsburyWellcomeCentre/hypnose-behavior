@@ -213,12 +213,11 @@ def response_rate_session(results):
 def rolling_reward_fraction(trials, window, *, step=1, include_avg=False, hr_only=False):
     """Rolling fraction of trials rewarded, divided by the **window**.
 
-    Checklist 2, and deliberately not `over_windows(decision_accuracy, ...)`.
+    Deliberately not `over_windows(decision_accuracy, ...)`.
     The denominator is the window size, so timeouts -- and, unless the caller has
-    already dropped them, aborts -- sit inside it. That is the audit's finding 12:
-    the curve differs visibly from a rolling `decision_accuracy`, which is why
-    this is a separately named metric rather than a granularity of an existing
-    one.
+    already dropped them, aborts -- sit inside it. The curve differs visibly from a
+    rolling `decision_accuracy`, which is why this is a separately named metric rather
+    than a granularity of an existing one.
 
     `include_avg` back-fills the warm-up, completing a not-yet-full window with
     the frame's overall rate so the series starts at the first trial instead of

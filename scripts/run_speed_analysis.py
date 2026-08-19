@@ -8,9 +8,9 @@ that session's `trial_data.parquet`, from SLEAP tracking plus the saved trial
 classification -- so run trial classification first.
 
 This is the only place the speed threshold is computed. The movement plotters
-(`visualization/movement/speed.py`) **read** the file it writes and report the
-session when it is absent; they no longer recompute it, because two derivations of
-one quantity is how two figures come to disagree (`docs/DECISIONS.md` section 14).
+(`visualization/movement/speed.py`) **read** the file it writes and report the session
+when it is absent; they must never recompute it, because two derivations of one quantity
+is how two figures come to disagree (`docs/DECISIONS.md` sections 14 and 35).
 
 Examples
 --------

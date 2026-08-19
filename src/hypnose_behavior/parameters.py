@@ -1,59 +1,28 @@
 """The genuinely hardcoded knobs, in one place, and stamped into every manifest.
 
-A leaf, in the sense of ``DECISIONS.md`` section 3 (``frames.py``) and section 20
-(``io/protocol_schema.py``): **this module imports nothing from the package** -- standard
-library only. Every layer stands on it -- ``trial_classification.windows``,
-``trial_classification.outcome``, ``utils.helpers`` and ``io.save_results`` -- so the day
-it imports back, ``trial_classification -> parameters`` and ``utils -> parameters`` become
-real cycles. Keep it that way.
-
-What belongs here
------------------
-A value that is **hardcoded in this code-base and decides an output**. There are two, and
-the shortness of that list is the measurement, not an omission (follow-up plan, item 4).
-
-What does not, and why each was left where it is
-------------------------------------------------
-* **Unit conversions** -- ``* 1000.0`` for milliseconds, everywhere. Not a parameter; it
-  is what the unit *is*. Centralising it would invite changing it.
-* **Per-session schema values** -- ``sample_offset_time_ms``,
-  ``minimum_sampling_time_ms_by_odor``, ``response_time_window_sec``,
-  ``isSingleRewardProtocol``. These are read per session from the task schema by
-  ``trial_classification/params.py`` and recorded in ``summary.json``'s ``params`` block.
-  They **legitimately differ between sessions**, so a single central value would be wrong
-  for most of them. That block and this module answer different questions -- "what was
-  this session configured with" against "what did the analysis code apply" -- and merging
-  them would make the two indistinguishable to a reader.
-* **``modelling/switchpoint/``'s constants** (``ACF_MAX_LAG``, ``N_STARTS``,
-  ``SWITCH_THRESHOLD``, ...) -- a self-contained cluster belonging to one model, not to
-  the scoring pipeline.
-
-The stamp, and what it is for
------------------------------
 ``scoring_parameters()`` is written to ``manifest.json`` as ``analysis_parameters``, so
-"what was this session scored with" is answerable from the file itself -- section 19's
-rule that the manifest is the audit surface. It sits in the manifest and **not** in
-``summary.json``'s ``params``, for the reason above, and under its own key because
-``manifest["session"]["runs"][].parameters`` already means the per-run *schema*
-parameters.
+"what was this session scored with" is answerable from the file itself.
 
-The stamp is built **default-in**: every public module-level constant here is stamped
-unless it is named in ``_NOT_SCORING``. That direction is deliberate. Default-out -- a
-hand-written list of what to stamp -- is section 27's trap, where a declaration wider (or
-here, narrower) than the behaviour it describes silently stops matching: a knob added to
-this file would be applied to every session and recorded on none of them. Excluding one is
-therefore an explicit act that carries its reason.
-
-> **Edit this file; do not assign to it at runtime.** Importers bind these names by value
-> at import time, so a runtime override of ``parameters.PRE_ODOR_GRACE_MS`` would be
-> reported by the stamp without being applied by the code that already imported it. A
-> stamp that disagrees with what ran is worse than no stamp.
-
-> **The stamp is asserted by no gate.** ``qc/_common.fingerprint_session`` reads
-> ``trial_data``, the metrics dict and the side tables, and deliberately never the
-> manifest -- section 19 relies on that, so that a per-run commit stamp cannot cause a
-> spurious RED. The knobs' *values* are gated indirectly (below); the stamp's continued
-> existence is not. See ``DECISIONS.md`` section 31.
+- **This module imports nothing from the package** -- standard library only.
+  ``trial_classification.windows`` / ``.outcome``, ``utils.helpers`` and
+  ``io.save_results`` all stand on it, so the day it imports back they become real
+  cycles. See DECISIONS.md sections 3 and 20.
+- **What belongs here:** a value hardcoded in this code-base that decides an output.
+  Not unit conversions (``* 1000.0`` is what the unit *is*), not per-session schema
+  values (they legitimately differ per session and live in ``summary.json``'s
+  ``params``), not ``modelling/switchpoint/``'s constants (they belong to one model),
+  and not ``scripts/run_speed_analysis.py``'s flags (chosen per run, and applied after
+  the manifest is written). See DECISIONS.md section 35.
+- **The stamp is built default-in:** every public constant here is stamped unless named
+  in ``_NOT_SCORING``. A hand-written list of what *to* stamp lets a new knob be applied
+  to every session and recorded on none.
+- **Edit this file; never assign to it at runtime.** Importers bind these names by value
+  at import time, so an override would be *reported* by the stamp without being
+  *applied* by code that already imported it.
+- **No gate asserts the stamp.** ``qc/_common.fingerprint_session`` deliberately never
+  reads the manifest. The knobs' *values* are gated through ``trial_data`` and
+  ``position_data``; the block's continued existence is not. Revisit this the moment a
+  third knob is added. See DECISIONS.md section 31.
 """
 from __future__ import annotations
 

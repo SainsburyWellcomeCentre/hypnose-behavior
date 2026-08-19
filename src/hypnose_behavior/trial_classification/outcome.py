@@ -1,29 +1,17 @@
 """The one rule for what a completed trial's outcome is.
 
-A leaf, in the sense of ``DECISIONS.md`` section 3: **this module imports nothing from the
-package except the root-level leaves** -- here ``parameters.py``, which imports nothing at
-all. Otherwise the standard library. That is what lets ``io/save_results.py`` reach it
-without turning ``io -> trial_classification`` into a cycle. Keep it that way.
+Three sites call it -- ``classify_trials``, ``analyze_response_times`` and
+``save_results._derive_outcome`` -- and each keeps what genuinely differs between them.
 
-Before Phase 6a, rewarded/unrewarded/timeout was decided in three places that shared no code:
-``classify_trials`` (which ``completed_sequence_*`` frame a trial is appended to),
-``analyze_response_times`` (the ``response_time_category`` column) and
-``save_results._derive_outcome`` (re-derived from the saved counts).
-
-`qc/outcome_agreement.py` measured them against each other before they were merged, over 1,731
-trials on all 9 regression sessions. **The rule never conflicted** -- see ``DECISIONS.md``
-section 14. So this module is the rule, and the three call sites keep exactly the parts that
-genuinely differ between them:
-
-* **the windows**, which are protocol-specific -- the caller counts supply pulses and reward
-  pokes over whatever span its protocol says, and passes counts;
-* **the sequence**, which is resolved differently by each caller -- ``sequence_rewarded`` is an
-  *input* here, never recomputed. The one measured conflict was a sequence difference caused by
-  the 0 ms positions bug (section 10 / Phase 6b), not by the rule;
-* **the coverage**, i.e. when a caller declines to name a category at all.
-  ``analyze_response_times`` emits one only when it could also compute a response time and
-  counts the rest in ``failed_calculations``; that stays at the call site, because folding it in
-  would move ~190 trials into the accuracy denominators.
+- **This module imports nothing from the package except the root-level leaves**
+  (``parameters.py``). That is what lets ``io/save_results.py`` reach it without turning
+  ``io -> trial_classification`` into a cycle. See DECISIONS.md section 3.
+- ``sequence_rewarded`` is an **input**, never recomputed here: each caller resolves its
+  own sequence.
+- Each caller keeps its own **windows** (it counts and passes counts) and its own
+  **coverage**. ``analyze_response_times`` names a category only when it can also compute
+  a response time; folding that in would move ~190 trials into the accuracy denominators.
+  See DECISIONS.md section 14.
 """
 from __future__ import annotations
 
@@ -82,10 +70,9 @@ def latency_label(latency_ms, response_time_ms_window, prefix):
 
     One response window is "in", up to ``LATE_LATENCY_WINDOW_MULTIPLIER`` windows is "out",
     beyond that is "late" -- the window itself is the session's own, read from its task
-    schema, and only the multiplier is hardcoded (``parameters.py``). Shared by
-    the false-response labels on completed no-go trials (``FR``) and the false-alarm labels on
-    aborted and non-initiated trials (``FA``) -- the same arithmetic was written out three times
-    before Phase 6a.
+    schema, and only the multiplier is hardcoded (``parameters.py``). Shared by the
+    false-response labels on completed no-go trials (``FR``) and the false-alarm labels on
+    aborted and non-initiated trials (``FA``).
 
     A ``None`` window means no threshold could be resolved, and everything falls to ``_late``.
     """

@@ -1,10 +1,8 @@
 """Figure destinations for the behavioural derivatives tree, plus the shared
 styling/saving re-exported from hypnose-helpers.
 
-The styles, `save_figure` and the small figure utilities moved to
-`hypnose_helpers.viz` during restructure_2 Phase 2a; directory discovery moved to
-`hypnose_helpers.io.layout` in Phase 2b. What stays here is the part neither of them
-can know: which *scope* of figure belongs at which level of the tree.
+What lives here is the part hypnose-helpers cannot know: which *scope* of figure
+belongs at which level of the tree.
 """
 from __future__ import annotations
 
@@ -25,10 +23,9 @@ from hypnose_helpers.viz.metadata import read_figure_metadata  # noqa: F401  (re
 from hypnose_helpers.provenance import provenance as _provenance
 
 
-# NOTE (restructure_2 Phase 2a): this module no longer applies a style at import.
-# Two packages mutating global rcParams at module scope means whoever imports last
-# silently wins -- which is how this collided with hypnose-somnotate's vendored
-# configuration.py. Apply a style explicitly at the top of a notebook or script:
+# This module deliberately applies NO style at import: two packages mutating global
+# rcParams at module scope means whoever imports last silently wins. Apply a style
+# explicitly at the top of a notebook or script:
 #
 #     use_style()                  # nature (the default)
 #     use_style("presentation")    # presentation (also caps y-ticks)
@@ -45,13 +42,9 @@ from hypnose_helpers.provenance import provenance as _provenance
 # default hypnose-behavior-analysis layout below.
 _FIGURE_DIR_RESOLVER = None
 
-# Subdirectory for figures drawn from SLEAP tracking. Promoted here from
-# `visualization/movement_analysis_utils.py` when Phase 10 split that file into
-# `visualization/movement/`: four of the resulting modules use it, so by
-# DECISIONS section 3 it becomes a leaf rather than a peer import. This module is
-# the right leaf because it already owns "which scope of figure belongs at which
-# level of the tree", and because every one of those modules already imports
-# `save_figure` from here -- so the promotion adds no import edge.
+# Subdirectory for figures drawn from SLEAP tracking. Lives here rather than in
+# `visualization/movement/` so the four modules using it share a leaf instead of
+# importing a peer; they already import `save_figure` from here, so it costs no edge.
 MOVEMENT_FIGURES_SUBDIR = "movement_figures"
 
 
@@ -99,10 +92,9 @@ def save_figure(fig, save_name: str, *, subjids, dates=None, subdir=None,
     Directory resolution, most specific first: an explicit `fig_dir` wins; then a resolver
     registered by a consuming repo; otherwise this repo's subject/session layout.
 
-    Provenance is captured *here*, and this module is added to the skip list, because
-    this function is a wrapper: helpers' own frame walk would stop at it, and capturing
-    without the skip would stop at it too. Excluding this module is what makes the
-    record name the plotting function that actually called us (restructure_2 Phase 2c).
+    - This is a `save_figure` wrapper, so it MUST pass `skip_modules=(__name__,)`.
+      Without it the provenance walk stops at this frame and the record names this
+      function instead of the plotter that called it. See DECISIONS.md section 9.
     """
     if fig_dir is None:
         if _FIGURE_DIR_RESOLVER is not None:

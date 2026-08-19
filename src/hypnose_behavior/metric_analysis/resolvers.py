@@ -4,29 +4,22 @@ from __future__ import annotations
 
 """Granularity resolvers: apply a metric core per group, or over a moving window.
 
-restructure_2 Phase 4a. Every canonical metric used to be `f(results) -> one
-session-level number`, so nothing could reuse it at another granularity and each
-plotter re-derived the formula by hand -- the audit's `VARIANT` class. With the
-D0 cores in place (`f(trials) -> value`) every granularity becomes a call:
+Because every metric core is `f(frame) -> value`, a granularity is a call rather
+than a hand-derived reimplementation in a plotter:
 
     by_group(decision_accuracy, trials, "last_odor")            # per odor
     by_group(decision_accuracy, trials, "date")                 # per day
     over_windows(decision_accuracy, trials, window=30)          # rolling
 
-**Deliberately not a dispatcher.** There is no `get_metric(name, granularity=)`:
-that is the same god-function failure the plan rejects for `plot_metric(kind,
-ses)`, accumulating kwargs for every metric it supports. A uniform core signature
-plus these two resolvers gives the same reach with none of it.
-
-**Two limits, both real** (audit, "Should metric_analysis grow a time-resolved
-helper?"):
-
-1. A variant whose *denominator changes with granularity* cannot be expressed
-   here. The rolling reward fraction divides by the window size, not by
-   rewarded+unrewarded, so `over_windows(decision_accuracy, ...)` draws a
-   visibly different curve; it stays a separately named metric.
-2. Per-position and per-odor metrics need `position_data` first -- they group on
-   a key that currently lives inside a JSON blob.
+- **Not a dispatcher.** No `get_metric(name, granularity=)` -- that accumulates
+  kwargs for every metric it supports. A uniform core signature plus these two
+  resolvers gives the same reach without it.
+- A variant whose **denominator changes with granularity** cannot be expressed here.
+  The rolling reward fraction divides by the window size rather than by
+  rewarded+unrewarded, so it stays a separately named metric.
+- **Anything collecting a metric's contributions must reduce them the way the metric
+  does** -- `metrics.common.reduce_rate` is public for exactly that. A rate is not a
+  per-trial quantity. See DECISIONS.md section 1.
 """
 
 from typing import Callable, Optional
@@ -54,8 +47,8 @@ def by_group(metric: Callable, trials: pd.DataFrame, key, *,
     needs to show counts alongside the rate.
 
     The metric is applied to a *slice of the frame*, so a rate is recomputed as
-    ``num.sum() / den.sum()`` within the group -- never averaged from per-trial
-    values, which is the error finding 12 describes.
+    ``num.sum() / den.sum()`` within the group -- **never averaged from per-trial
+    values**. See DECISIONS.md section 1.
     """
     if trials.empty:
         return pd.Series(dtype=float)

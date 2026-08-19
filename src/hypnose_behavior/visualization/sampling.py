@@ -4,9 +4,6 @@ from __future__ import annotations
 
 """Sampling-time and poke-duration figures.
 
-Carved out of ``visualization_utils.py`` in restructure_2 Phase 10 (follow-up
-Item 1). Source-only move -- no behaviour change.
-
 DECISIONS section 1: ``plot_sampling_times_analysis``'s panels 1-4 depend on
 ``_mean_sd_by`` using ``np.mean``/``np.std`` rather than the pandas reductions.
 Summation style is part of the quantity -- do not tidy it.
@@ -68,9 +65,9 @@ def plot_sampling_times_analysis(
     Plot sampling times (poke durations) by position and by odor for completed and aborted trials.
 
     Every number drawn here comes from `metric_analysis`: `poke_durations` for the
-    scattered raw values, `poke_duration_by_{position,odor}` for the mean ± SD
-    markers and for the per-session series in the bottom row. The two blob
-    extractors this used to carry were finding 5 of the metric audit.
+    scattered raw values, `poke_duration_by_{position,odor}` for the mean ± SD markers
+    and for the per-session series in the bottom row. **Do not extract poke durations
+    here** -- that reintroduces a second definition of the same quantity.
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
@@ -413,9 +410,8 @@ def plot_poke_duration_by_position(
     - Aborted trials (``is_aborted == True``): from the ``in_presentations`` rows,
       excluding the abort event; keyed by position.
 
-    (Those were the ``position_poke_times`` and ``presentations`` JSON columns of
-    ``trial_data`` until Phase 7b.4b; the provenance flags name the same two
-    sources -- ``DECISIONS.md`` section 2.)
+    (The provenance flags name which per-position source each reads; filtering on the
+    one matching the facts you want is required -- ``DECISIONS.md`` section 2.)
 
     Dots are horizontally jittered around each x-tick, with a black mean line and
     SD error bars — mirroring :func:`plot_position_completion_rate`.
@@ -797,11 +793,10 @@ def plot_poke_duration_by_odor(
     def _extract_odor_poke_ms(td, results_dir):
         """``{odor_letter: [poke_ms, ...]}`` for the requested odors, completed trials.
 
-        VARIANT 9 of the metric audit: this used to walk ``presentations`` with a
-        ``poke_ms > 0`` filter — the fourth copy of finding 5's extractor. Both
-        divergences were measured to be no-ops, so it now reads the canonical
-        source. Pooling these raw samples into the A+B / Hidden Rule / Other
-        series below is a display grouping, and stays here.
+        Reads the canonical ``poke_durations``; **do not walk ``presentations`` with a
+        ``poke_ms > 0`` filter instead**, which averages in the synthetic grace entries.
+        Pooling these raw samples into the A+B / Hidden Rule / Other series below is a
+        display grouping and stays here.
         """
         out: dict = {}
         pokes = poke_durations(_load_position_data(results_dir, td), aborted=False)

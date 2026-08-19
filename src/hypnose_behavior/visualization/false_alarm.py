@@ -4,13 +4,9 @@ from __future__ import annotations
 
 """False-alarm and abortion figures.
 
-Carved out of ``visualization_utils.py`` in restructure_2 Phase 10 (follow-up
-Item 1). Source-only move -- no behaviour change.
-
 ``_fa_stat_count`` / ``_fa_stat_rate`` stay here rather than becoming leaves:
-``plot_abortion_and_fa_rates`` is their only caller, and DECISIONS section 3's
-rule promotes what two modules share, not what one module uses twice. Their
-string branches have been unreachable since Phase 5 (DECISIONS section 5).
+``plot_abortion_and_fa_rates`` is their only caller, and the promote-to-a-leaf rule
+is about what two modules share, not what one module uses twice.
 """
 
 import pandas as pd
@@ -51,13 +47,11 @@ from hypnose_behavior.visualization.prep import _computed_metrics
 def _fa_stat_count(item, key):
     """A count out of `fa_abortion_stats`.
 
-    The legacy `"5 (0.50)"` string form is gone: Phase 4b made the metric
-    numeric (the audit's finding 3), and this plotter no longer reads
-    `metrics_*.json` at all, so the only shape that reaches here is the one the
-    registry computes -- counts `int`, rates `float`. `DECISIONS.md` section 5.
+The only shape reaching here is what the registry computes -- counts `int`,
+    rates `float` -- because this plotter computes rather than reading `metrics_*.json`.
 
-    `bool` is excluded before the numeric test because it is a subclass of
-    `int`, and `True` would otherwise read as the count 1.
+    `bool` is excluded before the numeric test because it is a subclass of `int`, and
+    `True` would otherwise read as the count 1.
     """
     val = item.get(key)
     if isinstance(val, bool) or not isinstance(val, (int, float)):
@@ -230,9 +224,7 @@ def plot_abortion_and_fa_rates(
                         continue
                     pos = item.get("Position")
 
-                    # The computed shape carries "Abortion Rate" on `by_position`
-                    # rows; the "Abortion Rate Value" probe that used to come
-                    # first went with the legacy string form (DECISIONS.md 5).
+                    # The computed shape carries "Abortion Rate" on `by_position` rows.
                     rate_val = _fa_stat_rate(item, "Abortion Rate")
                     if rate_val is None:
                         rate_val = _fa_stat_rate(item, "FA Abortion Rate")
@@ -266,13 +258,9 @@ def plot_abortion_and_fa_rates(
                         "rate": float(rate)
                     })
 
-            # Abortion rate per position, only when `fa_abortion_stats` gave none
-            # -- which is what this block's comment always claimed and the code
-            # never did. It used to append a *second*, duplicate set of position
-            # rows on every session; that stayed invisible only because JSON
-            # stringifies dict keys, so `int("1.0")` raised and the bare `except`
-            # below swallowed all of it. Computing the metric yields real float
-            # keys, `int(1.0)` succeeds, and the duplicates become visible.
+            # Abortion rate per position, **only when `fa_abortion_stats` gave none**.
+            # Without the `have_position_rates` guard this appends a second, duplicate
+            # set of position rows per session, which the bare `except` below hides.
             ab_pos_data = metrics.get("abortion_rate_positionX", {}) if not have_position_rates else {}
             if isinstance(ab_pos_data, dict):
                 for pos, rate in ab_pos_data.items():
@@ -777,9 +765,9 @@ def plot_false_alarm_rate_by_position(
                 continue
             views = _load_trial_views(results_dir)
             td = views["trial_data"]
-            # Guarded on `presentations` until Phase 7b.4b, though the metric never read
-            # that blob -- its denominator is `position_data`. Kept, it would have made
-            # this figure silently blank once the column went.
+            # Deliberately not guarded on a `presentations` column: the metric takes its
+            # denominator from `position_data`, and a guard on a column nothing here reads
+            # would blank this figure the day that column goes.
             if td.empty:
                 continue
 

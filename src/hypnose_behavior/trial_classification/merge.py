@@ -1,8 +1,7 @@
 """Merging per-run trial classifications into a single session-level result.
 
-Extracted from trial_classification/classification_utils.py during the restructuring
-(Phase 3). Pure move -- behaviour unchanged (to be re-verified by the regression
-harness once the data mount is available).
+Concatenates each run's frames, stamps `run_id` and renumbers trials continuously
+across the session.
 """
 from __future__ import annotations
 

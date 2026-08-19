@@ -164,8 +164,7 @@ def _last_poke_out(row, entries):
     poke-out time is available we return NaT so the trace is skipped rather than
     started at the wrong place.
 
-    ``entries`` is this trial's ``position_data`` rows (Phase 7b.4b; it used to
-    parse the ``position_poke_times`` blob off ``row``).
+    ``entries`` is this trial's ``position_data`` rows.
     """
     ends = [_naive_dt(v.get("poke_odor_end")) for v in (entries or [])]
     ends = [t for t in ends if pd.notna(t)]
@@ -355,10 +354,9 @@ def plot_category_traces(
         tracking["time"] = _naive_dt(tracking["time"])
         tracking = smooth_xy(tracking, smooth_window)
 
-        # `behavior` is a `SessionResults`, so `position_data` is already there --
-        # derived lazily on first access, and a read of the side-table from step 4.
-        # `in_poke_times` matches `position_poke_times`, the blob this read before
-        # Phase 7b.4b (`DECISIONS.md` section 2).
+        # `behavior` is a `SessionResults`, so `position_data` resolves on first
+        # access. `in_poke_times` is the provenance flag matching the poke facts this
+        # reads -- section 2.
         pokes_by_trial = position_entries_by_trial(
             behavior.get("position_data"), "in_poke_times")
 

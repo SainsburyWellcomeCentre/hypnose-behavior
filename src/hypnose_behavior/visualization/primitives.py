@@ -4,25 +4,21 @@ from __future__ import annotations
 
 """Display primitives: the arithmetic a *figure* does, not the arithmetic a metric does.
 
-restructure_2 Phase 5. The standing rule from the Phase 4 audit is that taking the
-mean +/- SEM of a metric across the subjects or sessions on a plot is a property of
-the figure, not of the data -- so it belongs here and never in `metric_analysis`.
-It was written longhand about 20 times across `visualization/`.
+Taking the mean +/- SEM of a metric across the subjects or sessions on a plot is a
+property of the **figure**, not of the data, so it lives here and never in
+`metric_analysis`.
 
-**These may roll or average *values*; they must never re-absorb a rate reduction.**
-A rolling rate is `sum(numerator) / sum(denominator)` over the window, never the mean
-of per-trial values -- that silently divides by the window size instead of by the
-trials that actually counted. That reduction lives in
-`metric_analysis.resolvers.over_windows` and stays there. See `docs/DECISIONS.md`
-section 1.
-
-On NaN, which is where the longhand versions quietly disagreed. Three idioms were in
-use, and while `Series.sem()`, `Series.std(ddof=1)/sqrt(len(s))` and
-`np.std(v, ddof=1)/sqrt(len(v))` are bit-identical on clean data (measured: 0
-disagreements in 20,000 random samples on the pinned pandas/numpy), they diverge as
-soon as a NaN appears: the first divides by the count of *finite* values, the second
-by the full length, and the third propagates NaN. Only the first is right, so that is
-what `mean_sem` does.
+- **These may roll or average *values*; they must never re-absorb a rate reduction.**
+  A rolling rate is `sum(numerator) / sum(denominator)` over the window, never the mean
+  of per-trial values. That reduction belongs to
+  `metric_analysis.resolvers.over_windows`. See DECISIONS.md section 1.
+- **`mean_sem` drops non-finite values before dividing.** The three longhand SEM idioms
+  are bit-identical on clean data and diverge the moment a NaN appears -- only dividing
+  by the count of *finite* values is right. See DECISIONS.md section 12.
+- **A new plotter module must be added to `plot_regression`'s `MODULES`**, or its cases
+  read as "not found", which is untestable rather than green.
+- **A primitive that calls `save_figure` needs `skip_modules=(__name__,)`** or an
+  explicit `provenance=`. See DECISIONS.md section 9.
 """
 
 import numpy as np

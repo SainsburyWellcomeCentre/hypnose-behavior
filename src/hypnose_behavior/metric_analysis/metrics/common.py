@@ -10,12 +10,10 @@ rather than in whichever module happens to define it first.
 
 **Rate metrics expose their numerator and denominator *contributions* as
 per-trial Series**, because a rate is not a per-trial quantity. Storing one value
-per trial and taking a rolling mean gives ``rewarded / window_size`` -- a
-denominator silently containing timeouts and aborts. That is finding 12 of the
-audit: it is exactly why ``pred_seq.performance`` and
-``plot_decision_accuracy_rolling_average`` disagree today. Reducing
-``num.sum() / den.sum()`` over any slice -- what ``reduce_rate`` does -- is
-correct at every granularity, and two cumulative sums make a rolling window O(1).
+per trial and taking a rolling mean gives ``rewarded / window_size`` -- a denominator
+silently containing timeouts and aborts, which is how two rolling accuracies come to
+disagree. Reducing ``num.sum() / den.sum()`` over any slice -- what ``reduce_rate``
+does -- is correct at every granularity. See DECISIONS.md section 1.
 
 **``_position_rows`` filters on a provenance flag, always.** The three JSON blobs
 ``frames.build_position_data`` expands do not carry the same positions:
@@ -37,21 +35,12 @@ __all__ = ["reduce_rate"]
 def _is_truthy(val):
     """Is a flag column's cell true, however the round-trip stored it?
 
-    **The one truthiness rule for the package** (reconciled 2026-08-07, Phase
-    4b). `hr_odor_associations` arrived from `visualization/` in 4a testing
-    `isin(["true", "1", "1.0"])`, i.e. accepting the string `"1.0"`, which this
-    rejected -- so the two disagreed on exactly the sessions read through the
-    CSV fallback, where a float flag column renders `True` as `"1.0"`. Measured
-    on all 9 fixture sessions they never actually disagree (both flag columns
-    arrive as native `bool` through parquet), so the divergence was latent
-    rather than active.
+**The one truthiness rule for the package.** A string that parses as a
+    non-zero number is as true as the number itself.
 
-    Resolved *here* rather than by narrowing the other, because the
-    inconsistency was this function's own: it already treats the float `1.0` as
-    true and rejected only its string form. The numeric branch below is what the
-    word set was missing -- a string that parses as a non-zero number is as true
-    as the number itself. That strictly widens what is accepted, so no caller
-    can lose a row it used to keep.
+    **Use this whenever a flag column is added; do not write a second rule, and do not
+    narrow it** -- widening cannot lose a row, narrowing silently can. See DECISIONS.md
+    section 6.
     """
     if isinstance(val, bool):
         return val

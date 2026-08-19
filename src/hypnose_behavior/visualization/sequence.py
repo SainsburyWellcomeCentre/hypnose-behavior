@@ -4,9 +4,6 @@ from __future__ import annotations
 
 """Sequence-position figures.
 
-Carved out of ``visualization_utils.py`` in restructure_2 Phase 10 (follow-up
-Item 1). Source-only move -- no behaviour change.
-
 DECISIONS section 10: ``presentations`` answers "what did the rig deliver" and
 ``poke_source`` answers "what did the animal sample". A per-position denominator
 here counts the first.

@@ -4,9 +4,6 @@ from __future__ import annotations
 
 """Spatial trajectory figures from SLEAP tracking.
 
-Carved out of ``movement_analysis_utils.py`` in restructure_2 Phase 10
-(follow-up Item 1). Source-only move -- no behaviour change.
-
 DECISIONS section 13: the ``_infer_port`` / ``_last_poke_out`` /
 ``_extract_segment`` helpers in here and in ``sing_rew_movement`` are
 **different rules wearing the same name** -- merging ``_infer_port``'s variants
@@ -875,11 +872,8 @@ def plot_trial_traces_by_mode(
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
     def _odor_letter(val):
-        """Canonical odor-token normaliser, plus this figure's label for a
-        missing odor. Measured over every odor value in 15 sessions, the two
-        agree on all of them except NaN -- and "Unknown" vs "NAN" only ever
-        reaches a label, never a branch. The relabelling stays here rather than
-        moving into `metric_analysis` (audit finding 14)."""
+        """Canonical odor-token normaliser, plus this figure's label for a missing
+        odor. The relabelling is a display choice and stays in the plotter."""
         return "Unknown" if pd.isna(val) else odor_letter(val)
 
     def _infer_port_from_response(row):
@@ -940,11 +934,9 @@ def plot_trial_traces_by_mode(
     def _last_poke_out_by_position(row, entries):
         """The **last entry by position**, null accepted -- not a scan back.
 
-        `entries` is this trial's `position_data` rows sorted by position (Phase
-        7b.4b; it used to parse the `position_poke_times` blob off `row`). The rule
-        is deliberately unchanged: when there are entries, the last one's
-        `poke_odor_end` is the answer *even when it is null*, and only a trial with
-        no entries at all falls through to the row-level columns.
+        `entries` is this trial's `position_data` rows sorted by position. When there
+        are entries, the last one's `poke_odor_end` is the answer **even when it is
+        null**; only a trial with no entries at all falls through to the row columns.
         """
         if entries:
             return pd.to_datetime(entries[-1].get("poke_odor_end"), errors="coerce")
@@ -1063,8 +1055,8 @@ def plot_trial_traces_by_mode(
                     td[c] = pd.to_datetime(td[c], errors="coerce")
         else:
             td = pd.DataFrame()
-        # `in_poke_times` is the flag matching `position_poke_times`, the blob this read
-        # before Phase 7b.4b (`DECISIONS.md` section 2).
+        # `in_poke_times` is the provenance flag matching the poke facts this reads;
+        # an unfiltered view carries positions the poke source never had -- section 2.
         pokes_by_trial = position_entries_by_trial(
             _load_position_data(results_dir, td), "in_poke_times")
 

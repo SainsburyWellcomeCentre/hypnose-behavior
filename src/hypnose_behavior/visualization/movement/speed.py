@@ -4,21 +4,17 @@ from __future__ import annotations
 
 """Cue-port speed figures from SLEAP tracking.
 
-Carved out of ``movement_analysis_utils.py`` in restructure_2 Phase 10
-(follow-up Item 1). Source-only move -- no behaviour change.
-
 Both **read** ``speed_analysis.parquet``, written by
 ``metric_analysis.movement.speed_analysis.compute_speed_analysis``. Neither
 computes anything: a session without that file is reported and skipped, and the
 threshold is the one the file records rather than one derived here.
 
-That last part was only half true until 2026-08-19. Phase 10 removed
-``plot_traces_with_speed_threshold``'s recompute but left
-``plot_epoch_speeds_by_condition`` deriving baseline mu/sigma from the stored
-speeds and applying **its own** alpha/beta -- so it drew a threshold line that
-could disagree with the ``latency_s`` and ``speed_threshold_time`` on the same
-axes, which is invisible in any output (audit finding 7). See ``DECISIONS.md``
-section 35.
+- **Never re-derive the threshold here.** A plotter that computes its own
+  alpha/beta draws a line that can disagree with the ``latency_s`` and
+  ``speed_threshold_time`` on the same axes, and nothing in any output would say
+  so. See DECISIONS.md section 35.
+- A file written without the threshold columns gets **no** baseline or threshold
+  lines and a warning -- absent means unknown, never today's default.
 """
 
 import pandas as pd
@@ -414,13 +410,10 @@ def plot_traces_with_speed_threshold(
         def fa_filter_fn(lbl):
             return str(lbl).lower() in fa_set if pd.notna(lbl) else False
 
-    # `mode` used to lead this suffix, so saved names read `..._mean_fa_time_in_...`.
-    # It is gone with the recompute, and dropping it from the name is the point
-    # rather than a side effect: the aggregation mode is now a property of the
-    # saved `speed_analysis.parquet`, chosen when that file was computed. A figure
-    # that no longer aggregates anything cannot know it, so keeping it in the
-    # filename would label the output with a mode that may not be the one the
-    # thresholds actually came from.
+    # **`mode` is deliberately absent from this suffix.** The aggregation mode is a
+    # property of the saved `speed_analysis.parquet`, chosen when that file was
+    # computed; a figure that aggregates nothing cannot know it, so naming it here
+    # would label the output with a mode the thresholds need not have come from.
     suffix_parts = []
     if fa_label_display:
         suffix_parts.append(_slugify(fa_label_display))
@@ -451,10 +444,9 @@ def plot_traces_with_speed_threshold(
     def _last_poke_out_scanning_back(entries):
         """Scan **back by position** to the first non-null `poke_odor_end`.
 
-        A different rule from `_last_poke_out_by_position` above, which takes the
-        last entry and accepts its null -- `DECISIONS.md` sections 13 and 14 are
-        about not merging helpers that differ, so both survive the Phase 7b.4b move
-        onto `position_data` unchanged.
+        **A different rule from `_last_poke_out_by_position`**, which takes the last
+        entry and accepts its null. Do not merge them. See DECISIONS.md sections 13
+        and 28.
         """
         for poke in reversed(entries or []):
             dt_val = _safe_dt(poke.get("poke_odor_end"))
@@ -575,8 +567,8 @@ def plot_traces_with_speed_threshold(
         for c in ["sequence_start", "sequence_end", "first_supply_time", "first_reward_poke_time", "fa_time", "speed_threshold_time"]:
             if c in trial_data.columns:
                 trial_data[c] = pd.to_datetime(trial_data[c], errors="coerce")
-        # `in_poke_times` is the flag matching `position_poke_times`, the blob the two
-        # `_last_poke_out_scanning_back` call sites read before Phase 7b.4b (section 2).
+        # `in_poke_times` is the provenance flag matching the poke facts the two
+        # `_last_poke_out_scanning_back` call sites read -- section 2.
         pokes_by_trial = position_entries_by_trial(
             _load_position_data(results_dir, trial_data), "in_poke_times")
 

@@ -12,17 +12,11 @@ Positions come from ``windows.positions_by_odor``, the single rule shared with
 position that odor already holds**. A trial presenting A, B, A is therefore **2 positions**,
 position 1 holding the *second* A.
 
-This module and ``analyze_response_times`` once resolved positions differently -- the rule here
-opened a *new* position for a non-consecutive re-entry, giving 3 positions for A, B, A. The two
-were measured before being merged (``DECISIONS.md`` section 13's requirement): they disagree
-only when an odor re-appears after a different odor, which happens on **1 of 1,731** fixture
-trials and **0 of 46,112** trials across subjects 056-066.
-
-That single trial is an experiment-side fault, not a longer sequence: the rig failed to emit an
-``InitiationSequence`` between three sampling runs, so ``F,A / F,A / F,A`` was recorded as one
-trial. Overwriting resolves it to the **last** run, which is the run the trial's outcome events
-belong to. ``_assign_positions_to_valve_events`` returns the repeated odors and the caller
-raises a ``RuntimeWarning``: silent on sound data, and meaningful precisely because of that.
+- Overwriting keeps the **last** sampling run, which is the run the trial's outcome events
+  belong to. It fires only when the rig failed to emit an ``InitiationSequence`` between
+  runs, so several runs were recorded as one trial. See DECISIONS.md section 18.
+- ``_assign_positions_to_valve_events`` returns the repeated odors so the caller can raise a
+  ``RuntimeWarning``: silent on sound data, and meaningful because of that.
 """
 from __future__ import annotations
 
@@ -311,17 +305,15 @@ def _trim_unsampled_tail(positions, position_poke_times):
     Called only for a trial that never reached AwaitReward. There the last valve activation is
     the odor the rig opened as the animal was leaving: it was presented, but the sequence did
     not advance through it, and counting it would put an odor the animal never smelled at the
-    end of ``odor_sequence`` and make it ``last_odor``. ``abortion_classification`` agrees --
-    measured on the 9 regression sessions its ``last_odor_position``, derived by a wholly
-    independent pipeline, is the last **poked** position on 74 of 74.
+    end of ``odor_sequence`` and make it ``last_odor``.
 
     An interior gap is the opposite case: the rig demonstrably opened a later valve, so the
     sequence *did* move past that position and the odor belongs in the sequence. It stays, and
     its ``poke_source`` is what keeps a 0 ms entry out of the poke-duration averages.
 
-    The test is ``poke_source != 'poke'``, so a trailing **grace** entry is trimmed too. That
-    is the ``presentations``-vs-``last_odor_position`` disagreement section 10 measured at 10
-    of 1731 trials, resolved in favour of the abort pipeline.
+    The test is ``poke_source != 'poke'``, so a trailing **grace** entry is trimmed too --
+    which is what keeps ``presentations`` and the abort pipeline's ``last_odor_position``
+    agreeing.
 
     On a completed trial nothing is trimmed: reaching AwaitReward means the rig counted every
     position it opened, including a final one our reconstruction from DIPort0 scores as
@@ -652,22 +644,14 @@ def _label_non_initiated_odors(non_initiated_trials, odor_map):
 def _as_declared_datetime(col: pd.Series) -> pd.Series:
     """Restore ``datetime64`` on a timestamp column pandas could only infer as ``object``.
 
-    A record declares every field, so a column no trial wrote is all-``None`` -- and a
-    column of nothing but ``None`` carries no type, so pandas gives it ``object``. On its
-    own that is harmless. It bites at the **concat in `merge`**: one run whose column is
-    entirely empty turns the whole merged column ``object``, and ``to_csv`` then writes
-    ``str(Timestamp)`` (``...806000``) where ``datetime64`` wrote ``...806``. Measured on
-    `sub-040 20251124`, a three-run session: 154 cells of ``await_reward_time`` and 135 of
-    ``first_supply_time`` changed representation, while every value stayed the same instant.
+    A record declares every field, so a column no trial wrote is all-``None``, and a column
+    of nothing but ``None`` carries no type. Harmless in one frame; at **merge's concat** one
+    such run turns the whole merged column ``object``, and ``to_csv`` then writes
+    ``str(Timestamp)`` where ``datetime64`` wrote milliseconds. See DECISIONS.md section 21.
 
-    Before the records, such a run simply lacked the column and ``concat`` filled it,
-    preserving ``datetime64`` -- so this restores the old dtype rather than imposing a new
-    one, and the parquet keeps real timestamps instead of Python objects.
-
-    **Deliberately not `pd.to_datetime(..., errors="coerce")`**: that would turn anything
-    unparseable into ``NaT``, silently destroying a value to fix a dtype. This converts
-    only when it is provably lossless -- the column is `object` and holds nothing but
-    Timestamps and nulls -- and returns it untouched otherwise.
+    - Never `pd.to_datetime(..., errors="coerce")`: that turns anything unparseable into
+      ``NaT``, destroying a value to fix a dtype. Convert only when provably lossless --
+      the column is ``object`` and holds nothing but Timestamps and nulls.
     """
     if col.dtype != object:
         return col

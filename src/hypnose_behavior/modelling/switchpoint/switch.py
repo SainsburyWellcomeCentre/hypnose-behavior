@@ -274,9 +274,9 @@ def fit_switch2(s: Sequence[int] | np.ndarray) -> dict:
     The regimes are gated non-decreasing (``p1 <= p2 <= p3``): pairs whose segment means are
     not monotone are excluded from the search, so a win reflects a staged progression toward
     SHORT rather than a transient spike (e.g. ``0 -> 1 -> 0`` over a few trials). This makes
-    switch2 a *constrained* model: unlike the unconstrained version it no longer nests the
-    single switch or the constant, and when no monotone split exists (e.g. a strictly
-    decreasing sequence) it is degenerate (``-inf``) and cannot win -- both intended.
+    switch2 a *constrained* model: it does not nest the single switch or the constant, and
+    when no monotone split exists (e.g. a strictly decreasing sequence) it is degenerate
+    (``-inf``) and cannot win -- both intended.
 
     Returns
     -------

@@ -8,7 +8,7 @@ from hypnose_helpers.io.paths import DataLocations, RAW_SUBDIR, DERIV_SUBDIR, en
 
 # The data-location *mechanism* (profile format, precedence, active selection) lives in
 # hypnose-helpers; only the knowledge of where THIS repo keeps its config and its legacy
-# data dir stays here. See restructure_2 Phase 2a.
+# data dir stays here.
 #
 # Resolution order for the data roots (highest priority first):
 #   1. HYPNOSE_* environment variables  (deliberate override: CI, the QC sandbox, one-offs)

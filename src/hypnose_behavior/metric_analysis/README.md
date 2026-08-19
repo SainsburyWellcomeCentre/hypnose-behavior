@@ -17,7 +17,10 @@ python scripts/run_metrics_analysis.py --subjids 59 --dates 20260618
 - `batch_run_all_metrics_with_merge(...)` — run across any combination of subjids/dates
   (optional `protocol` filter), saving per-session results and a merged result per subject.
 
-To add a metric, define it as its own function and call it inside `run_all_metrics`.
+To add a metric, declare it where you define it — `@metric(frame=...)` on the pure
+`f(frame) -> value` core, `@session_metric(core)` on the printing wrapper. Registering
+makes it discoverable; adding its key to `run.REPORT` is the separate decision to save
+it. See [`registry.py`](registry.py) and §4 of `docs/DECISIONS.md`.
 
 ## Single-reward outcome metrics
 

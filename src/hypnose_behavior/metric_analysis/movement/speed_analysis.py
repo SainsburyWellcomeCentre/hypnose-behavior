@@ -4,31 +4,18 @@ from __future__ import annotations
 
 """Movement metrics derived from SLEAP tracking.
 
-Moved wholesale out of ``visualization/movement_analysis_utils.py`` in
-restructure_2 Phase 4a: ``compute_speed_analysis`` contains no plotting at all,
-so this was a metrics module filed under ``visualization/``. It supplies seven
-metrics that had no canonical version anywhere (checklist items 10-16 of the
-Phase 4a metric audit, now closed):
+``compute_speed_analysis`` writes ``speed_analysis.parquet`` and supplies seven
+metrics off SLEAP tracking:
 
     binned speed epoch . baseline mu/sigma and vthresh . movement-onset latency
     . movement_onset_from_valve_s . path_length_px . travel_time_s . tortuosity
 
-``speed_analysis.parquet`` keeps its path and filename: the output directory is
-built from the session directory at runtime, so there is no ``__file__``-derived
-state of the kind that stopped ``io/paths.py`` moving whole in Phase 2a.
-
-Moved again in Phase 10 (follow-up Item 1), from the flat
-``metric_analysis/movement.py`` into this package, so movement metrics have room
-to grow beyond speed. The package ``__init__`` is docstring-only and re-exports
-nothing (section 3), so importers name this module.
-
-**This is the only place the speed threshold is computed.** Phase 10 removed the
-in-plotter recompute from ``visualization/movement/speed.py``: it was a second
-derivation of a quantity this module owns (section 14) that no gate could reach,
-and it wrote nothing despite a docstring claiming otherwise. A plotter now reads
-``speed_analysis.parquet`` or reports that it is missing.
-
-Source-only moves -- no behaviour change.
+- **This is the only place the speed threshold is computed.** A plotter reads
+  ``speed_analysis.parquet`` or reports that the file is missing -- it must never
+  recompute a threshold no value on its axes was derived from. See DECISIONS.md
+  section 35.
+- No gate can reach ``compute_speed_analysis``: it writes into ``results_dir``, and
+  the derivatives root is read-only. Changes here need a probe against a local copy.
 """
 
 import re
@@ -58,20 +45,15 @@ __all__ = ["binned_speed", "compute_speed_analysis", "run_speed_analysis_batch",
 # The speed-analysis defaults, in one place
 # --------------------------------------------------------------------------------------
 #
-# **Not `hypnose_behavior/parameters.py`.** That file is for knobs you can only change by
-# editing code, and its `scoring_parameters()` is stamped into `manifest.json` as what
-# *trial classification* applied (section 31). These are neither: every one is a
-# `scripts/run_speed_analysis.py` flag (`--bin-ms`, `--pre-buffer-s`,
-# `--threshold-alpha`, `--threshold-beta`), chosen per run, and speed analysis is a
-# separate later pass that does not write that manifest -- so stamping them there would
-# claim the session was scored with values applied after the file was written, which
-# section 31 calls worse than no stamp at all.
+# **These do not belong in `hypnose_behavior/parameters.py`.** That file is for knobs
+# changeable only by editing code, and its `scoring_parameters()` is stamped into
+# `manifest.json` as what *trial classification* applied. Every one of these is a
+# `scripts/run_speed_analysis.py` flag chosen per run, and speed analysis is a separate
+# later pass that does not write that manifest. See DECISIONS.md section 35.
 #
-# They live here because they were duplicated: `10.0` appeared as `speed_threshold`'s
-# default, as `compute_speed_analysis`'s, and again in
-# `visualization/movement/speed.py`, with nothing making the three agree -- and the
-# docstring below said `6.0`. One declaration, and the plotter no longer holds one at
-# all: it reads what produced the file.
+# **One declaration, read by the CLI's defaults too**, so what `--help` advertises and
+# what runs cannot diverge. The plotter holds none of them: it reads what produced the
+# file.
 BIN_MS = 100
 PRE_BUFFER_S = 1.0
 MODE = "mean"
@@ -236,11 +218,9 @@ def speed_threshold(baseline_values, *, alpha: float = THRESHOLD_ALPHA,
     ``vthresh = max(alpha * mu, mu + beta * sigma)`` over the speeds in the
     baseline window, where ``mu``/``sigma`` are the population mean and SD.
 
-    Finding 7 of the metric audit: this was written three times -- here, and
-    again in `plot_epoch_speeds_by_condition` and `plot_traces_with_speed_threshold`,
-    which re-derived it rather than reading it back. A plotted threshold that
-    disagrees with the one used to compute the saved latencies is the failure that
-    invites, and it is invisible in any output.
+    **The one derivation of this threshold.** A plotter that re-derives it can draw a
+    line no value on its axes came from, and nothing in any output would say so -- so
+    the four values are written into `speed_analysis.parquet` and read back.
 
     ``enabled=False`` reports mu/sigma but no combined threshold, matching the
     plotters' ``threshold=False`` switch. Every value is ``None`` when the
@@ -350,8 +330,10 @@ def compute_speed_analysis(
     def _last_poke_out(entries):
         """Scan **back by position** to the first non-null ``poke_odor_end``.
 
-        `entries` is this trial's `position_data` rows sorted by position (Phase
-        7b.4b; it used to parse the `position_poke_times` blob off the trial row).
+        `entries` is this trial's `position_data` rows sorted by position.
+
+        One of three different "last poke-out" rules in this repo; do not merge them.
+        See DECISIONS.md section 28.
         """
         for poke in reversed(entries or []):
             dt_val = _safe_dt(poke.get("poke_odor_end"))
@@ -375,12 +357,11 @@ def compute_speed_analysis(
         Iterates positions from highest to lowest; requires both valve_start and poke_odor_start
         for that position. If none meet both criteria, returns NaT.
 
-        Phase 7b.4b: the two blobs become two **flag-filtered views of the same
-        `position_data`** -- `in_valve_times` and `in_poke_times`. Filtering matters
-        here more than anywhere else in this file: `position_valve_times` is a
-        *superset*, holding valve activations whose poke registered as ~0 ms, and
-        reading the frame unfiltered would offer this join positions the poke blob
-        never had (`DECISIONS.md` section 2).
+        The two inputs are **flag-filtered views of the same `position_data`** --
+        `in_valve_times` and `in_poke_times`. The filtering matters more here than
+        anywhere else in this file: the valve view is a *superset*, holding activations
+        whose poke registered as ~0 ms, so an unfiltered read would offer this join
+        positions the poke view never had. See DECISIONS.md section 2.
         """
         pvt_entries = valve_entries or []
         ppt_entries = poke_entries or []
@@ -572,8 +553,9 @@ def compute_speed_analysis(
             if c in trial_data.columns:
                 trial_data[c] = pd.to_datetime(trial_data[c], errors="coerce")
 
-        # One row per trial x position for this session, split by the provenance flag
-        # matching the blob each helper used to read (`DECISIONS.md` section 2).
+        # One row per trial x position for this session. **Each view must use the
+        # provenance flag matching the facts its helper reads** -- see DECISIONS.md
+        # section 2.
         position_data = _load_position_data(results_dir, trial_data)
         pokes_by_trial = position_entries_by_trial(position_data, "in_poke_times")
         valves_by_trial = position_entries_by_trial(position_data, "in_valve_times")

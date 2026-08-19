@@ -2,11 +2,8 @@
 load_all_streams, load_experiment_events, load_odor_mapping) and the trial-data
 table readers.
 
-Extracted from trial_classification/classification_utils.py during the restructuring
-(Phase 3). Pure move -- behaviour unchanged (verified by the regression harness).
-
-The harp/aeon reader classes and file-reading primitives used to be duplicated here;
-they now live once in io/readers.py and are re-exported below (restructure_2 Phase 0.3).
+The harp/aeon reader classes and file-reading primitives live once in io/readers.py
+and are re-exported below.
 """
 from __future__ import annotations
 
@@ -26,20 +23,12 @@ from aeon.io.reader import Reader, Csv
 import aeon.io.api as api
 
 import hypnose_behavior.trial_classification.detect_settings as detect_settings
-# One definition of "where the per-position facts come from", in `load_results.py` --
-# the read side of `save_results.py`, which is where it belongs. Re-exported here under
-# the private name the `visualization/` and `metric_analysis/` readers import, the same
-# arrangement (and for the same reason) as the `readers.py` primitives above:
-# `load_results` imports nothing from this module, so the edge is one-way.
 from hypnose_behavior.io.load_results import (  # noqa: F401
     load_position_data as _load_position_data,
 )
 from hypnose_behavior.io.paths import get_rawdata_root, get_derivatives_root, get_server_root
 from hypnose_behavior.io.layout import rawdata
 from hypnose_behavior.utils.helpers import vprint, _get_from_cache, _update_cache
-# Reader classes and file-reading primitives are defined once, in io/readers.py. They are
-# re-exported here because callers (classification_utils, notebooks) import them from this
-# module; readers.py imports nothing from hypnose_behavior, so this direction stays acyclic.
 from hypnose_behavior.io.readers import (  # noqa: F401
     SessionData, Video, TimestampedCsvReader,
     load, load_json, load_video, load_csv, concat_digi_events,
@@ -68,9 +57,8 @@ def load_experiment(subjid, date, index=None):
     Path object to experiment root, or None if selection needed
     """
     
-    # One resolver for the whole family (restructure_2 Phase 2b). It reports the
-    # available sessions on a miss, as this function used to do by hand, and raises on
-    # an ambiguous subject or date rather than warning and taking the first match.
+    # The shared resolver: it reports the available sessions on a miss, and raises on an
+    # ambiguous subject or date rather than warning and taking the first match.
     session = rawdata.find_session(subjid, date=date)
     subject_dir = session.subject_dir
     print(f"Using subject directory: {subject_dir}")
@@ -133,12 +121,10 @@ def compute_real_time_offset(root, heartbeat):
     (``YYYY-MM-DDTHH-MM-SS``) and the heartbeat register the hardware clock's;
     the difference is what ``load_all_streams`` adds to every stream's index.
 
-    Written twice before Phase 4a: ``valve_poke_plots._compute_real_time_offset``
-    opened with *"compute the same real_time_offset used by load_all_streams"*
-    and then did exactly that. Drift between the two would have silently shifted
-    every timestamp on that debugging plot relative to every other figure in the
-    package -- the audit's finding 15. Returns ``Timedelta(0)`` when the folder
-    name carries no timestamp or the heartbeat is unusable.
+    **The only definition of this offset.** A second one drifting from it would
+    silently shift every timestamp on one figure relative to every other figure in
+    the package. Returns ``Timedelta(0)`` when the folder name carries no timestamp
+    or the heartbeat is unusable.
     """
     if heartbeat is None or heartbeat.empty or 'Time' not in heartbeat.columns or len(heartbeat) == 0:
         return pd.Timedelta(0)
@@ -645,7 +631,7 @@ def load_odor_mapping(root, *, data=None, verbose: bool = True, **kwargs):
         }
 
 
-# --- trial-data table loaders (moved from visualization/visualization_utils.py) -----------
+# --- trial-data table loaders ------------------------------------------------------------
 # High-level readers over a session's ``saved_analysis_results`` directory. They live in io so
 # the modelling and visualization layers each depend on io for their data, rather than on one
 # another. ``_odor_to_letter`` decodes a stored odor token and travels with them because the
@@ -694,16 +680,7 @@ def _load_table_with_trial_data(results_dir: Path, name: str) -> pd.DataFrame:
             _update_cache(subjid, [date], {date: df}, kind="trial_data")
         return df
 
-    # Only these non-initiated tables are loadable here. Parquet first, CSV second:
-    # since Phase 7b.3 the CSV is written only when `save_csv=True`, so a CSV-only reader
-    # would return an empty frame -- with no error -- for every session saved with the
-    # default. Parquet is always written.
-    #
-    # Only `non_initiated_attempts` is written now (Item 5: the other two are contained in
-    # it by construction, and `non_initiated_FA` was its old name). The retired names stay
-    # readable: every session currently on the server predates that change and carries all
-    # three files. Section 2's rule -- a read path must answer for the files that exist,
-    # not only for the ones today's writer produces.
+    # Only these non-initiated tables are loadable here. **Parquet first, CSV second:**
     allowed = {"non_initiated_attempts",
                "non_initiated_sequences", "non_initiated_odor1_attempts", "non_initiated_FA"}
     if name in allowed:

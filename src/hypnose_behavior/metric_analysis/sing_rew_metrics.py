@@ -423,10 +423,8 @@ def compute_sing_rew_rates(categories: dict) -> dict:
         },
         "hit_rate": hit_rate,
         "fa_rate": fa_rate,
-        # Checklist 23/24 of the Phase 4a audit. Both were derived on the fly in
-        # `visualization/sing_rew._metric_value`, whose docstring called them
-        # "(not stored)"; they are one line from counts already in this dict, so
-        # storing them removes the only metric math left in that file.
+        # Stored rather than derived plot-side: both are one line from counts already
+        # in this dict, so keeping them here leaves no metric math in the plotter.
         "ambiguous_rate": _ratio(n_amb, n_tot),
         "correct_rejection_rate": _ratio(cr, n_nogo),
         "H_prime": h_prime,

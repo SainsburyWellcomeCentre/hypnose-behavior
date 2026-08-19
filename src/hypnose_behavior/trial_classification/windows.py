@@ -1,17 +1,15 @@
 """Pure poke/valve window primitives for trial classification.
 
-A leaf, in the sense of ``DECISIONS.md`` section 3: **this module imports nothing from the
-package except the root-level leaves** -- here ``parameters.py``, which imports nothing at
-all. Otherwise the standard library and pandas. Everything here is a pure function of
-timestamps, boolean series and plain dicts, with no session context, no ``data``/``events``
-dictionaries and no I/O, so each piece is independently testable and importable from anywhere
-in the package (including ``io/``) without creating a cycle. Keep it that way.
+Every function is a pure function of timestamps, boolean series and plain dicts -- no
+session context, no ``data``/``events``, no I/O.
 
-The functions here are deliberately *not* generalised across their call sites. Several look
-like near-duplicates -- there are three different ways of pairing valve rise/fall edges in this
-codebase, and two different poke-bout merges. They are different rules, and section 13 of
-``DECISIONS.md`` is the reason each keeps its own name and its own docstring saying what it
-does differently, rather than being folded into one function behind a flag.
+- **This module imports nothing from the package except the root-level leaves**
+  (``parameters.py``), which is what lets any layer including ``io/`` import it without a
+  cycle. See DECISIONS.md section 3.
+- **Do not generalise these across their call sites.** Several look like near-duplicates --
+  three ways of pairing valve rise/fall edges, two poke-bout merges -- but they are
+  different rules. Each keeps its own name and its own docstring saying how it differs.
+  See DECISIONS.md section 13.
 """
 from __future__ import annotations
 
@@ -235,9 +233,8 @@ def positions_by_odor(valve_events: list[dict], *, seed: dict | None = None,
 def first_occurrence_positions(trial_valve_events: list[dict]) -> tuple[dict, list]:
     """``positions_by_odor`` with no seed and no cap, returning the ordered position numbers.
 
-    ``analyze_response_times``' entry point into the shared rule. Until Phase 6c-follow-up this
-    was a second, independent implementation that disagreed with ``classify_trials`` whenever an
-    odor re-appeared after a different one; both now resolve positions the same way.
+    ``analyze_response_times``' entry point into the shared rule, so it and
+    ``classify_trials`` resolve positions the same way.
 
     Returns ``(position_locations, ordered_positions)``.
     """

@@ -4,26 +4,15 @@ from __future__ import annotations
 
 """What a saved trial record *is* -- the single declaration of `trial_data`'s schema.
 
-`trial_data` is written by `io/save_results.py`, read by `io/load_results.py`, and
-built by `trial_classification/classify_trials.py`. Before restructure_2 Phase 7b
-nothing declared its shape: `save_results` named 27 columns while the table carried
-60, the other 33 existing only because some line assigned them. This module is that
-declaration.
+`trial_data` is built by `trial_classification/classify_trials.py`, written by
+`io/save_results.py` and read by `io/load_results.py`; all three conform to the
+declarations here. A session's columns depend on which branch of `classify_trials`
+ran, so the schema is per protocol mode, and `resolve_mode` decides that mode once
+rather than at each site that needs it.
 
-**A leaf.** It imports nothing from the package -- the standard library only. Both
-`io/__init__.py` and `metric_analysis/__init__.py` are docstring-only, so
-`trial_classification -> io.protocol_schema` triggers no package-level side effects and closes
-no cycle. Keep it that way, for the same reason `frames.py` must stay a leaf
-(`docs/DECISIONS.md` section 3): every layer here already imports it.
-
-### The protocol mode decides the column set
-
-A session's columns depend on which branch of `classify_trials` ran, and the three
-branches write different families. Declaring one uniform record for all of them would
-put ~26 all-NaN columns on the average session; declaring one per mode reproduces
-what is on disk today to within 7 columns. So the mode is part of the schema, and
-`resolve_mode` is where it is decided -- once, from the two flags, rather than
-re-derived at each site that needs to know.
+**This module imports nothing from the package -- the standard library only.** Every
+layer imports it, so the day it imports back, `trial_classification -> io` and
+`io/save_results -> io` become real cycles. See DECISIONS.md section 20.
 """
 
 from dataclasses import dataclass, fields
@@ -48,25 +37,23 @@ __all__ = [
 ]
 
 
-# The three per-position JSON blobs: declared fields, built by `classify_trials`, and
-# **never written to `trial_data`** since Phase 7b.4b. `save_results` expands them into
-# `position_data.parquet` -- one row per `trial x position`, with typed columns and
-# section 2's provenance flags -- and then drops them from the frame it saves.
+# The three per-position JSON blobs: declared fields that are **never written to
+# `trial_data`**. `save_results` expands them into `position_data.parquet` and then drops
+# them from the frame it saves.
 #
-# They stay *fields* because the expansion reads them off the in-memory trial frame, and
-# `@dataclass(slots=True)` would refuse the assignment in `classify_trials` if they were
-# removed. So this constant is the single statement of "in memory, not on disk", read by
-# `columns()` (hence by the conform and the loader's schema check) and by `save_results`.
+# They must stay declared *fields* -- the expansion reads them off the in-memory trial
+# frame, and `@dataclass(slots=True)` would refuse `classify_trials`' assignment otherwise.
+# This constant is the single statement of "in memory, not on disk", read by `columns()`
+# (hence by the conform and the loader's schema check) and by `save_results`.
 POSITION_BLOB_COLUMNS = ("position_valve_times", "position_poke_times", "presentations")
 
 
 class ConflictingProtocolError(Exception):
     """A session's two protocol flags disagree about which schema it follows.
 
-    Named rather than a bare `ValueError` so it is greppable in a batch log and
-    separately catchable: `batch_analyze_sessions` wraps each session in
-    `except Exception`, where a `ValueError` is indistinguishable from pandas
-    complaining about an index.
+    **Keep it a named class, not a bare `ValueError`:** `batch_analyze_sessions` wraps
+    each session in `except Exception`, where a `ValueError` is indistinguishable from
+    pandas complaining about an index.
     """
 
 
@@ -83,31 +70,17 @@ MODES = (STANDARD, SINGLE_REWARD, ODOUR_DISCRIMINATION)
 def resolve_mode(*, is_odour_discrimination: bool, is_single_reward: bool) -> str:
     """Which of `MODES` this run follows. Raises `ConflictingProtocolError` on the impossible one.
 
-    The two flags come from **independent sources** -- `is_odour_discrimination` from
-    the protocol name in the detected stage, `is_single_reward` from the schema's
-    `isSingleRewardProtocol` flag (`trial_classification/params.py`). Nothing in the
-    code makes them exclusive; the *experiment* does, and by construction: odour
-    discrimination presents a sequence of length 1, while the single-reward protocol
-    needs at least 2 positions for a sequence to be rewarded-or-not at its end. There
-    is no session that is both, and there cannot be one.
+    The two flags come from independent sources -- `is_odour_discrimination` from the
+    detected stage's protocol name, `is_single_reward` from the schema's
+    `isSingleRewardProtocol`. Nothing in the code makes them exclusive; the experiment
+    does, by construction, so both being true is a structural fault in the session as
+    it was run.
 
-    **So this raises rather than warns.** Both flags true means the session was run
-    with a structurally impossible configuration, which is a problem at the rig, not
-    in the analysis -- and it needs fixing before any number off that session is used.
-    Continuing would write a `trial_data` whose schema is undefined: today's control
-    flow reaches the odour-discrimination branch first and `continue`s past the
-    false-response scoring, so the four determinacy columns would be *silently absent*
-    from a file that still looked complete.
-
-    Raising is also the safer failure in bulk. `batch_analyze_sessions` catches per
-    session, prints which subject and date failed, and carries on -- so one broken
-    schema names itself and skips, writing no derivative, while the rest of the batch
-    completes. A warning would do the opposite: write the malformed file and bury the
-    notice in thousands of lines of batch output.
-
-    This is **not** Phase 9. Phase 9 validates data *values*; this is a contradiction
-    between two schema-derived flags that leaves the output schema undecidable, and it
-    exists only because Phase 7b made the schema mode-dependent.
+    **Raise, never warn.** Continuing writes a `trial_data` whose schema is undefined --
+    the odour-discrimination branch runs first and skips the false-response scoring, so
+    the four determinacy columns would be silently absent from a file that still looked
+    complete. Raising makes the broken session name itself, write no derivative, and let
+    the batch finish. See DECISIONS.md section 20.
     """
     if is_odour_discrimination and is_single_reward:
         raise ConflictingProtocolError(
@@ -130,20 +103,15 @@ def resolve_mode(*, is_odour_discrimination: bool, is_single_reward: bool) -> st
 # The trial record
 # --------------------------------------------------------------------------------------
 #
-# `classify_trials` used to build a free-form dict per trial, so a column existed only
-# because some line assigned it: `save_results` named 27 columns while the table carried
-# 60, and `trial_dict['fr_laency_ms'] = ...` was valid Python that silently invented a
-# column of NaNs. These classes are the declaration. `slots=True` makes that typo an
-# AttributeError at the assignment site.
+# These classes declare every column `classify_trials` writes. **Keep `slots=True`**: it
+# is what makes `rec.fr_laency_ms = ...` an AttributeError at the assignment site rather
+# than a silently invented column of NaNs.
 #
 # Fields are declared in the order they are written, so `to_row()` yields a stable column
 # order rather than one that depends on which branch a session's first trial took.
 #
-# **Every field defaults to None**, which is what the old dict's *absence* became once
-# pandas built a frame from it: a numeric column reads back as NaN either way, an object
-# column as an empty cell. The difference is that the columns now exist uniformly within
-# a mode, instead of depending on whether any trial in the session happened to take the
-# branch that wrote them.
+# Every field defaults to None, so a mode's columns exist uniformly across the session
+# instead of depending on whether any trial took the branch that writes them.
 
 
 @dataclass(slots=True)
@@ -153,12 +121,11 @@ class _TrialRecordBase:
     The first ten come from `detect_trials._record_detected_trial`; the rest are written
     by `classify_trials` on every path.
 
-    **`run_id` is deliberately absent**, though it is a `trial_data` column. It is assigned
-    downstream by `merge._with_run_id`, which copies any *existing* `run_id` to a new
-    `run_id_original` column before overwriting it. Declaring it here would emit it on
-    every row, so every merged session would silently gain an all-null `run_id_original`
-    that exists on no session today. `is_aborted` and `global_trial_id` are absent for the
-    same reason -- `save_results` derives them. See `ASSEMBLED_COLUMNS`.
+    **Do not declare `run_id`, `is_aborted` or `global_trial_id` here**, though all three
+    are `trial_data` columns -- they are assigned during assembly, see `ASSEMBLED_COLUMNS`.
+    Declaring `run_id` would emit it on every row, and `merge._with_run_id` copies any
+    *existing* `run_id` to `run_id_original` before overwriting, so every merged session
+    would silently gain an all-null column that exists on no session today.
     """
 
     # --- from detect_trials ---
@@ -172,7 +139,7 @@ class _TrialRecordBase:
     required_min_sampling_time_ms: float | None = None
     odor_name: str | None = None
     # Written only when a trial came from the pending-attempt fallback, so it is null on
-    # most sessions -- present on 2 of the 9 regression fixtures.
+    # most sessions.
     fallback_reason: str | None = None
 
     # --- the presented sequence ---
@@ -182,11 +149,9 @@ class _TrialRecordBase:
     sequence_name: str | None = None
     minimum_sampling_time_ms_by_odor: object = None
 
-    # --- per-position blobs: IN MEMORY ONLY since Phase 7b.4b ---
-    # `classify_trials` still builds them and `save_results` still expands them into
-    # `position_data.parquet` -- but they are no longer *written* to `trial_data`. See
-    # `POSITION_BLOB_COLUMNS`; they are excluded from `columns()`, so the loader's schema
-    # check does not demand a column nothing saves any more.
+    # --- per-position blobs: IN MEMORY ONLY ---
+    # Built by `classify_trials` and expanded into `position_data.parquet` by
+    # `save_results`, never written to `trial_data`. See `POSITION_BLOB_COLUMNS`.
     position_valve_times: object = None
     position_poke_times: object = None
     presentations: object = None
@@ -229,12 +194,10 @@ class _TrialRecordBase:
     def columns(cls) -> tuple:
         """The column names this record **writes**, in declaration order.
 
-        `POSITION_BLOB_COLUMNS` are declared fields but not written columns: since Phase
-        7b.4b they exist only in memory, long enough for `save_results` to expand them
-        into `position_data.parquet`. Excluding them here is what keeps the declaration
-        honest in both directions -- `save_results` conforms to it, and the loader checks
-        a saved file against it, so leaving them in would make every newly written file
-        report itself as missing three columns.
+        `POSITION_BLOB_COLUMNS` are declared fields but not written columns, so they are
+        excluded here. `save_results` conforms to this list and the loader checks a saved
+        file against it, so including them would make every newly written file report
+        itself as missing three columns.
         """
         return tuple(f.name for f in fields(cls) if f.name not in POSITION_BLOB_COLUMNS)
 
@@ -243,8 +206,8 @@ class _TrialRecordBase:
 class StandardTrialRecord(_TrialRecordBase):
     """The default protocol: a sequence of odors, rewarded at its final position."""
 
-    # Written by `_score_standard_outcome` only, which the odour-discrimination path never
-    # reaches -- it has no fixed response deadline.
+    # Written by `_score_standard_outcome` only, which the odour-discrimination path
+    # never reaches -- it has no fixed response deadline.
     poke_window_end: object = None
 
 
@@ -252,14 +215,13 @@ class StandardTrialRecord(_TrialRecordBase):
 class SingleRewardTrialRecord(StandardTrialRecord):
     """Single-reward: only some candidate sequences are rewarded at their final position.
 
-    Extends `StandardTrialRecord` rather than the base **because a single-reward session
-    uses both scorers**: a rewarded sequence goes through `_score_standard_outcome` and so
+    **Extends `StandardTrialRecord`, not the base, because a single-reward session uses
+    both scorers:** a rewarded sequence goes through `_score_standard_outcome` and so
     writes `poke_window_end`, while a non-rewarded one goes through `_score_false_response`.
-    Measured: sub-057's fixture carries `poke_window_end`.
 
     The twelve fields are one group even though the first four are written before the
-    false-response scoring and the other eight inside it. That reproduces `save_results`'
-    existing behaviour, which added all twelve together as soon as any one was present.
+    false-response scoring and the other eight inside it -- all twelve appear together
+    on any session that writes any of them.
     """
 
     # Written for every trial of a single-reward session, before scoring.
@@ -283,9 +245,9 @@ class SingleRewardTrialRecord(StandardTrialRecord):
 class OdourDiscriminationTrialRecord(_TrialRecordBase):
     """Odour discrimination: a single-position sequence, scored over an open reward window.
 
-    Does **not** extend `StandardTrialRecord`: `poke_window_end` belongs to the standard
-    scorer's fixed response deadline, which this protocol does not have, and both fixture
-    sessions of this mode lack the column.
+    **Does not extend `StandardTrialRecord`**, deliberately: `poke_window_end` belongs to
+    the standard scorer's fixed response deadline, which this protocol has no equivalent
+    of, and `slots` then makes it physically impossible to set on this record.
     """
 
     odourdiscrimination_mode: bool | None = None
@@ -293,9 +255,8 @@ class OdourDiscriminationTrialRecord(_TrialRecordBase):
     next_initiation_time: object = None
     next_cue_poke_start: object = None
     reward_window_end: object = None
-    # Written when AwaitReward never lands in the window. Never fires on either fixture
-    # session, so the column is new -- and that absence is exactly what a declaration is
-    # meant to make visible.
+    # Written when AwaitReward never lands in the window, so it is null on most
+    # sessions.
     abort_reason: str | None = None
 
 
@@ -321,9 +282,7 @@ def record_class_for(mode: str):
 # `trial_data` has three producers. `classify_trials` builds the record above;
 # `save_results` merges in the two frames below and derives `is_aborted` /
 # `global_trial_id`; `merge` assigns `run_id`. All three are part of the saved schema, so
-# a reader checking a file against "what a trial is" has to know about all three --
-# `fa_window_latency_ms` and `completed_window_latency_ms` are merged columns, and they
-# are precisely the ones Phase 6's rename moved.
+# a reader checking a file against "what a trial is" must know about all three.
 
 # Merged from `aborted_sequences_detailed` by `save_results`.
 ABORT_COLUMNS = (
@@ -356,16 +315,13 @@ ASSEMBLED_COLUMNS = ("run_id", "is_aborted", "global_trial_id")
 def mode_independent_columns() -> tuple:
     """Columns a `trial_data` carries whatever protocol wrote it.
 
-    The base record's fields are common to all three modes by construction, and the merged
-    and assembled columns do not depend on the mode at all. So this is the largest set that
-    can be checked against a file whose mode is **unknown** -- every file written before
-    Phase 7b -- with no risk of a false alarm from guessing wrong.
+    The largest set checkable against a file whose mode is unknown, with no risk of a
+    false alarm: the base record's fields are common to all three modes, and the merged
+    and assembled columns do not depend on mode at all.
 
-    It is not a lesser check for the case that matters. `fa_window_latency_ms`,
-    `fa_response_time_ms` and `completed_window_latency_ms` are merged columns, hence
-    mode-independent, and they are exactly the ones Phase 6's rename moved: measured on the
-    server's `sub-040 20251124`, this reports all three, while comparing against the record's
-    own fields alone reports only `fallback_reason` -- a column nothing reads.
+    **Build it from `columns()`, not from `fields(_TrialRecordBase)`** -- the latter
+    includes `POSITION_BLOB_COLUMNS`, and a file written by current code would then report
+    itself missing three columns it is not supposed to have. See DECISIONS.md section 22.
     """
     return (_TrialRecordBase.columns()
             + ABORT_COLUMNS + RESPONSE_TIME_COLUMNS + ASSEMBLED_COLUMNS)
@@ -374,22 +330,20 @@ def mode_independent_columns() -> tuple:
 def trial_data_columns(mode: str) -> tuple:
     """Every column a `trial_data` written in `mode` should carry.
 
-    The single declaration `io/load_results.py` checks a saved file against. Comparing
-    field sets answers the question a commit stamp cannot: a git SHA says *something*
-    changed between the file and now, not whether *this file* is affected -- a one-line
-    plotter fix and a trial-classification restructure look identical to it.
+    The single declaration `io/load_results.py` checks a saved file against, and the one
+    `accessors` uses to word a failed column lookup.
     """
     return (record_class_for(mode).columns()
             + ABORT_COLUMNS + RESPONSE_TIME_COLUMNS + ASSEMBLED_COLUMNS)
 
 
 # Record fields holding a timestamp. Declared because a column of *nothing but* None
-# carries no type, and pandas then infers `object` -- see `_as_declared_datetime` in
-# `trial_classification/classify_trials.py` for the concat that makes that visible.
+# carries no type, so pandas infers `object` and a multi-run merge then turns the whole
+# merged column `object` -- see `_as_declared_datetime` in
+# `trial_classification/classify_trials.py`, and DECISIONS.md section 21.
 #
-# Measured from the reference tree's `trial_data.parquet` rather than assumed. The abort
-# frame's `abortion_time` / `fa_time` are datetimes too, but they are merged in by
-# `save_results` from a frame this declaration does not build, and are left alone.
+# The abort frame's `abortion_time` / `fa_time` are datetimes too, but `save_results`
+# merges them in from a frame this declaration does not build, so they are left alone.
 DATETIME_FIELDS = frozenset({
     # base
     "initiation_sequence_time", "sequence_start", "sequence_end", "timestamp",

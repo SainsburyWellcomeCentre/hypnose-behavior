@@ -1,8 +1,7 @@
 """Session orchestration: classify one run, then discover runs, merge, save, summarise.
 
-Extracted from trial_classification/classification_utils.py during the restructuring
-(Phase 3). Pure move -- behaviour unchanged (to be re-verified by the regression
-harness once the data mount is available).
+The top of `trial_classification`: it imports the workers and the leaves, and nothing
+imports it back. See DECISIONS.md section 17.
 """
 from __future__ import annotations
 
@@ -45,9 +44,9 @@ from hypnose_behavior.utils.helpers import session_selectors, vprint
 
 # --------------------------------------------------------------------------------------
 # One run: detect -> classify -> response times -> abortions, assembled into one dict.
-# Moved here in Phase 6c: it orchestrates classify_trials.py, response_times.py,
-# aborted_trials.py, index.py and params.py, so it belongs above all of them rather than
-# inside any one. analyze_session_multi_run_by_id_date below drives it once per run.
+# It orchestrates classify_trials.py, response_times.py, aborted_trials.py, index.py and
+# params.py, so it belongs above all of them rather than inside any one.
+# analyze_session_multi_run_by_id_date below drives it once per run.
 # --------------------------------------------------------------------------------------
 
 def classify_and_analyze_with_response_times(data, events, trial_counts, odor_map, stage, root, verbose=True, run_id=None):# Wrapper function to fully classify all trials. 
@@ -583,13 +582,6 @@ def build_position_pokes_table(classification: dict, *, threshold_ms: float | No
     return out
 
 
-# `_parse_date_input` lived here and expanded a 2-tuple into every calendar day in the
-# range, so `batch_analyze_sessions` could intersect that list against the sessions a
-# subject has. `filter_sessions` reads a 2-tuple as a range itself, so the expansion had
-# no remaining caller once the resolution moved into the layout -- deleted rather than
-# left, because its only purpose was the local slicing section 8 forbids.
-
-
 def _requested_dates(dates):
     """The dates named *explicitly*, for the not-found warning, or None.
 
@@ -634,12 +626,10 @@ def batch_analyze_sessions(
     `rawdata.find_sessions(...)` rather than by slicing a listing here, because
     `session_index` is only defined *against* a listing -- `docs/DECISIONS.md` section 8.
 
-    **This resolves RAWDATA.** `metric_analysis.batch_run_all_metrics_with_merge` resolves
-    *derivatives*, and the two trees hold different session sets for the same subject, so
-    `index=5` names a different session to each of them. Measured across 8 subjects: on 7
-    of them at least one index disagrees, and on `sub-061` all 27 do. `ses` and the dates
-    are tree-stable; `index` and `index_range` are not. `scripts/batch_process.py`, which
-    chains both, therefore refuses the two tree-relative selectors -- section 32.
+    **This resolves RAWDATA**, while `metric_analysis.batch_run_all_metrics_with_merge`
+    resolves *derivatives*. The two trees hold different session sets for the same subject,
+    so `ses` and the dates chain safely between them and `index` / `index_range` do not --
+    which is why `scripts/batch_process.py` refuses those two. See DECISIONS.md section 32.
     """
     results = {}
 
@@ -654,16 +644,14 @@ def batch_analyze_sessions(
     requested = _requested_dates(dates)
 
     for subjid in subjids:
-        # A missing subject and a subject with no sessions are different problems;
-        # only the first is worth warning about, as before.
+        # A missing subject and a subject with no sessions are different problems; only
+        # the first is worth warning about.
         if rawdata.subject_dir(subjid, missing_ok=True) is None:
             print(f"[batch_analyze_sessions] WARNING: Subject {subjid} not found.")
             continue
 
-        # One resolution, through the layout. Previously this listed every session and
-        # intersected the result against a locally expanded date list -- which produced
-        # the same *set* (measured: identical on all 33 probe cases) but preserved the
-        # caller's argument order and ran a duplicated date twice.
+        # One resolution, through the layout: never slice a listing locally. The result is
+        # chronological and de-duplicated, whatever order the caller named the dates in.
         dates_for_subject = [
             int(s.date) for s in rawdata.find_sessions(subjid, date=dates, **selectors)
         ]

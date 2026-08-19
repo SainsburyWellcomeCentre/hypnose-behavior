@@ -6,19 +6,15 @@ from __future__ import annotations
 
 ``hidden_rule_mask`` is the grouping *key* for the HR / non-HR split, not a
 metric: ``by_group(decision_accuracy, trials, hidden_rule_mask(trials))`` is the
-audit's checklist 7. It is deliberately **not** ``hidden_rule_performance``,
+It is deliberately **not** ``hidden_rule_performance``,
 which has a different numerator *and* denominator.
 
-``hr_odor_associations`` is session **metadata** rather than a plotting concern
-(judgement call 1 of the audit): ``visualization/`` only used it to pick a
-colour, but which reward an animal's hidden-rule odor pays out is an analysis
-result.
+``hr_odor_associations`` is session **metadata** rather than a plotting concern:
+which reward an animal's hidden-rule odor pays out is an analysis result.
 
-**One truthiness rule**, as of Phase 4b: ``_truthy`` / ``_is_truthy``, used by
-``hidden_rule_mask``, ``hidden_rule_counts_by_odor`` and
-``hr_odor_associations`` alike. The last of those arrived from
-``visualization/`` in 4a with its own inline test; see ``common._is_truthy``
-for which way that was resolved and why.
+- **One truthiness rule**, ``common._is_truthy``, used by ``hidden_rule_mask``,
+  ``hidden_rule_counts_by_odor`` and ``hr_odor_associations`` alike. Do not write a
+  second one. See DECISIONS.md section 6.
 """
 
 import ast
@@ -110,7 +106,7 @@ def hidden_rule_mask(trials):
     """Boolean mask of hidden-rule trials -- the grouping key for the HR split.
 
     `by_group(decision_accuracy, trials, hidden_rule_mask(trials))` is the
-    audit's checklist 7 (decision accuracy, HR vs non-HR): a granularity of
+    Decision accuracy split HR vs non-HR: a granularity of
     `decision_accuracy`, not a metric of its own. It is deliberately **not**
     `hidden_rule_performance`, which has a different numerator *and* denominator.
     """
@@ -384,14 +380,8 @@ def hr_odor_associations(subj_dirs) -> dict:
 
     Returns ``{odor_letter: 'A' | 'B'}`` (empty if no HR sessions found).
 
-    Judgement call 1 of the metric audit: it is **session metadata**, not a
-    plotting concern -- `visualization/` only used it to pick a colour, but the
-    fact it establishes (which reward an animal's hidden-rule odor pays out) is
-    an analysis result. Moved here verbatim.
-
-    Its truthiness test used to be an inline ``isin(["true", "1", "1.0"])``,
-    which accepted a string `_is_truthy` did not. Phase 4b reconciled the two on
-    `_is_truthy`'s side (see it), so this now uses the package's one rule.
+Session metadata rather than a plotting concern, and it uses the package's
+    one truthiness rule (`common._is_truthy`).
     """
     votes: dict = defaultdict(lambda: {"A": 0, "B": 0})
     for subj_dir in subj_dirs:
@@ -465,7 +455,7 @@ def _first_hr_position(val):
 def hr_abort_poke_gap(trials, position_data):
     """Latency from the hidden-rule poke to the last poke of an aborted trial.
 
-    Checklist 8: `last poke_odor_end - hidden-rule poke_odor_end`, on trials that
+    `last poke_odor_end - hidden-rule poke_odor_end`, on trials that
     aborted having hit the hidden rule, plus the start-to-end variant. No
     canonical metric measures any latency *between positions*.
 
@@ -521,7 +511,7 @@ def hr_abort_poke_gap(trials, position_data):
 def rolling_hr_reward_fraction(trials, window, *, with_flags=False):
     """Rolling percentage of rewarded trials that were hidden-rule rewarded.
 
-    Checklist 9. Related to `hidden_rule_performance` but not a granularity of
+    Related to `hidden_rule_performance` but not a granularity of
     it: the denominator is rewarded trials, not hidden-rule hits. Indexed by the
     rows of `trials` it kept, in `sequence_start` order.
 

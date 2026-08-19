@@ -4,8 +4,7 @@ from __future__ import annotations
 
 """Running the metric set: one session, or a batch with merges.
 
-Mirrors ``trial_classification/run.py`` -- the orchestration, not the
-definitions. Moved out of ``metrics_utils.py`` in restructure_2 Phase 4b.
+Mirrors ``trial_classification/run.py`` -- the orchestration, not the definitions.
 
 ``run_all_metrics`` is what writes ``metrics_<subj>_<date>.json`` and
 ``.txt``. The **json** is fingerprinted by ``qc/regression.py``; the **txt** is
@@ -100,7 +99,7 @@ def _report_fa_abortion_stats(results):
         'by_position': fa_ab_stats[1].to_dict(orient='records') if hasattr(fa_ab_stats[1], 'to_dict') else None,
         'by_odor_position': fa_ab_stats[2].to_dict(orient='records') if hasattr(fa_ab_stats[2], 'to_dict') else None,
     }
-    # The metric is numeric (finding 3); summary.py owns how it reads.
+    # The metric returns numbers; summary.py owns how they read.
     shown = format_fa_abortion_tables(*fa_ab_stats)
     print("\nFA Abortion Stats by Odor:")
     print(shown[0].to_string(index=False) if hasattr(shown[0], 'to_string') else shown[0])
@@ -114,41 +113,22 @@ def _report_fa_abortion_stats(results):
 def metric_value(spec, results):
     """One registered metric's value for one session. **Computes; never reads a file.**
 
-    The single definition of the expression `docs/DECISIONS.md` section 5 requires a
-    consumer to evaluate a metric with. It was previously written out by hand in two
-    places -- the `REPORT` loop below and `visualization.prep._computed_metrics` -- and
-    section 5 kept them in step by saying so in prose. Follow-up item 7c added a third
-    consumer (`hypnose_behavior.accessors.Session.metrics`), at which point prose stops
-    being enough: section 27's rule is that a second spelling of one declaration is how
-    the two come to disagree.
+    **The single definition of the expression every consumer must evaluate a metric
+    with** -- `prep._computed_metrics` and `accessors.Session.metrics` both call it. A
+    second spelling of it is how two figures come to show the same quantity and disagree.
+    See DECISIONS.md sections 5 and 34.
 
-    **The rule has one branch, and the registry makes it single-valued.** Measured over
-    all 43 registered metrics: a `session` wrapper exists for exactly the 25 in `REPORT`
-    and for none of the 18 outside it, and the same is true of `adapter`. So:
-
-    - **has a wrapper** -> `adapter(session(results))`, which is what `run_all_metrics`
-      saves and therefore what `metrics_*.json` holds. Not `spec.call`: several cores
-      take session configuration as keywords (`hidden_rule_counts_by_odor` needs
-      `hr_odors`/`hr_positions`, which `spec.call` cannot supply and which digging out
-      of `manifest`/`summary` is precisely the wrapper's job), and the adapter is part
-      of the saved shape rather than a formatting flourish.
-    - **has none** -> `spec.call(results)` at its declared defaults, which is the same
-      expression `qc/_common._unreported_metrics_fingerprint` fingerprints those 16 with.
-      So what this returns for an unreported metric is what the golden master watches.
-
-    `fa_abortion_stats` is special-cased here for the reason it is special-cased in both
-    of the places this replaces: it reports three tables rather than a value, so it fits
-    neither shape.
-
-    **Wrappers print; this suppresses it** -- a consumer is asking for a value, not for a
-    report. That is why `run_all_metrics` deliberately does **not** call this: its loop's
-    stdout *is* `metrics_<subj>_<date>.txt`, so routing it through a function that
-    swallows stdout would empty that file.
-
-    Raises whatever the metric raises. The two rolling metrics take `window`
-    positionally with no default, so they raise `TypeError` here; that is the section 5
-    line -- a window is a property of a figure, not of a session -- and callers that
-    should say so more clearly are expected to check before calling.
+    - **Has a `session` wrapper** -> `adapter(session(results))`, which is what
+      `metrics_*.json` holds. Not `spec.call`: several cores need session configuration
+      the wrapper digs out of `manifest`/`summary`, and the adapter is part of the saved
+      shape.
+    - **Has none** -> `spec.call(results)` at declared defaults, the same expression
+      `qc/_common._unreported_metrics_fingerprint` watches.
+    - `fa_abortion_stats` is special-cased: it reports three tables rather than a value.
+    - **Wrappers print; this suppresses it.** That is why `run_all_metrics` does *not*
+      call it -- its loop's stdout **is** `metrics_<subj>_<date>.txt`.
+    - Raises whatever the metric raises: the two rolling metrics take `window`
+      positionally with no default, so a caller wanting a clearer message checks first.
     """
     with contextlib.redirect_stdout(io.StringIO()):
         if spec.name == "fa_abortion_stats":
@@ -160,7 +140,7 @@ def metric_value(spec, results):
 
 
 # --------------------------------------------------------------------------------------
-# The per-trial and per-poke metric tables (restructure_2 Phase 7b.5)
+# The per-trial and per-poke metric tables
 # --------------------------------------------------------------------------------------
 #
 # Nine registered metrics return a *table* rather than a session value, so they are
@@ -256,9 +236,7 @@ def _build_metrics_by_poke(results):
     record of the session, so saving only the default would drop half the data (measured
     on `sub-057`: 629 completed + 45 aborted).
 
-    The grain is `global_trial_id` + position, which 7b.5 had to add to `poke_durations`
-    to make real -- it previously returned anonymous observations that could not be joined
-    back to a trial.
+    The grain is `global_trial_id` + position, so every row joins back to a trial.
     """
     position_data = results.get("position_data")
     spec = REGISTRY.get("poke_durations")

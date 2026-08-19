@@ -58,14 +58,13 @@ trial_rec.my_new_field = value
 ```
 
 `slots=True` means a typo raises at the assignment site instead of silently inventing a
-column of NaNs — which is exactly what the free-form dict used to do.
+column of NaNs.
 
 ### 3. If it is a datetime, add it to `DATETIME_FIELDS`
 
 **This one bites silently.** A column of nothing but `None` carries no type, so pandas
 infers `object`, and one empty run turns the merged column `object` — after which
-`to_csv` writes `…806000` where it used to write `…806`. Measured: 289 cells moved on
-the only multi-run session in the fixture set, and it is **invisible on single-run
+`to_csv` writes `…806000` rather than `…806`. It is **invisible on single-run
 sessions** (§21). Cast losslessly; never `errors="coerce"`.
 
 ### 4. What happens automatically

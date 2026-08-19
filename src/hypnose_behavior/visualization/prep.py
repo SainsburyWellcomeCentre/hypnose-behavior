@@ -3,35 +3,21 @@ from __future__ import annotations
 
 """The non-drawing leaf of `visualization/`: what more than one plotter module needs.
 
-Every plotter module depends on this; **this depends on no plotter module**. That
-one-way edge is the invariant of `docs/DECISIONS.md` sections 3 and 13 -- a thing
-shared by two plotting modules is promoted here, never reached by importing a
-sibling -- and it is what made the Phase 10 split of `visualization_utils.py`
-tractable at all. Measured after that split: 12 importers, of which 2 are the
-movement modules. It therefore does **not** belong under `movement_analysis/`;
-that would invert the edge for the other ten.
+Shared non-drawing code: session collection, JSON/label parsing, colour and marker
+sizing, trajectory prep, the figure-level loaders and the registry-backed metric access.
 
-It began (Phase 5) as trajectory prep for the two movement modules alone, and
-`resample_trace` / `smooth_xy` / `load_tracking_with_behavior` are the survivors
-of that. The rest arrived because it is where shared non-drawing code goes:
-session collection, JSON/label parsing, colour and marker sizing, the
-figure-level loaders, and -- from Phase 10 -- the registry-backed metric access
-`DECISIONS.md` section 5 describes.
-
-The Phase 5 history, kept because the conclusion still binds. The Phase 4 audit's
-finding listed seven helpers duplicated 2-4x across `movement_analysis_utils`
-and `movement_analysis/sing_rew_movement` and called for de-duplicating both
-files in one pass, on the premise that "every row has a twin".
-
-**Measured, that premise does not hold: most of them are different rules
-wearing the same name, and merging them would change what is plotted.** Only
-the two below are genuinely the same computation. What the others do, and the
-numbers, are in `docs/DECISIONS.md` section 13 -- read that before trying the
-merge again.
-
-This is prep, not display arithmetic: it reshapes the trace *before* anything
-is drawn. `primitives.py` is the other half, and takes the mean/SEM/rolling of
-values that are already on the figure.
+- **Every plotter module depends on this; this depends on no plotter module.** A thing
+  two plotting modules share is promoted here, never reached by importing a sibling.
+  Zero plotter-to-plotter imports is the invariant to preserve. See DECISIONS.md
+  sections 3 and 13.
+- It has 12 importers of which only 2 are the movement modules, so it does **not**
+  belong under `movement/` -- that would invert the edge for the other ten.
+- Prep, not display arithmetic: it reshapes data *before* anything is drawn.
+  `primitives.py` is the other half, taking the mean/SEM/rolling of values already on
+  the figure.
+- The helpers here are the ones genuinely shared. Several similarly-named helpers in
+  the plotters are **different rules wearing the same name**; do not merge them. See
+  DECISIONS.md section 13.
 """
 
 import numpy as np
@@ -66,11 +52,9 @@ __all__ = [
     "_coerce_tz_naive", "_load_protocol_from_summary",
     "load_tracking_frame", "load_tracking_with_behavior",
     "_load_subject_trial_timeline",
-    # Phase 10 (follow-up Item 1): promoted out of `visualization_utils.py`
-    # because each is used by two or more of the construct modules it was split
-    # into -- section 3's rule, that a shared thing becomes a leaf rather than a
-    # peer import. `_computed_metrics` is the one DECISIONS section 5 names by
-    # its old path; it is the same function, unmoved in behaviour.
+    # Used by two or more construct modules, hence leaves here rather than peer
+    # imports. DECISIONS.md section 5 names `_computed_metrics` by its old path
+    # `visualization._computed_metrics`; it is this function.
     "_extract_metric_value", "_metric_name_for_key", "_computed_metrics",
     "_computed_metric", "_series_line_widths", "_build_odor_colors",
 ]
@@ -251,16 +235,13 @@ def _ordered_groups(group_keys, preferred):
     """Labels in `preferred`'s canonical order first, then every other label in
     the order `group_keys` yields them.
 
-    **`group_keys` must be ordered.** Until restructure_2 Phase 5 the three
-    multi-session callers accumulated into a bare `set()`, so every label outside
-    `preferred` was drawn in string-hash order -- which varies between processes,
-    making those figures irreproducible run to run rather than merely oddly
-    ordered. It went unnoticed because `preferred` lists only the four 3-odor
-    sequences: on a 5-odor protocol *every* drawn series took the hash path.
+    **`group_keys` must come from an ordered container.** Accumulate labels first-seen,
+    never into a bare `set()`: string-hash order varies between processes, so the figure
+    stops being reproducible run to run. A `preferred` list covering none of the live
+    data is not a partial ordering, it is no ordering. See DECISIONS.md section 11.
 
-    An unordered input is sorted rather than iterated, since a set has no order
-    to preserve and sorting is the only deterministic thing left to do with one.
-    That is a guard against the defect returning, not the normal path.
+    A set input is sorted rather than iterated -- a guard against the defect returning,
+    not the normal path.
     """
     if isinstance(group_keys, (set, frozenset)):
         group_keys = sorted(group_keys)
@@ -526,16 +507,15 @@ def _load_subject_trial_timeline(subjid, subj_dates, *, ses=None, index=None,
     }
 
 
-# Load metric results for visualization (NOTE: Previously in metrics_utils.py) ==============================================================================
+# Load metric results for visualization =====================================================================================================================
 
 def _extract_metric_value(metrics: dict, var_path: str):
     """
     Extract a numeric value from metrics dict given a dot-path.
 
-    A navigator over a metrics mapping, not a reader of one: since Phase 5 the
-    mapping comes from `_computed_metrics`, not from `metrics_*.json`. The
-    dot-path is how a plot names a sub-entry of a metric ("avg_response_time.Rewarded"),
-    so it survives the move to computing.
+    A navigator over a metrics mapping, not a reader of one: the mapping comes from
+    `_computed_metrics`, never from `metrics_*.json`. The dot-path is how a plot names
+    a sub-entry of a metric ("avg_response_time.Rewarded").
 
     Examples:
       - "decision_accuracy" -> uses the 3rd element (value) if tuple/list (num, denom, value)
@@ -586,21 +566,14 @@ def _computed_metrics(results_dir: Path, keys: Iterable[str]) -> dict:
     record of an analysis run -- not a plotting input (`docs/DECISIONS.md`
     section 5). That deletes the staleness problem rather than managing it.
 
-    `adapter(session(results))` is deliberately the *same expression* `run.py`
-    uses to build the file, so what a plotter now computes and what would have
-    been saved cannot drift apart by construction. Follow-up item 7c made that
-    structural rather than prose: the expression, its `fa_abortion_stats`
-    special case and its stdout suppression are `run.metric_value`, which the
-    session handle calls too, so there is one definition and not three copies
-    kept in step by a paragraph (`DECISIONS.md` sections 5 and 27).
+    Evaluates through `run.metric_value` -- the same expression `run.py` builds the file
+    with -- so what a plotter computes and what would have been saved cannot drift apart.
+    **Do not write that expression out again here.** See DECISIONS.md sections 5 and 34.
 
-    **The lenient miss stays here and is not shared.** A key naming no
-    registered metric is skipped rather than raised on, which is what plotters
-    have always relied on -- they ask for a fixed key list and draw whatever
-    comes back. `Session.metrics` raises instead, because a caller naming a
-    metric by hand has made a typo, not a coverage choice; that is the same
-    strict-at-one-end / lenient-at-the-other split as
-    `build_position_data(strict=)` (section 27).
+    **The lenient miss stays here and is not shared.** A key naming no registered metric
+    is skipped rather than raised on: plotters ask for a fixed key list and draw whatever
+    comes back. `Session.metrics` raises instead, because a caller naming a metric by
+    hand has made a typo rather than a coverage choice.
     """
     results = load_results_dir(results_dir)
     metrics = {}

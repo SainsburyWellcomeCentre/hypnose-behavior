@@ -7,16 +7,13 @@ from __future__ import annotations
 The trial-timing family is indexed by ``global_trial_id``, so pass one session's
 frames -- pooled frames repeat ids and the index alignment mis-pairs trials.
 
-Two quantities here share an everyday name with a ``trial_data`` column and are
-**not** it (the audit's finding 11): ``reward_delivery_latency`` is measured from
-leaving the odor port, where ``response_time_ms`` is measured from the reward-port
-poke. The FA counterpart, ``fa_latency_from_pokeout``, lives in ``false_alarm.py``
--- grouped by what it measures, not by the fact that it returns a time.
-
-The 10x-group-mean outlier rule that ``pred_seq_utils.response_time`` and
-``fa_analysis`` apply is deliberately **not** here. Judgement call 4 of the audit
-settles it: metrics raw, filtering is display -- so the rule stays in
-``visualization/``, where it can be seen and changed.
+- ``reward_delivery_latency`` shares an everyday name with ``response_time_ms`` and
+  is **not** it: this measures from leaving the odor port, that from the reward-port
+  poke. The FA counterpart, ``fa_latency_from_pokeout``, lives in ``false_alarm.py`` --
+  grouped by what it measures, not by returning a time.
+- **Metrics raw; filtering is display.** The 10x-group-mean outlier rule
+  ``pred_seq_utils.response_time`` and ``fa_analysis`` apply stays in
+  ``visualization/``, where it can be seen and changed.
 """
 
 import numpy as np
@@ -76,7 +73,7 @@ def avg_response_time_session(results):
 
 @metric(frame="trials")
 def inter_trial_interval(trials):
-    """Seconds from one trial ending to the next starting. Checklist 6.
+    """Seconds from one trial ending to the next starting.
 
     `sequence_start.shift(-1) - sequence_end`, so the last row is NaN. Pass a
     single session's trials: shifting across a session boundary would measure the
@@ -102,12 +99,10 @@ def _deepest_position_timestamp(position_data, blob, field):
 
 @metric(frame="trials+position_data")
 def reward_delivery_latency(trials, position_data):
-    """`first_supply_time` minus the last odor poke-out, in ms. Checklist 18.
+    """`first_supply_time` minus the last odor poke-out, in ms.
 
-    **Not** `trial_data.response_time_ms`, which is measured from the reward-port
-    poke rather than from leaving the odor port -- the audit's finding 11, two
-    quantities sharing an everyday name and not a definition. Written twice
-    today, as `pred_seq_utils.response_time` and `sing_rew._response_time_ms`.
+    **Not** `trial_data.response_time_ms`, which is measured from the reward-port poke
+    rather than from leaving the odor port: an everyday name shared by two definitions.
     """
     return _latency_ms(_trial_timestamp(trials, "first_supply_time"),
                        _deepest_position_timestamp(position_data, "in_poke_times",
@@ -118,7 +113,7 @@ def reward_delivery_latency(trials, position_data):
 def valve_to_reward_latency(trials, position_data):
     """`first_supply_time` minus the last position's `valve_start`, in ms.
 
-    Checklist 20. Nothing canonical measures anything from a valve opening.
+    Nothing canonical measures anything from a valve opening.
     """
     return _latency_ms(_trial_timestamp(trials, "first_supply_time"),
                        _deepest_position_timestamp(position_data, "in_valve_times",

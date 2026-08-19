@@ -4,9 +4,6 @@ from __future__ import annotations
 
 """Hidden-rule figures.
 
-Carved out of ``visualization_utils.py`` in restructure_2 Phase 10 (follow-up
-Item 1). Source-only move -- no behaviour change.
-
 The A/B association of a hidden-rule odor is never hard-coded; it is learned
 from the animal's own hidden-rule sessions via ``hr_odor_associations``, which
 is why the colour builder these share sits in ``prep`` with it.

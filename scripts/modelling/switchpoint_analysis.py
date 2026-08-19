@@ -5,28 +5,25 @@ Entry points and CLI only -- the numeric models, stats and figures live in ``src
 
 - ``hypnose_behavior.modelling.switchpoint``                 -- data prep, model fits, comparison,
   permutation and autocorrelation maths (numpy in, dicts out).
+
 - ``hypnose_behavior.visualization.modelling.switchpoint``   -- every figure.
 
-This module wires those together: it selects subjects, fits, prints the tables, builds the
-figures, and exposes four entry points, each callable from a notebook (import, call, get
-results and figure handles back) or from the terminal via the argparse wrapper at the bottom:
+Here: 
 
 - ``run_analysis``                -- per-animal switch-point fit, posterior, and model comparison
   (with the three Q-learning null trajectories overlaid unless turned off).
+
 - ``run_qlearning_sweep``         -- one ``(alpha, b)`` parameter-sweep figure per Q-learning
   variant (standalone; three figures per sequence).
+
 - ``run_permutation``             -- do switches sit closer to *real* sleep boundaries than to
   other animals' donated ones?
+
 - ``run_logistic_diagnostic``     -- where each of the logistic's multi-start initial conditions
   converges (standalone; nothing else depends on it).
+
 - ``run_residual_autocorrelation``-- the i.i.d.-Bernoulli check behind the planned bootstrap.
 
-None of them depends on the others having run; all build their trial sequences through
-``prepare_subject``. Trials are read from the ``trial_data.parquet`` written by trial
-classification, so run that first. A trial is kept when ``is_aborted == False`` (and, with
-``rewarded_only``, when ``response_time_category == "rewarded"``), and it scores 1 (SHORT) when
-``hidden_rule_success`` is truthy, else 0 (LONG). Kept trials are re-indexed 0..n-1 continuously
-across sessions.
 
 Examples
 --------
@@ -96,14 +93,8 @@ from hypnose_behavior.visualization.modelling.switchpoint.plots import (
 _LOGLIK_REPORT_TOL = 1e-3
 
 # Which animals count as "has a switch" in run_permutation. Keys are the `inclusion` values.
-#
-# TODO (deferred): `qlearning` is now a real fit and is eligible to win compare_models, so
-# `bic_switch_wins` and `aic_switch_wins` silently drop any animal where the mechanistic null
-# takes the BIC/AIC crown -- an exclusion that did not exist while qlearning was a stub, and
-# one that is currently invisible in the printed "no switch under '<rule>'" line beyond the
-# named winner. Make it an explicit, counted choice: either a rule that treats a qlearning win
-# as "no abrupt switch" deliberately, or one that ranks the switch model against the
-# descriptive models only. Not changed here.
+
+#NOTE: update inclusion rules when updating the permutation plot. Deferred. 
 _INCLUSION_RULES = {
     # Strictest: the 3-parameter switch beats BOTH the constant and the 4-parameter
     # logistic on BIC, i.e. the change is real *and* abrupt rather than a slow drift.
@@ -345,9 +336,9 @@ def _show_figures(show: bool) -> None:
     the cell is auto-displayed at cell end, in creation order, by the backend's ``post_execute``
     flush hook -- so we must NOT also call ``plt.show()`` there. ipympl's ``show()`` eagerly
     displays only the *active* (last-created) figure mid-execution and drops it from the flush
-    queue, which floats it above all the others; this is why the last-built (reward-B Q-learning)
-    figure used to appear first. For non-interactive/GUI backends (the CLI) nothing auto-displays,
-    so ``plt.show()`` is still required.
+    queue, which floats it above all the others -- so the last-built figure would appear
+    first. For non-interactive/GUI backends (the CLI) nothing auto-displays, so
+    ``plt.show()`` is required.
     """
     if not show:
         return
@@ -372,19 +363,7 @@ def run_analysis(
 ) -> dict:
     """Fit and plot the strategy switch for each subject independently.
 
-    Produces three figures per animal, in this order: the binary SHORT/LONG strategy coloured
-    by reward identity, with sleep markers; the five-model comparison
-    (constant / switch / logistic / switch2 / qlearning) with AIC and BIC in-panel; and the
-    switch-point posterior windowed around its peak. The peak trial, its session, and the HDI
-    width are printed as well as annotated. Figures are shown one animal at a time, so an
-    animal's plots stay together and in order. With ``split_ab`` the reward-A and reward-B
-    figures of one animal are interleaved by kind (A strategy, B strategy, A model comparison,
-    B model comparison, ...), so same-kind figures sit next to each other.
-
-    Unless ``qlearning_overlay=False``, the three Q-learning variants -- the mechanistic null --
-    are also fitted per animal (per A/B subset, with ``split_ab``), tabulated, and overlaid on
-    the model-comparison figure as dash-dot curves. They are never fitted on pooled or averaged
-    data; see ``hypnose_behavior.modelling.switchpoint.qlearning``.
+    Produces three figures per animal.
 
     Parameters
     ----------
@@ -401,18 +380,11 @@ def run_analysis(
         Half-width, in trials, of the posterior plot's window around the peak.
     split_ab : bool
         Analyse the A- and B-reward trials separately: each subset gets its own contiguous
-        trial axis, its own fits, and its own three figures. Trials whose reward identity is
-        unresolved fall into neither subset. When False (default) all trials are modelled as
-        one sequence and reward identity only colours the strategy plot.
+        trial axis, its own fits, and its own three figures.
     show : bool
-        Display each animal's figures once built (default True). In an interactive notebook
-        backend the figures are shown by the backend's own flush hook, in creation order; on
-        other backends this triggers ``plt.show()``. See ``_show_figures``.
+        Display each animal's figures once built (default True).
     qlearning_overlay : bool
-        Fit the three Q-learning variants (default True). Their one-step-ahead fits are overlaid
-        on the model-comparison figure and an extra ``generative`` figure is produced. Set False
-        to skip the fits entirely -- the figures and the printed output then match the
-        pre-Q-learning behaviour, and no ``generative`` figure is built.
+        Fit the three Q-learning variants (default True). 
     around_switch : bool
         Crop each model-comparison figure's x-axis to ``plot_trials`` trials either side of the
         switch tau (default False, showing the whole trial axis). Only the view changes; the fits
@@ -420,10 +392,7 @@ def run_analysis(
     plot_trials : int
         Half-width in trials of the ``around_switch`` crop (default 200).
     save : bool
-        Save every figure to disk (default False). Each is written as its own PDF into the
-        subject's ``derivatives/sub-NNN_id-*/figures`` directory via ``save_figure``, named by
-        figure kind with the reward letter prefixed for a split (e.g. ``A_all_models``,
-        ``B_qlearning_generative``). Independent of ``show``.
+        Save every figure to disk (default False). Each is written as its own PDF.
 
     Returns
     -------
@@ -456,10 +425,6 @@ def run_analysis(
                           for letter in AB_LETTERS}
                 splits = {letter: r for letter, r in splits.items() if r is not None}
                 if splits:
-                    # Interleave the splits by figure kind: all splits' strategy figures, then
-                    # all their model-comparison figures, and so on -- so within an animal the
-                    # reward-A and reward-B figures of the same kind sit next to each other,
-                    # rather than every A figure preceding every B figure.
                     for kind in _FIGURE_KINDS:
                         for letter, r in splits.items():
                             fig = _build_sequence_figure(r, kind, rewarded_only, likelihood_window,
@@ -546,13 +511,6 @@ def run_qlearning_sweep(
     show: bool = True,
 ) -> dict:
     """Draw one Q-learning ``(alpha, b)`` parameter-sweep figure per variant, per animal.
-
-    A **standalone** entry point -- ``run_analysis`` does not call it. Per animal (or per A/B
-    subset) it fits all three variants, prints their estimates, and produces **three figures**:
-    one per variant, each showing the binary trial data with the P(SHORT) trajectories of a
-    4 x 4 ``(alpha, b)`` grid overlaid and that variant's maximum-likelihood fit highlighted.
-    ``Q0`` (and ``kappa``) are held at their fitted values on every grid line, so the figure
-    isolates the two parameters that set the *shape* of the curve.
 
     ``alpha`` is mapped to colour and ``b`` to linestyle, each with its own legend.
 
@@ -645,10 +603,6 @@ def run_logistic_diagnostic(
     show: bool = True,
 ) -> dict:
     """Show where every logistic multi-start initial condition converges, per animal.
-
-    A standalone diagnostic -- ``run_analysis`` does not call it. It replays the exact start
-    set that ``fit_logistic`` ships with (``logistic_start_points``, via
-    ``fit_logistic_multistart``), so what is plotted is what is fitted.
 
     Per animal it prints a per-start table (initial midpoint -> converged midpoint, converged
     slope, converged loglik) and draws one figure: the raw SHORT/LONG trials with the
@@ -846,28 +800,6 @@ def run_permutation(
     show: bool = True,
 ) -> dict:
     """Permutation test of whether strategy switches sit closer to sleep than chance.
-
-    For every included animal, ``f`` is the number of trials from the start of the session
-    containing ``tau`` to ``tau`` -- i.e. how deep into a session, and so how long after
-    sleep, the switch happened.
-
-    **Statistic**: the mean of ``f`` across included animals.
-
-    **Null**: switches are unrelated to that animal's own sleep timing. It is realized by
-    *donating* boundaries across animals -- each recipient keeps its real ``tau`` and its own
-    trial axis, but is scored against another included animal's session starts. One
-    permutation assigns every recipient exactly one donor (without replacement where
-    possible) and takes the mean ``f`` over recipients; ``n_permutations`` of these give the
-    null distribution. Pairing donors one-to-one keeps each permutation's statistic on the
-    same footing as the observed one; pooling all recipient x donor values instead would
-    understate the null's spread.
-
-    **Direction**: one-sided, testing that switches sit *closer* to real sleep than chance:
-    ``p = (1 + #{null mean <= observed mean}) / (n_permutations + 1)``. The ``+1`` keeps ``p``
-    strictly positive. A small ``p`` means real ``f`` is smaller than donated ``f``.
-
-    Pairs whose donor trial axis does not reach the recipient's ``tau`` are dropped rather
-    than scored (see ``pairwise_f``), both from the null and from the plotted pool.
 
     Selects its own subjects and recomputes every fit, so it never depends on
     ``run_analysis`` having been called.

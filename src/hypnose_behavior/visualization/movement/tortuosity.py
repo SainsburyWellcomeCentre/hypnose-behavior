@@ -2,11 +2,7 @@
 # importable on Python 3.9 for repos pinned there (hypnose-eeg-preprocessing).
 from __future__ import annotations
 
-"""Tortuosity overlay figures from SLEAP tracking.
-
-Carved out of ``movement_analysis_utils.py`` in restructure_2 Phase 10
-(follow-up Item 1). Source-only move -- no behaviour change.
-"""
+"""Tortuosity overlay figures from SLEAP tracking."""
 
 import pandas as pd
 import matplotlib.pyplot as plt

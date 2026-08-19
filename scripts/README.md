@@ -65,9 +65,8 @@ python scripts/batch_process.py --subjids 53 58 --dates 20260528
 
 ## `parquet_peek.py`
 
-Parquet is the format and CSV is off by default, so "open the CSV and look" stopped
-being an answer for anything written after Phase 7b.3. This is the replacement.
-Three views, narrowing:
+Parquet is the format and CSV is off by default, so this is how you look at a saved
+table. Three views, narrowing:
 
 ```bash
 # every table in the session: rows, columns, size on disk

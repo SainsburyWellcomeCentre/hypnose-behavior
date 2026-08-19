@@ -1,8 +1,7 @@
 """Printing/saving the merged session summary report.
 
-Extracted from trial_classification/classification_utils.py during the restructuring
-(Phase 3). Pure move -- behaviour unchanged (to be re-verified by the regression
-harness once the data mount is available).
+Reads the **in-memory** `classification` dict, not the saved files, so it still sees
+the per-position blobs `save_results` drops on the way to disk.
 """
 from __future__ import annotations
 

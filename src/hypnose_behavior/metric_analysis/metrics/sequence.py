@@ -8,14 +8,10 @@ from __future__ import annotations
 ``odorx_abortion_rate``; ``hidden_rule.py`` imports it for the same count
 restricted to the hidden-rule odors.
 
-The per-position denominators are ``frames.reached_counts`` -- the package's
-single definition of "reached" (audit Q5), over ``frames.sequence_depths``. The
-audit's ``presentations``-sourced target and today's rule disagreed on 10 of
-1731 fixture trials; Phase 6b's ``poke_source`` closed that gap (the two sources
-now agree) and the rule was settled in ``DECISIONS.md`` section 10, then stated
-as one expression in section 18. Phase 7b.4b moved where it is *read from* --
-``position_data`` rather than the trial row's JSON blobs -- which is why these
-cores take a second frame.
+The per-position denominators are ``frames.reached_counts`` over
+``frames.sequence_depths`` -- the package's single definition of "reached". They read
+``position_data``, which is why these cores take a second frame. See DECISIONS.md
+sections 10 and 18.
 """
 
 import numpy as np
@@ -71,11 +67,13 @@ def sequence_completion_rate_session(results):
 def presentation_counts_by_odor(position_data):
     """`{odor_name: n presentations}` -- the denominator of `odorx_abortion_rate`.
 
-    Counts `presentations` rows, which since Phase 6b include a trailing position the
-    animal never poked: the valve opened and the odor *was* presented, so it belongs in a
-    count of presentations. It is deliberately not filtered on `poke_source` -- the
-    numerator is `last_odor_name`, the last odor actually sampled, so such a position
-    contributes a presentation and no abortion. `DECISIONS.md` section 10.
+    Counts `in_presentations` rows, including a trailing position the animal never poked:
+    the valve opened, so the odor *was* presented.
+
+    **Do not filter this on `poke_source`.** The numerator is `last_odor_name`, the last
+    odor actually sampled, so such a position contributes a presentation and no abortion.
+    `presentations` answers "what did the rig deliver", `poke_source` answers "what did
+    the animal sample". See DECISIONS.md section 10.
     """
     rows = _position_rows(position_data, "in_presentations")
     if rows is None or rows.empty:
@@ -88,10 +86,9 @@ def presentation_counts_by_odor(position_data):
 def odorx_abortion_rate(trials, position_data, *, with_counts=False):
     """aborts@odor / presentations@odor."""
     empty = ({}, {}, {}) if with_counts else pd.Series(dtype=float)
-    # Guarded on `presentations` until Phase 7b.4b, though it never read the blob: its
-    # denominator comes from `position_data`. Left in place the guard would have made a
-    # REPORTED metric return empty for every session once the column went, which is the
-    # section 27 failure with no error to notice it.
+    # Deliberately not guarded on a `presentations` column: this reads its denominator
+    # from `position_data`, and a guard on a column the function does not use turns a
+    # reported metric silently empty the day that column goes.
     if trials.empty:
         return empty
     odor_col = "last_odor_name" if "last_odor_name" in trials.columns else "last_odor"
@@ -129,10 +126,8 @@ def odorx_abortion_rate_session(results):
 def abortion_rate_positionX(trials, position_data, *, with_counts=False):
     """aborts@position / trials that reached it.
 
-    The denominator is `frames.reached_counts` -- the single definition of
-    "reached" for the package (audit Q5). It takes `position_data` since Phase
-    7b.4b: "reached" is measured from the per-position rows, which used to be
-    JSON blobs inside the trial row and are now their own table.
+    The denominator is `frames.reached_counts`, the package's single definition of
+    "reached", measured from the per-position rows.
     """
     empty = ({}, {}, {}) if with_counts else pd.Series(dtype=float)
     if trials.empty:

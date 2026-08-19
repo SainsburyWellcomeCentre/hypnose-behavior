@@ -15,26 +15,18 @@ one line is the right cost for the commonest thing anyone does:
 
 ### This file imports nothing, and that is load-bearing
 
-**No eager re-exports here or in any package `__init__.py`** (follow-up item 2;
-`docs/DECISIONS.md` sections 3 and 31). They are what keep `frames.py` and
-`parameters.py` importable as leaves: an eager import here would make
-`import hypnose_behavior.frames` pull matplotlib, harp, aeon and dotmap, paid by every
-downstream repo including the ones pinned to Python 3.9 that `frames.py` is kept
-importable for.
-
-So the four names are forwarded lazily, through PEP 562's module `__getattr__`, which
-runs only on **attribute access** for a name not already bound. `import
-hypnose_behavior` and `import hypnose_behavior.frames` therefore cost exactly what they
-cost before this file had a body -- measured, 39 and 614 modules -- and
-`hypnose_behavior.session` pays for the analysis stack at the moment it is used.
-
-Four names, not everything `api` exports. The package root is a shortcut to the handle,
-not a second copy of the API surface -- two spellings of one thing is how the two come
-to disagree (section 27).
-
-**A name not on the list raises `AttributeError`**, which is what keeps
-`from hypnose_behavior import frames` working: Python asks for the attribute first and
-falls back to importing the submodule only when that raises.
+- **No eager re-exports here or in any package `__init__.py`.** They keep `frames.py`
+  and `parameters.py` importable as leaves: an eager import here would make
+  `import hypnose_behavior.frames` pull matplotlib, harp, aeon and dotmap, paid by every
+  downstream repo including the ones pinned to Python 3.9. See DECISIONS.md sections 3
+  and 34.
+- The four names are forwarded through PEP 562's module `__getattr__`, which runs only
+  on attribute access, so `import hypnose_behavior` stays cheap.
+- **Four names, not everything `api` exports.** The root is a shortcut to the handle,
+  not a second copy of the surface.
+- **A name off the list must raise `AttributeError`**, which is what keeps
+  `from hypnose_behavior import frames` working: Python asks for the attribute first and
+  imports the submodule only when that raises.
 """
 
 _FORWARDED_TO_API = frozenset({"session", "sessions", "Session", "metric_names"})

@@ -1,7 +1,8 @@
 """Saving trial-classification results to the derivatives tree.
 
-Extracted from trial_classification/classification_utils.py during the restructuring
-(Phase 3). Pure move -- behaviour unchanged (verified by the regression harness).
+Writes `trial_data`, its `position_data` side-table and `non_initiated_attempts` into
+`saved_analysis_results/`, beside a `manifest.json` recording what produced them.
+`io/load_results.py` is the read side.
 """
 from __future__ import annotations
 
@@ -17,28 +18,24 @@ import pandas as pd
 
 from hypnose_behavior.io.paths import get_rawdata_root, get_derivatives_root
 from hypnose_behavior.utils.helpers import vprint
-# Provenance is hypnose-helpers' (restructure_2 Phase 2c), so the stamp in a saved
-# manifest and the one embedded in a saved figure cannot drift apart.
+# One provenance implementation, so the stamp in a saved manifest and the one embedded
+# in a saved figure cannot drift apart.
 from hypnose_helpers.provenance import provenance
 # The single declaration of what `trial_data` holds -- see `io/protocol_schema.py`.
 from hypnose_behavior.io.protocol_schema import (
     ABORT_COLUMNS, ASSEMBLED_COLUMNS, POSITION_BLOB_COLUMNS, RESPONSE_TIME_COLUMNS,
     trial_data_columns,
 )
-# The one derivation of the long per-position frame, shared with `io/load_results.py`,
-# so the table written here and the one the loader falls back to deriving cannot drift
-# apart. `hypnose_behavior.frames` is a package-root leaf (standard library and pandas
-# only), which is what lets `trial_classification` reach it through this module without
-# picking up a `metric_analysis` dependency -- `docs/DECISIONS.md` section 3.
+# The one derivation of the long per-position frame, shared with `io/load_results.py`.
+# A package-root leaf; keep it one -- DECISIONS.md section 3.
 from hypnose_behavior.frames import build_position_data
-# The hardcoded scoring knobs, stamped into the manifest below. Also a package-root leaf,
-# for the same reason and with the same obligation -- DECISIONS section 3.
+# The hardcoded scoring knobs, stamped into the manifest below. Also a package-root leaf.
 from hypnose_behavior.parameters import scoring_parameters
-# One rule for rewarded/unrewarded/timeout, shared with trial_classification. That module is a
-# leaf importing nothing from the package, so this is not a cycle -- DECISIONS section 3.
+# One rule for rewarded/unrewarded/timeout, shared with trial_classification. `outcome` is
+# a leaf, so this is not a cycle.
 from hypnose_behavior.trial_classification.outcome import classify_completed_trial, TIMEOUT
-# Generic serialisation moved to hypnose-helpers (restructure_2 Phase 2a); re-exported
-# here because callers import these names from this module.
+# Generic serialisation lives in hypnose-helpers; re-exported here because callers
+# import these names from this module.
 from hypnose_helpers.io.serialize import (  # noqa: F401
     _json_safe, _json_default, _normalize_df_for_io,
 )
@@ -58,11 +55,10 @@ def _has_value(v):
 def _derive_outcome(row):
     """Outcome of one trial re-derived from the saved supply/poke counts.
 
-    Deliberately independent of the response-time analysis: this runs over the merged trial
-    table and fills in a category for the trials that pass could not compute one for. The rule
-    itself is `trial_classification.outcome.classify_completed_trial`; what belongs here is only
-    the reading of it off saved columns, and the fact that this table's timeout is spelled
-    ``timeout_delayed``.
+    Independent of the response-time analysis: it fills in a category for the trials that
+    pass could not compute one for. The rule is
+    `trial_classification.outcome.classify_completed_trial`; what belongs here is reading it
+    off saved columns, and this table's timeout being spelled ``timeout_delayed``.
     """
     # Bool-safe: pandas may store sequence_rewarded as numpy.bool_, and NaN means "not a
     # single-reward session" rather than "not a rewarded sequence".
@@ -85,32 +81,20 @@ def _derive_outcome(row):
 def _analysis_provenance() -> dict:
     """``{"commit": ..., "version": ...}`` for the code writing these results.
 
-    **What it is for: auditing.** "Which sessions were produced before commit X, and
-    should I re-run them?" It catches the case a schema check cannot -- Phase 6's
-    close-out moved a *value* on one trial while adding and removing no column at all,
-    so comparing field sets would have been silent on it.
+    For auditing: "which sessions were produced before commit X, and should I re-run
+    them?" It is **not** a cache key -- a commit stamp invalidates on every unrelated
+    commit, so plotters still compute through the registry (DECISIONS.md section 5).
 
-    **This does not re-open ``DECISIONS.md`` section 5.** That rejected provenance as a
-    *metrics-cache key*, because a commit stamp invalidates on every unrelated commit --
-    a docstring fix would force re-analysing the whole server. Stamping for audit is a
-    different job; plotters still compute through the registry.
+    **Pass both arguments explicitly; do not let `provenance()` inspect the calling
+    frame.** Each omission produces a plausible-looking wrong answer rather than an
+    error: an anchor resolved inside the installed `hypnose-helpers` stamps every repo
+    with the helpers commit, and a `call` captured from a notebook frame resolves to
+    ``__main__``, where `package_version` returns ``None``.
 
-    Both arguments are passed explicitly rather than letting `provenance()` inspect the
-    calling frame, and that is deliberate:
-
-    * ``anchor=__file__`` names *this* repo. `hypnose-helpers` is installed as a
-      library, so an anchor resolved there would stamp every repo with the helpers
-      commit -- plausible-looking and wrong.
-    * ``call={"module": __name__}`` fixes the distribution whose version is reported.
-      Captured from the frame instead, a call from a notebook resolves to ``__main__``
-      and `package_version` returns ``None``. It also sidesteps the section 9 wrapper
-      hazard entirely, since nothing is being captured.
-
-    Cached: it shells out to ``git``, and the answer describes the code as *imported*,
-    which cannot change while the process runs. Both keys are always present, so a
-    reader can tell "written before provenance existed" (no key) from "written by code
-    whose commit could not be resolved" (``None``) -- the section 2 rule about absent
-    markers, applied to the manifest.
+    **Write both keys always, even as `None`**, so a reader can tell "written before
+    provenance existed" (no key) from "written by code whose commit could not be
+    resolved" (``None``). Cached because it shells out to ``git`` and describes the code
+    as *imported*, which cannot change while the process runs.
     """
     prov = provenance(anchor=__file__, call={"module": __name__})
     return {"commit": prov.get("commit"), "version": prov.get("version")}
@@ -156,20 +140,17 @@ def resolve_derivatives_output_dir(root) -> tuple[Path, dict]:
 def save_session_analysis_results(classification: dict, root, session_metadata: dict | None = None, data=None, events=None, verbose: bool = True, save_csv: bool = False) -> Path:
     """Write a session's analysis results to the derivatives tree.
 
-    ``save_csv`` adds a human-readable CSV of every table alongside the parquet. It is
-    **off by default**: parquet is the format that round-trips dtypes and blobs, and a
-    second copy of every table is worth writing only when someone is going to read it by
-    eye. Anything that needs the CSV must ask for it explicitly rather than rely on the
-    default -- the QC harness does, so a later change to the default cannot quietly break
-    the gate.
+    ``save_csv`` adds a human-readable CSV of every table alongside the parquet, off by
+    default. **A caller that needs the CSV must pass it explicitly rather than rely on the
+    default**, so a later change to the default cannot quietly break a gate.
     """
     out_dir, info = resolve_derivatives_output_dir(root)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Which record the classifier built, and therefore which columns this session should
-    # carry. Absent only if `classification` did not come through `classify_trials`, in
-    # which case nothing is conformed and no mode is stamped -- guessing one would put a
-    # wrong schema in the manifest, which is worse than an absent key (section 2).
+    # carry. Absent if `classification` did not come through `classify_trials`; nothing is
+    # then conformed and no mode is stamped, since guessing one would put a wrong schema in
+    # the manifest.
     protocol_mode = classification.get("protocol_mode") if isinstance(classification, dict) else None
 
     manifest = {
@@ -177,16 +158,13 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
         # Manifest only. The regression fingerprints `trial_data` and the metrics dict
         # and never reads this file, so the stamp cannot cause a spurious RED.
         **_analysis_provenance(),
-        # The hardcoded scoring knobs this run applied, so "what was this session scored
-        # with" is answerable from the file (section 19). Built by introspection over
-        # `parameters.py`, never hand-copied, so it cannot disagree with what ran; a knob
-        # added there is stamped without touching this line. NOT merged into
-        # `summary.json`'s `params`, which holds the per-session *schema* values -- a
-        # different question, and one whose answer legitimately differs per session.
+        # The hardcoded scoring knobs this run applied, by introspection over
+        # `parameters.py` so it cannot disagree with what ran. **Keep it out of
+        # `summary.json`'s `params`**, which holds per-session *schema* values.
         "analysis_parameters": scoring_parameters(),
         # Which schema this file follows, so a reader checks it against the right field
-        # set instead of guessing from the columns it happens to find. Absent on every
-        # file written before Phase 7b, which is how the loader knows to skip the check.
+        # set instead of guessing from the columns it happens to find. Absent on older
+        # files, which is how the loader knows to fall back to the mode-independent check.
         "protocol_mode": protocol_mode,
         "session": _json_safe(session_metadata or {}),
         "paths": info,
@@ -238,15 +216,10 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
 
         # Ensure every column this protocol's schema declares exists, so the table's shape
         # is a function of the protocol rather than of which branches this session's trials
-        # happened to take. Replaces two hand-maintained lists: the abort/response-time
-        # columns above, and a single-reward block that added twelve `fr_*` columns as soon
-        # as any one of them was present.
+        # happened to take. Columns are added, never reordered.
         #
-        # Columns are added, never reordered: the fingerprint sorts columns, but the CSV on
-        # disk is read by people, and moving `global_trial_id` off the front buys nothing.
-        #
-        # `ASSEMBLED_COLUMNS` are excluded because the three lines below own them, and
-        # creating them here as NaN would break both: `run_id`'s fallback is guarded on the
+        # **`ASSEMBLED_COLUMNS` must stay excluded** -- the three lines below own them, and
+        # creating them here as NaN breaks both: `run_id`'s fallback is guarded on the
         # column being *absent*, so it would stay null, and `global_trial_id` would be
         # appended at the end instead of inserted at the front.
         expected = [c for c in trial_data_columns(protocol_mode) if c not in ASSEMBLED_COLUMNS] \
@@ -313,59 +286,30 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     else:
         classification["trial_data"] = pd.DataFrame()
 
-    # The measured per-position table: one row per `trial x position`, with `poke_source`
-    # and section 2's three provenance flags (`in_poke_times` / `in_presentations` /
-    # `in_valve_times`) as real typed columns instead of a table smuggled into a cell.
+    # The only saved form of the per-position record: one row per `trial x position`, with
+    # `poke_source` and the three provenance flags as real typed columns.
     #
-    # **This is now the only saved form of the per-position record.** The three blobs are
-    # dropped from `trial_data` immediately below; every reader was moved onto this table
-    # first, and `qc/position_data_lossless.py` asserts the precondition that licenses the
-    # drop -- every blob field recoverable here with an equal value, bar one allow-listed
-    # key that is already saved as its own table (section 24).
+    # **Build it from the in-memory `trial_df`, not at load time.** The blobs are
+    # JSON-encoded on their way into `trial_data.parquet`, so a load-time derivation gets
+    # its five timestamp fields back as ISO strings where this carries real `datetime64`.
+    # Must run after `global_trial_id` is assigned above.
     #
-    # Built from the **in-memory** `trial_df`, deliberately, and that is the whole reason
-    # this is worth writing: the blobs are JSON-encoded on their way into
-    # `trial_data.parquet`, so a frame derived at *load* time gets its five timestamp
-    # fields back as ISO strings, while this one carries real `datetime64`. Measured
-    # across the nine fixture sessions (4,791 position rows): the two agree on every
-    # cell of every column once parsed, and differ only in the dtype of `poke_odor_start`
-    # / `poke_odor_end` / `poke_first_in` / `valve_start` / `valve_end`. Every metric
-    # reading those normalises through `metrics.common._tz_naive` (`pd.to_datetime`), so
-    # all 14 evaluable `position_data` metrics return identical values either way.
-    #
-    # Built after `global_trial_id` is assigned above, because that is one of the id
-    # columns `build_position_data` carries onto every row.
-    #
-    # **`strict=True`, and only here.** The blobs were just built by this run's
-    # classifier, so a field `build_position_data` does not carry means somebody added
-    # one and did not carry it across -- and once 7b.4b drops the blobs, that is data
-    # loss with no signal. Raising stops this session before it writes a `position_data`
-    # quietly missing a column; `batch_analyze_sessions` catches per session, so the
-    # broken one names itself and the batch completes (the section 20 rule). Read paths
-    # deliberately stay lenient: they also run over sessions saved long before these
-    # field lists existed, and refusing to read those would be the worse failure.
+    # **`strict=True` here and nowhere else:** these blobs came from this run's classifier,
+    # so an uncarried field means somebody added one and did not carry it. Read paths stay
+    # lenient because they also run over sessions older than these field lists. See
+    # DECISIONS.md section 27.
     classification["position_data"] = build_position_data(
         classification["trial_data"], strict=True)
 
     def _save_df(name: str, df) -> bool:
         """Write one table: parquet always, CSV only when asked for.
 
-        **Parquet is the format; CSV is a convenience.** It is written for every table, not
-        just `trial_data`, because `save_csv=False` would otherwise make a table unreadable
-        rather than merely unreadable-by-eye -- `loaders._load_table_with_trial_data` could
-        load the `non_initiated_*` tables from CSV *only*, and would have returned an empty
-        frame with no error.
-
-        **`save_csv` stays uniform across tables** (Item 5). The follow-up plan's "drop CSV
-        and .schema.json" for the non-initiated tables was written against a pre-7b.3 file
-        count, where every table got all three files; with CSV off by default they already
-        get parquet alone. Exempting particular tables from the flag would re-introduce the
-        per-table asymmetry section 23 removed -- and would silently deny a CSV to the one
-        caller who asked for one.
+        **Parquet for every table, and `save_csv` uniform across them.** Exempting a table
+        from the parquet write makes it unreadable rather than merely unreadable-by-eye,
+        since CSV is off by default. See DECISIONS.md section 23.
 
         The `.schema.json` sidecar goes with the CSV, not the parquet: it records which
-        object columns were JSON-encoded to survive a flat text file, which parquet does not
-        need because it stores them as real values.
+        object columns were JSON-encoded to survive flat text, which parquet does not need.
         """
         if not isinstance(df, pd.DataFrame) or df.empty:
             return False
@@ -395,44 +339,17 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     # Save only the streamlined set: trial_data, its per-position side-table, and the
     # non-initiated table.
     #
-    # **`non_initiated_attempts` is the only non-initiated table saved** (Item 5). Its two
-    # inputs -- `non_initiated_sequences` and `non_initiated_odor1_attempts` -- are each
-    # fully contained in it, **by construction** rather than by agreement on the coverage
-    # sessions:
-    #
-    #   1. `run.py` builds the FA input as `concat([sequences, odor1_attempts])`, so every
-    #      row and every column of both enters;
-    #   2. `aborted_trials.classify_noninitiated_FA` drops a row only when `attempt_end` is
-    #      NaN, and neither source can produce one -- `detect_trials` falls back to the
-    #      valve's own `event_start`, and `prior_presentations` takes its `valve_end` from
-    #      `windows.valve_windows_closing_at_series_end`, which closes an unterminated
-    #      activation at the series' last timestamp rather than leaving it null;
-    #   3. each output row is `{**row.to_dict(), <6 FA fields>}`, so every input cell is
-    #      carried verbatim.
-    #
-    # Columns, rows and values are all subsets. The only difference is dtype widening at
-    # the concat, int64 -> float64 wherever the other source's rows introduce nulls
-    # (`attempt_number`, `global_trial_id`, `trial_id`). Verified cell-by-cell and typed:
-    # zero genuine differences.
-    #
-    # Both inputs stay in `classification` -- they are the *inputs* to that concat, and
-    # `summary.py` and `merge.py` report their counts. Only the files go.
+    # **`non_initiated_attempts` is the only non-initiated table saved**: its two inputs,
+    # `non_initiated_sequences` and `non_initiated_odor1_attempts`, are each contained in it
+    # by construction (DECISIONS.md section 30). Both stay in `classification` regardless --
+    # they feed that concat, and `summary.py` and `merge.py` report their counts.
     for k in ("trial_data", "position_data", "non_initiated_attempts"):
         df = classification.get(k) if isinstance(classification, dict) else None
         if k == "trial_data" and isinstance(df, pd.DataFrame) and not df.empty:
-            # **Phase 7b.4b: the blobs do not go to disk.** `trial_data` is now one row
-            # per trial, scalar columns only -- no table smuggled into a cell. They were
-            # expanded into `position_data` above, and `qc/position_data_lossless.py`
-            # asserts every field is recoverable from it before this is allowed.
-            #
-            # Dropped **here, on the way to the file, not from `classification`**, and
-            # that distinction is load-bearing: this dict is *returned* to the caller and
-            # two things read the blobs off it afterwards -- `print_merged_session_summary`
-            # (called by `run.py` after this function) for its per-position poke/valve
-            # stats, and `qc/position_data_lossless.py`, whose whole job is comparing them
-            # against `position_data`. Mutating the dict would have emptied the first
-            # silently and made the second vacuously green -- a gate that passes by having
-            # nothing left to check.
+            # The blobs do not go to disk -- they were expanded into `position_data` above.
+            # **Drop them here, on the way to the file, never from `classification`:** that
+            # dict is returned to the caller, and `print_merged_session_summary` and
+            # `qc/position_data_lossless.py` both read the blobs off it afterwards.
             df = df.drop(columns=list(POSITION_BLOB_COLUMNS), errors="ignore")
         if _save_df(k, df):
             saved_any = True
@@ -531,10 +448,9 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     def _n(name):
         df = classification.get(name)
         return int(len(df)) if isinstance(df, pd.DataFrame) else 0
-    # `non_initiated_sequences` is counted although it is no longer saved as a table: the
-    # count is a real fact about the session (how many sampling attempts failed), it is
-    # what `merge.py`'s per-run sanity check compares against, and dropping it would
-    # change a number readers of `summary.json` have always had.
+    # `non_initiated_sequences` is counted here although it is not saved as a table: the
+    # count is a real fact about the session (how many sampling attempts failed), and it
+    # is what `merge.py`'s per-run sanity check compares against.
     for k in [
         "trial_data","position_data","non_initiated_sequences","non_initiated_odor1_attempts","non_initiated_attempts",
     ]:

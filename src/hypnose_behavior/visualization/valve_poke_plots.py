@@ -1,8 +1,7 @@
 """Plotting valve-state and poke events for a session/time-window.
 
-Extracted from trial_classification/classification_utils.py during the restructuring
-(Phase 3). Pure move -- behaviour unchanged (to be re-verified by the regression
-harness once the data mount is available).
+A debugging view over the raw harp streams, not a derivative-tree figure: it reads
+the session's rawdata directly.
 """
 from __future__ import annotations
 
@@ -230,7 +229,8 @@ def plot_valve_and_poke_events(
             if not hb.empty:
                 hb = hb.reset_index()  # ensure 'Time' is a column
                 hb['Time'] = pd.to_datetime(hb['Time'], errors='coerce')
-            # The loader's own offset, not a second copy of it (audit finding 15).
+            # The loader's own offset, never a second copy of it: a drifting copy
+            # would shift every timestamp here relative to every other figure.
             offset = compute_real_time_offset(exp_dir, hb)
             # Heartbeat span (after offset)
             if 'Time' in hb.columns and not hb.empty:

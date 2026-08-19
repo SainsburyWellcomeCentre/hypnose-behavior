@@ -2,8 +2,8 @@
 """Run behavioural metric analysis for given subject(s) and date(s).
 
 Thin CLI wrapper over hypnose_behavior.metric_analysis.run.batch_run_all_metrics_with_merge;
-contains no analysis logic. Metrics read previously-saved trial-classification
-results from the derivatives tree, so run trial classification first.
+contains no analysis logic. Metrics read saved trial-classification results from the
+derivatives tree, so run trial classification first.
 
 Examples
 --------

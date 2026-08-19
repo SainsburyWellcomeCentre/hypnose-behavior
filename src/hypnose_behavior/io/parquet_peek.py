@@ -1,41 +1,22 @@
 """What is in this file -- a terminal answer for a saved parquet table.
 
-Parquet is the format and CSV is off by default (`docs/DECISIONS.md` section 23), so
-"open the CSV and look" stopped being an answer for anything written after Phase 7b.3.
-This is the replacement, and it is deliberately the *smallest* thing that answers the
-question: point it at a file or a `saved_analysis_results/` directory and read what
-comes back.
-
-Three views, narrowing:
+Point it at a file or a `saved_analysis_results/` directory. Three views, narrowing:
 
 * **a directory** -> one line per table: rows, columns, size on disk.
-* **a table** -> one line per *column*: dtype, non-null count, distinct count and a
-  value summary. Not the frame -- `trial_data` is 58-70 columns wide (measured:
-  standard 58, single_reward 70, odour_discrimination 63) and hundreds of rows long,
-  so any row-shaped view is unreadable in a terminal. One line per column is O(width),
-  and 60 lines is a screenful.
+* **a table** -> one line per *column*: dtype, non-null count, distinct count, value
+  summary. Never the frame -- `trial_data` is 58-70 columns wide, so any row-shaped
+  view is unreadable in a terminal.
 * **a column** -> that column alone, with real values.
 
-**A reader, and nothing else.** It opens files read-only, computes nothing that any
-metric consumes, and is reachable from no pipeline code path. It is emphatically *not*
-a route to loading a metric: `metrics_*.json` is an export and the record of an
-analysis run, never an input (section 5).
-
-**These functions take a path; the script resolves the session.** `scripts/parquet_peek.py`
-takes `--subjids` / `--dates` like every other entry point in this repo and turns them
-into a directory through `derivatives.find_sessions`, so the CLI is consistent with the
-rest of the family. That resolution is the expensive half -- a cold walk is 14.6 s
-against 29 ms to compute every metric for the session it finds (section 5) -- which is
-why it stays at the entry point rather than inside these functions. A caller that
-already holds a directory, item 7b's session handle above all, must not re-pay a walk
-to arrive back where it started.
-
-**Imports: the standard library and pandas.** `pyarrow` is used where it saves a read
-and is optional at every site. Nothing from this package is imported -- there is no
-schema check here, deliberately: `io/load_results.py` already compares a saved
-`trial_data` against the current declaration (section 22), and a second spelling of
-that comparison is section 27's trap, a guard that can drift from the behaviour it
-guards. Ask the loader, not this.
+- A reader and nothing else: read-only, computing nothing any metric consumes. Not a
+  route to loading a metric -- `metrics_*.json` is an export, never an input
+  (DECISIONS.md section 5).
+- These functions take a **path**; only `scripts/parquet_peek.py` resolves a session.
+  Resolution is the expensive half, so a caller already holding a directory must not
+  re-pay the walk.
+- Standard library and pandas only, `pyarrow` optional at every site. **No schema check
+  here** -- `io/load_results.py` already does it, and a second spelling of that
+  comparison can drift from the first. Ask the loader.
 """
 from __future__ import annotations
 
@@ -47,8 +28,7 @@ import pandas as pd
 
 __all__ = ["peek", "DEFAULT_ROWS"]
 
-# How many values `--column` lists. Enough to see the shape of a column without
-# scrolling; `--rows` overrides, and `--rows 0` prints the statistics alone.
+# How many values `--column` lists. `--rows` overrides, and `--rows 0` prints the statistics alone.
 DEFAULT_ROWS = 20
 
 # Longest value rendered in the one-line-per-column view, and in the per-value listing
@@ -83,20 +63,13 @@ def _fmt_num(value) -> str:
         return "nan"
     if f == int(f) and abs(f) < 1e15:
         return str(int(f))
-    # Six significant figures, not a fixed number of decimals: these columns span
-    # milliseconds, counts and ratios, and `.4f` renders a mean of 1423 as 1423.5676 --
-    # four digits of noise on a quantity measured to the nearest tenth.
     return f"{f:.6g}"
 
 
 def _fmt_pct(non_null: int, n_rows: int) -> str:
     """How full a column is -- and `100%` only when it is genuinely full.
 
-    Rounding is **floored**, not nearest, and that is the whole point. Measured on
-    `sub-057 20260709`: `last_odor` holds 338 of 339 values, which `%.0f` renders as
-    `100%` -- a column with a missing value reading as complete. This repo's
-    characteristic failure is a quantity that looks fine and is not (section 22), so a
-    tool for looking at files must not manufacture one in its own output.
+    Rounding is **floored**, so a colum with 99.9% data does not print '100%'.
     """
     if not n_rows:
         return "   -"

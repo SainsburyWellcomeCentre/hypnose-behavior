@@ -14,49 +14,22 @@ and the same over a cohort, one tree walk per subject:
     pooled(hs, "trial_data", columns=["response_time_ms"])   # + subjid/date/ses
     pooled_metrics(hs, ["decision_accuracy"])                # one row per session
 
-**`metrics()` computes through the registry. It does not read `metrics_*.json`, and
-there is deliberately no sibling that does.** That file is an export and the record of
-an analysis run, never an input (`docs/DECISIONS.md` section 5). The temptation is real
-because `s.metrics([...])` *feels* like loading and the file is right there next to
-`trial_data.parquet` -- so, plainly: **do not "optimise" this into a disk read.** The
-saving would be 25 ms of CPU and one 17 KB file read, against 14.6 s for the mount walk
-the caller has already paid; what it would cost is the guarantee that two figures
-showing one quantity cannot disagree, which is the defect section 5 was written about
-after finding `decision_accuracy` obtainable both ways.
-
-Every metric is evaluated by `metric_analysis.run.metric_value`, which is the *same*
-function `visualization.prep._computed_metrics` calls, so a plotter and this handle
-cannot drift apart by construction rather than by agreement.
-
-### Resolve once
-
-`derivatives.find_session` costs **14.6 s on a cold mount**, against **29 ms** to
-compute every registered metric for the session it found (section 5). Five module-level
-`get(subjid, date, ...)` functions would therefore make a caller wanting `trial_data`
-plus two metrics pay that walk three times, and in a loop over a cohort it is the whole
-runtime. So resolution happens once, in `session()` / `sessions()`, and everything
-after it is a file read against a path already in hand.
-
-`Session.from_results_dir` is the cheaper door for a caller who has already walked the
-tree -- the same reason `io/load_results.load_results_dir` exists beside
-`load_session_results`, and the reason `io/parquet_peek`'s functions are path-based
-(section 29). Nothing here re-resolves.
-
-### Where it sits
-
-At the package root beside `frames.py` and `parameters.py`, but it is **not a leaf and
-must not be treated as one**. Those two import nothing from the package, which is what
-lets every layer stand on them (sections 3, 31). This is the opposite: it imports
-downward into `io/` and `metric_analysis/` and exists to be the *top* of the stack.
-
-> **The invariant: nothing inside the package may import this module.** The moment
-> something under `io/` or `metric_analysis/` reaches back up for the handle, the leaf
-> modules below inherit the whole import graph -- matplotlib is absent from it today,
-> but `harp`, `aeon` and `dotmap` are not.
-
-It is at the root rather than in `io/` or `metric_analysis/` because it spans them: it
-answers both "what did this session record" (layout knowledge, the 0.2 test) and "what
-do the metrics say about it" (analysis). `api.py` is its neighbour for the same reason.
+- **`metrics()` computes through the registry.** It does not read `metrics_*.json`, and
+  there is deliberately no sibling that does -- that file is an export, never an input.
+  **Do not "optimise" this into a disk read**: it would save 25 ms against the 14.6 s
+  mount walk the caller has already paid, and cost the guarantee that two figures
+  showing one quantity cannot disagree. See DECISIONS.md section 5.
+- Every metric is evaluated by `metric_analysis.run.metric_value`, the same function
+  `visualization.prep._computed_metrics` calls, so a plotter and this handle cannot
+  drift apart.
+- **Resolve once.** `derivatives.find_session` costs 14.6 s on a cold mount against
+  29 ms to compute every metric, so resolution happens in `session()` / `sessions()`
+  and everything after is a file read against a path in hand.
+  `Session.from_results_dir` is the cheaper door for a caller that already walked.
+- **Nothing inside the package may import this module.** It sits at the root beside
+  `frames.py` and `parameters.py` but is the opposite of a leaf: it imports downward
+  into `io/` and `metric_analysis/` and exists to be the top of the stack. The moment
+  something below reaches up for it, the leaves inherit the whole import graph.
 """
 
 import difflib
@@ -283,10 +256,10 @@ class Session:
     def protocol_mode(self) -> Optional[str]:
         """`standard` / `single_reward` / `odour_discrimination`, or None.
 
-        None means the file was written before Phase 7b recorded it, not that the
-        session had no protocol -- an absent marker is *unknown* (section 2). Guessing
-        one from the columns present would be circular, which is why the loader's schema
-        check falls back to `mode_independent_columns()` instead.
+        None means the file was written before the mode was recorded, not that the
+        session had no protocol -- an absent marker is *unknown* (section 2). **Do not
+        guess one from the columns present**; that is circular, which is why the
+        loader's schema check falls back to `mode_independent_columns()`.
         """
         return self.manifest().get("protocol_mode")
 
@@ -298,21 +271,15 @@ class Session:
         Returns a copy, so a caller reshaping the frame cannot corrupt the cached one
         that this handle's metrics are computed from.
 
-        **A requested column is checked against this session's frame, not against the
-        schema declaration**, and the distinction is not academic: measured on the
-        server, every saved session differs from `trial_data_columns(mode)` in *both*
-        directions -- carrying `presentations` and `fa_latency_ms`, which the current
-        declaration does not name, while lacking `fa_window_latency_ms` and
-        `completed_window_latency_ms`, which it does. Validating against the declaration
-        would refuse a column that is right there in the file and accept one that is
-        not. So any name is accepted as input, a new saved column works the day it is
-        written, and the only failure is "this session does not have it".
+        **Check a requested column against this session's frame, never against
+        `trial_data_columns(mode)`.** Saved sessions differ from the declaration in both
+        directions, so validating against it refuses columns that are in the file and
+        accepts ones that are not. Any name is accepted as input; the only failure is
+        "this session does not have it". See DECISIONS.md section 34.
 
-        The declaration is used to *word* that failure, which is where it earns its
-        keep: a missing column the schema declares means the session predates it and
-        wants re-analysing (section 22), while one it does not declare is a typo --
-        `fr_laency_ms`, the slip section 21 gave `@dataclass(slots=True)` to catch on
-        the writing side, caught here on the reading side.
+        The declaration is used only to *word* that failure: a missing column the schema
+        declares means the session wants re-analysing (section 22), while one it does
+        not declare is a typo.
         """
         frame = self.results()["trial_data"]
         if columns is None:

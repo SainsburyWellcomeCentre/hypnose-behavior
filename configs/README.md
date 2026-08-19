@@ -5,7 +5,7 @@
 Where the pipeline reads `rawdata` and writes `derivatives`, chosen per machine —
 no symlink required.
 
-- **`data_locations.yml`** (committed, shared): named profiles. Each has `rawdata`
+- **`data_locations.yml`** (shared): named profiles. Each has `rawdata`
   (required) and `derivatives` (optional — defaults to the sibling of `rawdata`).
   Add machines/drives here.
 - **`data_locations.local.yml`** (git-ignored, per machine): one line, `active: <profile>`.

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 """Rendering a metrics dict as text.
 
-Mirrors ``trial_classification/summary.py``. Moved out of ``metrics_utils.py``
-in restructure_2 Phase 4b: formatting is a property of the report, not of the
-metric, so it lives apart from the definitions.
+Mirrors ``trial_classification/summary.py``. Formatting is a property of the report,
+not of the metric, so it lives apart from the definitions.
 """
 
 import pandas as pd
@@ -55,11 +54,9 @@ def save_merged_metrics_txt(metrics, header, txt_path, pretty_print_str=None):
 
 # ---- fa_abortion_stats: numbers in, readable tables out ------------------------
 #
-# The audit's finding 3, resolved in Phase 4b. `fa_abortion_stats` used to build
-# its tables out of pre-formatted strings, so the saved metric was a table of
-# prose and its consumer parsed it back apart. The metric is numeric now and the
-# formatting lives here, where changing how the report reads cannot change what
-# was measured.
+# `fa_abortion_stats` returns numbers -- counts as `int`, rates as `float`, positions
+# as `int` -- and all formatting happens here, so changing how the report reads cannot
+# change what was measured.
 
 # Everything else in those tables is a count rendered as "n (fraction of the
 # row's abortions)". Deriving the subtype columns rather than naming them keeps
@@ -102,8 +99,8 @@ def _format_fa_position_table(frame):
         "Reached Trials": reached,
         "Abortion Rate": [f"{n}/{d} ({v:.2f})" if d > 0 else "N/A"
                           for n, d, v in zip(total, reached, rate)],
-        # Kept in the *report* only: it is the same number as "Abortion Rate",
-        # which the metric no longer duplicates.
+        # Report-only: the same number as "Abortion Rate", which the metric returns
+        # once rather than twice.
         "Abortion Rate Value": rate,
     }
     cols.update({k: v for k, v in _fa_shared_columns(frame).items()

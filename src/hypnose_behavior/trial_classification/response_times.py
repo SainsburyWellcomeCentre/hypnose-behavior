@@ -1,18 +1,16 @@
 """Response-time analysis for completed trials.
 
 ``analyze_response_times`` measures how long the animal took to reach the reward port and
-labels each completed trial ``rewarded`` / ``unrewarded`` / ``timeout``. It emits a category
-only where it can also compute a response time; the remaining trials are counted in
-``failed_calculations`` and that coverage gap is deliberate (``DECISIONS.md`` section 14 --
-unify the rule, do not unify the coverage).
+labels each completed trial ``rewarded`` / ``unrewarded`` / ``timeout``.
 
-The anchor falls back to the animal's last cue-port exit *before* the odor when the scan
-inside the odor window finds no exit; that rescue is correct and still fires on 20 trials.
-Do not treat it as dead because ``poke_source`` exists (``DECISIONS.md`` section 15).
-
-Positions come from ``windows.first_occurrence_positions``, a thin entry point into
-``windows.positions_by_odor`` -- the single position rule, shared with ``classify_trials``
-since the two were measured and found to agree on all but one experiment-faulted trial.
+- It names a category only where it can also compute a response time; the rest are counted
+  in ``failed_calculations``. **That coverage gap is deliberate** -- unify the rule, not
+  the coverage. See DECISIONS.md section 14.
+- The anchor falls back to the animal's last cue-port exit *before* the odor when the scan
+  inside the odor window finds none. **The fallback is live, not dead code**, and it does
+  not read ``poke_source``. See DECISIONS.md section 15.
+- Positions come from ``windows.first_occurrence_positions``, the single position rule
+  shared with ``classify_trials``.
 """
 from __future__ import annotations
 

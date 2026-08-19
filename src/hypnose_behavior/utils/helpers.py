@@ -78,10 +78,8 @@ def clear_cache():
 def _iter_subject_dirs(derivatives_dir: Optional[Path], subjids: Optional[Iterable[int]]):
     """Yield (subjid, subject_dir) tuples from derivatives.
 
-    Thin wrapper over the shared layout walker (restructure_2 Phase 2b) so this repo's
-    ~21 call sites keep working unchanged. Named subjects that do not exist are still
-    skipped rather than raised on; two directories for one subject now raise instead of
-    yielding both.
+    Thin wrapper over the shared layout walker. A named subject that does not exist is
+    skipped rather than raised on; two directories for one subject raise.
     """
     yield from layout_for(derivatives_dir).iter_subjects(subjids)
 
@@ -152,9 +150,8 @@ def _filter_session_dirs(subj_dir: Path,
     )]
 
 
-# Prints the cache these helpers maintain. Moved here from
-# `visualization/visualization_utils.py` in Phase 10: it reports on `CACHE`,
-# which is declared in this module, and it draws nothing.
+# Prints the cache these helpers maintain. It lives here because `CACHE` is declared
+# in this module, and it draws nothing.
     # Utility function to print current cache keys
 def print_cache_keys():
     print("[CACHE CONTENTS] Current cache keys:")

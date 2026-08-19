@@ -4,25 +4,22 @@ from __future__ import annotations
 
 """The frames metric cores consume, and the helpers that build them.
 
-Phase 4a (restructure_2) gives every metric a pure ``f(frame) -> value`` core.
-There are two frames:
+Every metric core is a pure ``f(frame) -> value`` over one of two frames:
 
 ``trials``
-    ``trial_data`` -- one row per trial. Unchanged.
+    ``trial_data`` -- one row per trial.
 
 ``position_data``
-    long form, one row per ``trial x position``. Derived at *load* time by
-    expanding the per-trial JSON blobs ``position_poke_times`` /
-    ``presentations`` / ``position_valve_times``, so metrics never parse a blob
-    and carry no legacy-session branch. Pairs with Phase 7b's ``position_data``
-    side-table, which will make the expansion a read rather than a derivation.
+    long form, one row per ``trial x position``, so metrics never parse a JSON blob
+    and carry no legacy-session branch.
 
-This module also owns "how far did the sequence get", which the Phase 4a audit's
-Q5 resolution mandates as a single definition. Since Phase 7b.4b it reads
-``position_data`` rather than a trial row's blobs, and it is stated at the
-**frame** grain -- ``sequence_depths(trials, position_data)`` -- because the
-per-trial form's only consumer was ``reached_counts``' own loop, and a per-trial
-signature over a long frame invites being handed the wrong trial's rows.
+- **This module imports nothing from the package** -- standard library and pandas
+  only. Every layer stands on it, so the day it imports back, they all inherit that
+  dependency. See DECISIONS.md section 3.
+- It owns the single definition of "how far did the sequence get"
+  (``sequence_depths``) and of "reached" (``reached_counts``). Both are stated at the
+  **frame** grain: a per-trial signature over a long frame invites being handed the
+  wrong trial's rows.
 """
 
 import json
@@ -66,9 +63,7 @@ def odor_letter(value) -> str:
     ``'["OdorE", "OdorG"]'``, hence the bracket/quote stripping before the
     ``Odor`` prefix check.
 
-    Written out four times in ``visualization/`` before Phase 4a
-    (``visualization_utils`` twice, ``pred_seq_utils._canonical_odor``,
-    ``sing_rew_movement._odor_letter``). It knows what the data *is*, so it
+    **The one normaliser for an odor token.** It knows what the data *is*, so it
     belongs here rather than in ``hypnose_helpers``.
     """
     s = str(value).strip().strip('[]"\'').strip()
@@ -139,19 +134,16 @@ def position_entries_by_trial(position_data, flag: str = "in_poke_times") -> dic
     - ``movement_analysis_utils._last_poke_out_by_position`` takes the **last
       entry** and accepts its null.
 
-    Those are three different rules and `DECISIONS.md` sections 13 and 14 are
-    about not merging helpers that differ, so this yields the entries and reduces
-    nothing.
+    Those are three different rules and must not be merged, so this yields the entries
+    and reduces nothing. See DECISIONS.md sections 13 and 28.
 
-    ``flag`` is the provenance column matching the blob the caller used to read
-    (section 2): ``in_poke_times`` for ``position_poke_times``, ``in_valve_times``
-    for ``position_valve_times``, ``in_presentations`` for ``presentations``.
-    **It is not optional in meaning** -- reading the frame unfiltered picks up the
-    ~0 ms valve positions the other two blobs drop, which is exactly how
-    ``manual_vs_auto_stop_preference`` would change value.
+    ``flag`` is the provenance column naming which per-position source to read:
+    ``in_poke_times``, ``in_valve_times`` or ``in_presentations``. **It is not optional
+    in meaning** -- an unfiltered read picks up the ~0 ms valve positions the other two
+    sources drop, which changes a metric's value. See DECISIONS.md section 2.
 
-    Returns ``{}`` for an absent or unusable frame, which every caller already
-    treats as "no positions" -- the answer an empty blob gave.
+    Returns ``{}`` for an absent or unusable frame, which every caller treats as
+    "no positions".
     """
     if position_data is None or len(position_data) == 0:
         return {}
@@ -183,9 +175,8 @@ def _fallback_depths(trials):
 
     ``last_odor_position`` is already a position. ``last_event_index`` is a
     0-based index into ``presentations``, so it needs ``+1`` to be the same
-    unit -- the two were previously returned interchangeably, which was a latent
-    off-by-one that never fired because ``last_odor_position`` is a column on
-    every session written by this pipeline.
+    unit. **Do not return the two interchangeably** -- that is an off-by-one that
+    stays latent while ``last_odor_position`` is present on every session.
     """
     if "last_odor_position" in trials.columns:
         vals = pd.to_numeric(trials["last_odor_position"], errors="coerce")
@@ -243,15 +234,11 @@ def sequence_depths(trials, position_data):
       pipeline derives independently and which agrees with the filtered maximum
       on **486 of 486** trials where both are defined.
 
-    That split is ``DECISIONS.md`` section 10's rule, and it is why neither
-    single-meaning form may be substituted. Measured on the 9 fixture sessions
-    (1,731 trials): ``max(presentations)`` unfiltered moves **84** trials and
-    ``max(poke_source == 'poke')`` everywhere moves **32**; this rule is the
-    current values.
+    **Neither single-meaning form may be substituted for the split.** Unfiltered
+    ``max(presentations)`` everywhere moves 84 trials; ``max(poke_source == 'poke')``
+    everywhere moves 32. See DECISIONS.md sections 10 and 18.
 
-    **Read off ``position_data``, not off the trial row** (Phase 7b.4b). The
-    per-blob precedence the old per-trial form had is reproduced through section
-    2's provenance flags, and the two are *not* in the same order:
+    The two precedences below are **opposite**, and that is deliberate:
 
     - presented: ``in_poke_times`` first, ``in_presentations`` second. On
       sessions written by this pipeline the two carry the same position set --
@@ -325,14 +312,11 @@ def sequence_depths(trials, position_data):
 def reached_counts(trials, position_data) -> dict[int, int]:
     """``{position: n trials that reached it}`` -- the per-position denominator.
 
-    The single definition of "reached" for the whole package. Before Phase 4a
-    this walk was written out four times: twice identically in ``metrics_utils``
-    (``abortion_rate_positionX`` and ``fa_abortion_stats``) and twice more in
-    ``visualization/`` under two *different* definitions.
+    **The single definition of "reached" for the whole package.** Do not count a
+    trial's presented positions instead; that is a different denominator.
 
-    Counts **per trial row**, so a depth of *n* fills positions 1..n. A null or
-    zero depth contributes nothing, exactly as the old `presented_positions`
-    returned `[]` for it.
+    Counts **per trial row**, so a depth of *n* fills positions 1..n. A null or zero
+    depth contributes nothing.
     """
     reached: dict[int, int] = {}
     for depth in sequence_depths(trials, position_data).dropna():
@@ -371,16 +355,14 @@ _ID_COLUMNS = ("trial_id", "global_trial_id", "subjid", "date", "session_num")
 #
 # `last_event_index` is the abort event's index within the trial:
 # `avg_sampling_time_aborted_sequence` excludes exactly the entry whose
-# `index_in_trial` equals it. The `is_last_event` flag `presentations` carries
-# agrees with that rule on all 9 fixture sessions, but it is a *different* rule,
-# and 4a reproduces today's values rather than a rule that happens to match.
+# `index_in_trial` equals it. **`is_last_event` is a different rule**, even though it
+# agrees on every fixture session -- do not substitute one for the other.
 _TRIAL_COLUMNS = ("last_event_index",)
 
 # Every blob field `build_position_data` copies onto a position row. The field lists
 # above are a **whitelist**, not a passthrough: a key not named here is dropped
-# silently -- no error, no empty column, nothing. Once Phase 7b.4b removes the blobs
-# from `trial_data`, that silence is data loss, so the set is declared here and
-# checked rather than left implicit.
+# silently -- no error, no empty column, nothing. Since the blobs are not written to
+# `trial_data`, that silence is data loss, so the set is declared here and checked.
 # Built from exactly what the copy loop below reads -- **not** from `_PRES_FIELDS`,
 # which is documentation. A guard whose whitelist is wider than the behaviour it guards
 # reports a pass for a field that is still being dropped.
@@ -401,11 +383,8 @@ CARRIED_FIELDS = frozenset(
 # *attempt*, not per `trial x position`. Measured: 1,730 occurrences over the nine
 # fixture sessions.
 #
-# Item 5 (section 30) stopped writing `non_initiated_odor1_attempts` as its own file,
-# so this justification is restated rather than left pointing at a table that no longer
-# exists: the information is not lost, it is contained in `non_initiated_attempts` by
-# construction. **That is what licenses the entry** -- section 27's rule is that a field
-# belongs here only when the information survives somewhere, never that nothing reads it.
+# **The information surviving in `non_initiated_attempts` is what licenses the entry.**
+# If that ever stops being true, the entry must come off this list.
 KNOWN_UNCARRIED_FIELDS = {
     "prior_presentations":
         "per-attempt, not per-position; already saved as rows of non_initiated_attempts",
@@ -415,10 +394,9 @@ KNOWN_UNCARRIED_FIELDS = {
 class UncarriedPositionFieldError(Exception):
     """A position blob carries a field `build_position_data` would silently drop.
 
-    Named rather than a bare `ValueError` so it is greppable in a batch log and
-    separately catchable -- `batch_analyze_sessions` wraps each session in
-    `except Exception`, where a `ValueError` is indistinguishable from pandas
-    complaining about an index (the section 20 rule, applied to a second schema check).
+    **Keep it a named class, not a bare `ValueError`:** `batch_analyze_sessions` wraps
+    each session in `except Exception`, where a `ValueError` is indistinguishable from
+    pandas complaining about an index.
     """
 
 
@@ -486,13 +464,13 @@ def build_position_data(trials, *, strict: bool = False) -> pd.DataFrame:
     positions** and a metric that reads one must not silently pick up rows from
     another:
 
-    - on a *completed* trial all three now hold every position with a valve
-      activation, including ones the animal never poked -- Phase 6b writes those
-      rather than dropping them, marking each ``poke_source == "outside_grace"``;
-    - on an *aborted* trial ``position_valve_times`` still holds one position more
-      than the other two whenever the trial ended on an unpoked odor, because the
-      trailing entry is trimmed back to the last real poke (``classification_utils
-      ._trim_unsampled_tail``).
+    - on a *completed* trial all three hold every position with a valve activation,
+      including ones the animal never poked, each marked
+      ``poke_source == "outside_grace"``;
+    - on an *aborted* trial ``position_valve_times`` holds one position more than the
+      other two whenever the trial ended on an unpoked odor, because the trailing entry
+      is trimmed back to the last real poke
+      (``trial_classification.classify_trials._trim_unsampled_tail``).
 
     So each row records **which blobs it came from** (``in_poke_times`` /
     ``in_presentations`` / ``in_valve_times``) and every metric filters on the
@@ -500,10 +478,10 @@ def build_position_data(trials, *, strict: bool = False) -> pd.DataFrame:
     ``manual_vs_auto_stop_preference`` -- which counts valve durations -- would
     gain the trimmed positions and change value.
 
-    ``poke_source`` is carried through but never **synthesised**: an absent column
-    is how ``sampled_positions`` knows to omit the ``only_true_pokes`` variants,
-    and how ``metrics.sampling._real_pokes`` knows to leave a pre-6b session's
-    sampling averages exactly as they were.
+    ``poke_source`` is carried through but **never synthesised**: an absent column is
+    how ``sampled_positions`` knows to omit the ``only_true_pokes`` variants, and how
+    ``metrics.sampling._real_pokes`` knows to leave an older session's sampling averages
+    exactly as they were. Absent means *unknown*, never "all real pokes".
     """
     if trials is None or len(trials) == 0:
         return pd.DataFrame()

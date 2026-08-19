@@ -11,14 +11,8 @@ false response is the same construct under the single-reward schema's own
 column (``false_response`` / ``fr_label``, not ``fa_label``; it is **not** the
 single-reward ``fa_rate``).
 
-The FA port count was the audit's finding 1 -- the same two-line count written
-**eight** times. ``fa_port_counts`` states it once; ``fa_port_share_a`` is
-rescaled from ``fa_port_ratio`` rather than recounted, per VARIANT resolutions 1
-and 2.
-
-``get_fa_ratio_a_stats`` is the odd one out: it lived in
-``visualization/visualization_utils.py`` but contains no plotting at all, so 4a
-moved it wholesale rather than repointing it.
+- **The FA port count has one home**, ``fa_port_counts``. ``fa_port_share_a`` is
+  rescaled from ``fa_port_ratio`` rather than recounted; do not add a third counter.
 """
 
 import numpy as np
@@ -71,9 +65,8 @@ __all__ = [
 def _fa_port_payload(out):
     """`fa_port_ratio_by_odor`'s saved shape.
 
-    One variant, not two: Phase 4a step 6 removed the non-initiated false
-    alarms, so the `with_`/`without_non_initiated` wrapper this key used to carry
-    no longer distinguishes anything.
+    One variant, not two: non-initiated false alarms are outside the metric set, so a
+    `with_`/`without_non_initiated` split would distinguish nothing.
     """
     return {
         'by_odor': as_dict(out['by_odor']),
@@ -300,13 +293,9 @@ def fa_abortion_stats(trials, position_data):
     Returns three DataFrames, empty when the frame lacks what they need. Counts
     are `int`, rates `float`, positions `int`.
 
-    **Numeric since Phase 4b** -- the audit's finding 3. These tables used to be
-    built out of pre-formatted strings (`"3/10 (0.30)"`, `"2 (0.20)"`), so the
-    saved `metrics['fa_abortion_stats']` was a table of prose and its one
-    consumer, `plot_abortion_and_fa_rates`, parsed the numbers back out with
-    `int(s.split()[0])`. `summary.format_fa_abortion_tables` renders the
-    readable form for the txt report. The `"Abortion Rate Value"` column is gone
-    from the metric: `"Abortion Rate"` *is* that value now.
+    **Return numbers, never pre-formatted strings.** `summary.format_fa_abortion_tables`
+    renders the readable form for the txt report, so changing how the report reads cannot
+    change what was measured.
     """
     df = trials
     empty = (pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
@@ -336,9 +325,9 @@ def fa_abortion_stats(trials, position_data):
             "FA Abortion Rate": n_fa / n_total,
         }
         for subtype, pretty in subtype_labels:
-            # int(): `.sum()` gives np.int64, which `json.dumps(default=str)`
-            # writes as a *string* -- the trap the audit records for
-            # `manual_vs_auto_stop_preference`.
+            # int(): `.sum()` gives np.int64, which `json.dumps(default=str)` writes
+            # as the *string* "3" rather than 3. Any count a metric returns must be
+            # cast. See DECISIONS.md section 1.
             row[pretty] = int((fa_labels == subtype).sum())
         return row
 
@@ -430,9 +419,7 @@ def _fa_type_mask(trials, fa_type):
 def fa_port_ratio_by_odor(trials, *, fa_type="FA_time_in"):
     """Signed FA port bias per odor: `(port A - port B) / (port A + port B)`.
 
-    0 is no preference, positive a bias towards port A. A tier-1 core on
-    `trial_data` since step 6 dropped the non-initiated FAs -- which is what makes
-    it the canonical target for finding 1, the FA port ratio written eight times.
+    0 is no preference, positive a bias towards port A.
 
     `fa_type` takes a single label, `"all"` for every `FA_*`, or a set/list of
     labels; the set form is what lets the plotters' `fa_types` filters call this
@@ -493,9 +480,8 @@ def _fa_filter_mask(frame, fa_types=None):
 def fa_port_label(frame):
     """`fa_port` as `"A"` / `"B"` / None, one entry per row.
 
-    The 1-is-A, 2-is-B mapping written out at every FA-port site (finding 1).
-    `fa_port_counts` counts these labels, and `pred_seq_utils.fa_analysis` buckets
-    its latencies by them, so the mapping itself is stated once.
+**The one statement of the 1-is-A, 2-is-B mapping.** `fa_port_counts` counts
+    these labels and `pred_seq_utils.fa_analysis` buckets its latencies by them.
     """
     if frame is None or len(frame) == 0 or "fa_port" not in frame.columns:
         return pd.Series(dtype=object, index=getattr(frame, "index", None))
@@ -507,12 +493,9 @@ def fa_port_label(frame):
 def fa_port_counts(frame):
     """`(n_port_a, n_port_b)` over `fa_port` -- 1 is port A, 2 is port B.
 
-    The audit's finding 1: this two-line count was written **eight** times, in
-    `fa_port_ratio_by_odor` plus seven independent recomputes across
-    `visualization_utils.py`. They differed only in how the frame was sliced
-    beforehand and which ratio was taken afterwards, so the counter takes an
-    already-sliced frame and the slicing stays with the caller (or goes through
-    `by_group`).
+**The one place this count is made.** It takes an already-sliced frame, so
+    the slicing stays with the caller (or goes through `by_group`) rather than
+    multiplying into a variant per call site.
     """
     if frame is None or len(frame) == 0 or "fa_port" not in frame.columns:
         return 0, 0
@@ -532,11 +515,10 @@ def fa_port_ratio(n_a, n_b):
 def fa_port_share_a(n_a, n_b):
     """Port A's share of false alarms, on 0..1 rather than -1..1.
 
-    Derived from `fa_port_ratio` rather than recounted, per VARIANT resolutions 1
-    and 2: `A/(A+B) == (r+1)/2` exactly, and recounting from `fa_port` would
-    reintroduce one of the duplicate implementations finding 1 exists to remove.
-    (The rescale can land a ULP away from a direct `A/(A+B)`; these values are
-    plotted, never fingerprinted.)
+    **Derived from `fa_port_ratio`, never recounted**: `A/(A+B) == (r+1)/2` exactly,
+    and recounting from `fa_port` reintroduces a duplicate implementation. (The rescale
+    can land a ULP away from a direct `A/(A+B)`; these values are plotted, never
+    fingerprinted.)
     """
     return (fa_port_ratio(n_a, n_b) + 1.0) / 2.0
 
@@ -544,13 +526,10 @@ def fa_port_share_a(n_a, n_b):
 def get_fa_ratio_a_stats(subjid, dates=None, odors=['C', 'F']):
     """Per-odor `A/(A+B)` false-alarm port share, one row per session per odor.
 
-    Checklist 6 of Phase 4a, and the odd one out: it lived in
-    `visualization/visualization_utils.py` but **contains no plotting at all**, so
-    it moves here wholesale rather than being repointed. Its FA filter is every
-    `FA_*` label, wider than `plot_fa_ratio_a_over_sessions`' single `fa_type`.
+Its FA filter is every `FA_*` label, wider than `plot_fa_ratio_a_over_sessions`'
+    single `fa_type`. The share is rescaled from `fa_port_ratio`, never recounted.
 
-    The share is rescaled from `fa_port_ratio`, never recounted (VARIANT
-    resolution 2).
+    Not registrable: it takes a subject and dates rather than a frame.
 
     Returns
     -------
@@ -620,7 +599,7 @@ def get_fa_ratio_a_stats(subjid, dates=None, odors=['C', 'F']):
 def fa_rate_by_odor(trials, *, fa_types=None, odors=None):
     """FA aborts at an odor / (its passes in completed sequences + those aborts).
 
-    Checklist 1. The denominator matches no canonical metric: not `FA_odor_bias`
+    The denominator matches no canonical metric: not `FA_odor_bias`
     (aborts@odor) and not `odorx_abortion_rate` (presentations@odor). It counts
     how often the odor was sampled and passed, plus the times it was false-alarmed
     on -- so the rate answers "when this odor came up, how often did it draw a
@@ -667,11 +646,9 @@ def fa_rate_by_odor(trials, *, fa_types=None, odors=None):
 def fa_rate_by_position(trials, position_data, *, fa_types=None):
     """FA aborts at position *p* / trials that reached *p*.
 
-    Checklist 5. The denominator is `frames.reached_counts`, the package's single
-    definition of "reached" (audit Q5). The plotter used to count the positions
-    listed in each trial's `presentations` blob -- Q5's "definition C", now
-    deleted -- so the drawn denominators change here even though no saved metric
-    value does.
+    The denominator is `frames.reached_counts`, the package's single definition of
+    "reached". Do not count a trial's presented positions instead: that is a different
+    denominator. See DECISIONS.md section 10.
     """
     if trials.empty:
         return pd.Series(dtype=float)
@@ -688,21 +665,18 @@ def fa_rate_by_position(trials, position_data, *, fa_types=None):
 
 @metric(frame="trials")
 def fa_latency_from_pokeout(trials, *, fa_types=None):
-    """`fa_time` minus the animal's last cue-port exit before it, in ms. Checklist 19.
+    """`fa_time` minus the animal's last cue-port exit before it, in ms.
 
     **Not** `trial_data.fa_window_latency_ms`, which is measured from the abortion timestamp and is
     what `fa_label` buckets (`DECISIONS.md` section 16 -- (a) vs (b)).
 
-    Reads `fa_response_time_ms` rather than re-deriving the anchor. It used to compute it
-    from `position_data.poke_odor_end`, which is wrong twice over: that timestamp is synthetic
-    and 25 ms late whenever the pre-odor grace produced the entry (section 15), and it does not
-    exclude the animal returning to the cue port between giving up and false-alarming, which
-    happens on 44% of false alarms (section 16). Two independent derivations of one quantity is
-    exactly what section 14 is about, so there is now one.
-
-    Returns empty when the column is absent. Sessions saved before Phase 11 never carry it, and
-    silently falling back to the old computation would make old and new sessions look
-    comparable when they measure different things -- the section 2 rule for absent provenance.
+    - **Read `fa_response_time_ms`; never re-derive the anchor from
+      `position_data.poke_odor_end`.** That timestamp is synthetic and 25 ms late on a
+      grace-derived entry, and it charges cue-port revisits to the false alarm. See
+      DECISIONS.md sections 15 and 16.
+    - Returns empty when the column is absent. **Do not fall back to a second
+      computation** -- that would make sessions saved before the column existed look
+      comparable to newer ones when they measure different things.
     """
     if "fa_response_time_ms" not in trials.columns or "global_trial_id" not in trials.columns:
         return pd.Series(dtype=float)
@@ -728,7 +702,7 @@ def false_response_ratio_contributions(trials, *, fr_types=None):
 
 @metric(frame="trials")
 def false_response_ratio(trials, *, fr_types=None):
-    """False-response trials / completed trials. Checklist 22.
+    """False-response trials / completed trials.
 
     **Not** the single-reward `fa_rate`, which is `false_alarm / n_nogo` off a
     different column (`fa_label`, not `fr_label`). `fr_types=None` counts every

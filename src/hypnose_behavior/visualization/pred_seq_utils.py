@@ -303,8 +303,8 @@ def last_odor_poke_time(
 				continue
 			n_trials = len(df)
 			completed = df[df.get("is_aborted") == False]
-			# `in_poke_times` is the flag matching `position_poke_times`, the blob this
-			# read before Phase 7b.4b -- section 2.
+			# `in_poke_times` is the provenance flag matching the poke facts this reads;
+			# an unfiltered view carries positions the poke blob never had -- section 2.
 			pokes_by_trial = position_entries_by_trial(
 				_load_position_data(results_dir, df), "in_poke_times")
 			for cat in categories:
@@ -749,8 +749,8 @@ def response_time(
 			n_trials = len(df)
 			completed = df[df.get("is_aborted") == False]
 			completed = completed[completed.get("response_time_category") != "timeout_delayed"]
-			# Raw: the 10x-group-mean outlier rule below is a display filter, and
-			# deliberately stays out of the metric (judgement call 4 of the audit).
+			# Raw: the 10x-group-mean outlier rule below is a display filter and
+			# deliberately stays out of the metric.
 			latencies = reward_delivery_latency(df, _load_position_data(results_dir, df))
 			records = []
 			for _, row in completed.iterrows():
@@ -1287,10 +1287,7 @@ def _plot_performance_daily(sessions_frames, subjid):
 		stats = by_group(decision_accuracy, sub, "sequence", values_only=False)
 		# First-seen order, not `by_group`'s sorted index: it decides the insertion
 		# order of `sequence_data`, and `_ordered_groups` draws any label outside
-		# SEQUENCE_ORDER in exactly that order. This call site was already the
-		# deterministic one -- it feeds an ordered dict -- which is why Phase 5's
-		# `_ordered_groups` fix moved the other three onto the same rule rather
-		# than moving this one.
+		# SEQUENCE_ORDER in exactly that order. See DECISIONS.md section 11.
 		for seq_label in sub["sequence"].drop_duplicates():
 			r, t, _ = stats[seq_label]
 			if t > 0:
@@ -1483,10 +1480,10 @@ def performance(
 	figs = []
 	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
 		# One frame per session, already reduced to the rows `decision_accuracy`
-		# scores: completed, sequence-labelled, timeouts dropped. VARIANT 5 -- the
-		# denominator then matches the canonical metric exactly, so the two plot
-		# helpers below are `by_group` / `over_windows` calls rather than their own
-		# rewarded/(rewarded+unrewarded) arithmetic.
+		# scores: completed, sequence-labelled, timeouts dropped. The denominator then
+		# matches the canonical metric exactly, so the two helpers below are `by_group` /
+		# `over_windows` calls rather than their own rewarded/(rewarded+unrewarded)
+		# arithmetic.
 		sessions_frames = []
 		for results_dir in results_dirs:
 			df = _load_sorted_session(results_dir)

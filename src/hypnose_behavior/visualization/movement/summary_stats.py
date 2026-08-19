@@ -4,9 +4,6 @@ from __future__ import annotations
 
 """Per-condition distributions of the movement metrics, with tests.
 
-Carved out of ``movement_analysis_utils.py`` in restructure_2 Phase 10
-(follow-up Item 1). Source-only move -- no behaviour change.
-
 Named ``summary_stats`` rather than ``statistics``/``stats``: the first shadows
 a standard-library module, and the second would sit opposite
 ``metric_analysis/stats/``, which *computes* the tests this module *draws* --

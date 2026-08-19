@@ -1,9 +1,9 @@
 """Session and subject discovery for the behavioural rawdata and derivatives trees.
 
 The walking itself is layout knowledge, not data knowledge, so it lives in
-`hypnose_helpers.io.layout` (restructure_2 Phase 2b). What stays here is the part only
-this repo knows: that it has *two* trees, where each is rooted, and that its subject
-directories always carry the `_id-` suffix.
+`hypnose_helpers.io.layout`. What stays here is the part only this repo knows: that it
+has *two* trees, where each is rooted, and that its subject directories always carry
+the `_id-` suffix.
 
     from hypnose_behavior.io.layout import derivatives, rawdata
 
@@ -11,16 +11,14 @@ directories always carry the `_id-` suffix.
     for ses in derivatives.find_sessions(66, ses="03-09"): ...
     x = ses.session_index                                   # gap-free plotting ordinal
 
-Both trees are exposed as named objects rather than a bare `find_sessions()` bound to
-one of them. `rawdata` holds every recorded session; `derivatives` holds only the
-analysed ones, so the same subject legitimately has different sessions in each. A
-default would make picking the wrong tree a silent one-character mistake, and Phase 2a
-established that silent resolution errors are the expensive kind here.
-
-The roots are passed as **functions**, not resolved Paths. `qc/_common` redirects
-derivatives into a fresh temp directory for every regression session by setting
-`HYPNOSE_DERIVATIVES_ROOT` and clearing the `lru_cache` on `get_derivatives_root`;
-anything holding a Path captured at import would keep answering from the real server.
+- Both trees are named objects with **no default**. `rawdata` holds every recorded
+  session, `derivatives` only the analysed ones, so the same subject legitimately has
+  different sessions in each; a default makes picking the wrong tree a silent
+  one-character mistake.
+- The roots are passed as **functions**, never resolved Paths. `qc/_common` redirects
+  derivatives per session by setting `HYPNOSE_DERIVATIVES_ROOT` and clearing the
+  `lru_cache`; anything holding a Path captured at import keeps answering from the
+  real server.
 """
 from __future__ import annotations
 

@@ -4,9 +4,6 @@ from __future__ import annotations
 
 """Latency, response-time and inter-trial-interval figures.
 
-Carved out of ``visualization_utils.py`` in restructure_2 Phase 10 (follow-up
-Item 1). Source-only move -- no behaviour change.
-
 ``_plot_metric_over_sessions`` and its two helpers stay here: both callers
 (``plot_latency_over_time``, ``plot_iti_over_time``) are in this module, so
 section 3's promote-what-is-shared rule does not apply to them.
@@ -99,13 +96,10 @@ def plot_response_times_completed_vs_fa(
             if not results_dir.exists():
                 continue
 
-            # Both means come from the canonical metrics over trial_data. There
-            # used to be a fall-back to metrics_*.json here, which made this one
-            # of the three quantities obtainable two ways -- so two figures could
-            # show it and disagree, since a saved JSON predates any later metric
-            # change. `docs/DECISIONS.md` section 5 settles that on compute.
-            # (The two paths did not even agree on the key: the JSON branch read
-            # "Aborted FA Time In" where the metric returns "FA Time In".)
+            # Both means come from the canonical metrics over trial_data. **Never add
+            # a fall-back to metrics_*.json**: a saved JSON predates any later metric
+            # change, so two figures could show this quantity and disagree.
+            # See DECISIONS.md section 5.
             td = _load_trial_views(results_dir).get("trial_data", pd.DataFrame())
 
             completed_rt = avg_response_time(td).get(
@@ -225,10 +219,9 @@ def _style_log_yaxis(ax):
     The minor label size is resolved through matplotlib's own font machinery
     rather than ``float()``. ``ytick.labelsize`` is allowed to be a *relative*
     keyword -- and matplotlib's default is the string ``"medium"`` -- so the
-    plain cast raised ``ValueError`` in any process that had not applied the
-    repo style first, i.e. a bare notebook or script (restructure_2 Phase 5).
-    Under the style the key is numeric and both forms give the same number, so
-    this widens what works without moving a drawn figure.
+    plain cast raises ``ValueError`` in any process that has not applied the repo
+    style first, i.e. a bare notebook or script. Under the style the key is numeric
+    and both forms give the same number.
     """
     from matplotlib.font_manager import FontProperties
     from matplotlib.ticker import LogLocator, ScalarFormatter, FuncFormatter

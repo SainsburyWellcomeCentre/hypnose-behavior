@@ -4,13 +4,15 @@ from __future__ import annotations
 
 """Pooling several sessions' results dicts into one.
 
-Mirrors ``trial_classification/merge.py``. Moved out of ``metrics_utils.py`` in
-restructure_2 Phase 4b.
+Mirrors ``trial_classification/merge.py``.
 
-Pooling concatenates every DataFrame key, so a metric run on the pooled dict is
-computed over the raw trials of every session -- not averaged from per-session
-values. That is the same reduction rule ``resolvers.by_group`` follows, and the
-reason ``run_all_metrics`` can be called on a pooled dict unchanged.
+- Pooling concatenates every DataFrame key, so a metric run on the pooled dict is
+  computed over the **raw trials** of every session -- never averaged from per-session
+  values. That is the same reduction rule ``resolvers.by_group`` follows, and what lets
+  ``run_all_metrics`` take a pooled dict unchanged.
+- A pooled frame has **no key separating two sessions' trials**: ``global_trial_id``
+  collides across sessions. Per-position metrics must be computed one session at a time.
+  See DECISIONS.md section 28.
 """
 
 import pandas as pd

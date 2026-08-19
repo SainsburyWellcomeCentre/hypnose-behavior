@@ -4,9 +4,6 @@ from __future__ import annotations
 
 """Decision-accuracy figures.
 
-Carved out of ``visualization_utils.py`` in restructure_2 Phase 10 (follow-up
-Item 1). Source-only move -- no behaviour change.
-
 The three here answer the same question at three grains: per session across
 animals, split by odor, and rolling within a session.
 """
@@ -418,10 +415,9 @@ def plot_decision_accuracy_rolling_average(
             df["is_rewarded"] = numerator_mask.astype(int)
             n_trials = len(df)
 
-            # The windowing rule is `rolling_reward_fraction`, whose denominator
-            # is the window rather than rewarded+unrewarded -- deliberately not
-            # `over_windows(decision_accuracy, ...)`, which would draw a
-            # different curve (audit finding 12).
+            # The windowing rule is `rolling_reward_fraction`, whose denominator is
+            # the window rather than rewarded+unrewarded -- deliberately not
+            # `over_windows(decision_accuracy, ...)`, which draws a different curve.
             df["decision_accuracy"] = rolling_reward_fraction(
                 df, window_n, step=step_n, include_avg=include_avg, hr_only=hr_only)
 
@@ -703,10 +699,10 @@ def plot_decision_accuracy(
     def _decision_acc_split(td):
         """``(non_hr_accuracy, hr_accuracy)`` for one session.
 
-        VARIANT 6 of the metric audit: the HR / non-HR split is a *granularity*
-        of `decision_accuracy`, not a metric of its own, so it is `by_group` over
-        the canonical HR mask. A side with no trials at all is absent from the
-        grouping and comes back as NaN, which is what the callers below test for.
+        The HR / non-HR split is a *granularity* of `decision_accuracy`, not a metric
+        of its own, so it is `by_group` over the canonical HR mask. A side with no
+        trials is absent from the grouping and comes back as NaN, which is what the
+        callers below test for.
         """
         acc = by_group(decision_accuracy, td, hidden_rule_mask(td)).reindex([False, True])
         return acc.iloc[0], acc.iloc[1]

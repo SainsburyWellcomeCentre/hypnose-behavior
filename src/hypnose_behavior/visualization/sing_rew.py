@@ -425,8 +425,8 @@ def _session_reward_rts(completed, results_dir):
     """Reward response times for one session: (all_values, {"A": [...], "B": [...]}).
 
     `reward_delivery_latency` is the same quantity `pred_seq_utils.response_time`
-    draws -- finding 11's duplicate pair, now one definition. It is **not**
-    `trial_data.response_time_ms`, which is measured from the reward-port poke.
+    draws, from one definition. It is **not** `trial_data.response_time_ms`, which is
+    measured from the reward-port poke.
     """
     rew_df = completed[completed.get("response_time_category") == "rewarded"]
     latencies = reward_delivery_latency(rew_df, _load_position_data(results_dir, rew_df))
@@ -611,9 +611,8 @@ def _metric_value(rates, key):
     """Resolve a metric value from a `compute_sing_rew_rates` result.
 
     Handles top-level rate keys and raw counts (under ``counts``). Missing -> NaN.
-    ``ambiguous_rate`` and ``correct_rejection_rate`` used to be derived here
-    rather than looked up; Phase 4a moved both into `compute_sing_rew_rates`, so
-    they now take the ordinary top-level path below.
+    **Look values up; do not derive one here** -- `compute_sing_rew_rates` owns the
+    arithmetic, and a second derivation is how two figures come to disagree.
     """
     if rates is None:
         return float("nan")

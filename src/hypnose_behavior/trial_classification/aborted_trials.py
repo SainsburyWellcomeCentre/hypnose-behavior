@@ -4,9 +4,9 @@
 where the sequence stopped, which odor was last sampled and whether the abort was a false
 alarm. ``classify_noninitiated_FA`` does the equivalent for periods with no initiation at all.
 
-The false-alarm latency is bucketed on the **window-relative** time, never the movement time
--- bucketing the movement latency was measured and rejected because it destroys what
-``FA_late`` means (``DECISIONS.md`` section 16).
+- Bucket the false-alarm latency on the **window-relative** time, never the movement
+  time: bucketing the movement latency destroys what ``FA_late`` means. See DECISIONS.md
+  section 16.
 """
 from __future__ import annotations
 

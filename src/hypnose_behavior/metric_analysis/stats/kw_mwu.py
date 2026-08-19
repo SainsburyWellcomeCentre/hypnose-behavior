@@ -4,13 +4,8 @@ from __future__ import annotations
 
 """Kruskal-Wallis across groups, then Holm-corrected pairwise Mann-Whitney U.
 
-One module per test, per judgement call 6 of the Phase 4a metric audit: a single
-`stats.py` accumulates unrelated procedures and their assumptions, and the next
-test added is what makes it a grab bag.
-
-It lived inside `plot_movement_analysis_statistics` in `visualization/`, which
-made it unreachable from anywhere else and invisible to anything that wanted to
-report the same comparison. Nothing about it is specific to movement data.
+One module per test: a single `stats.py` accumulates unrelated procedures and their
+assumptions. Nothing here is specific to movement data.
 """
 
 import numpy as np

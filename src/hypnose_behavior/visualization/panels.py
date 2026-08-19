@@ -2,18 +2,11 @@ from __future__ import annotations
 
 """Drawing helpers shared by more than one plotter module.
 
-restructure_2 Phase 5. These four were reached by importing them *from another
-plotter module* -- `sing_rew` pulled two of them out of `pred_seq_utils`, and
-`movement_analysis_utils` pulled `_clean_graph` out of `visualization_utils`.
-A plotter module importing from a sibling plotter module is the layering the
-audit's finding about a "shared prep module" was really pointing at; there was
-no duplication to remove, only a dependency pointing sideways instead of down.
-
-Same reasoning as `DECISIONS.md` section 3 for `frames.py`: the shared thing
-becomes a leaf, and every plotter depends on the leaf rather than on a peer.
-
-None of these calls `save_figure`, so section 9's provenance hazard does not
-apply to the move.
+- **A helper two plotter modules need lives here, never in one of them.** Zero
+  plotter-to-plotter imports is the invariant that keeps `visualization/` splittable.
+  See DECISIONS.md sections 3 and 13.
+- None of these calls `save_figure`, so the section 9 provenance hazard does not arise
+  here. Anything added that does must pass `skip_modules=(__name__,)`.
 """
 
 import numpy as np

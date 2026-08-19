@@ -4,12 +4,11 @@ from __future__ import annotations
 
 """Session loader for SLEAP tracking joined to the behavioural results.
 
-Moved out of ``visualization/movement_analysis_utils.py`` in restructure_2
-Phase 4a. It is a loader, not a plot: it resolves the session directory, reads
-the combined tracking table and back-fills the legacy behaviour views. It moved
-to ``io/`` rather than the audit's suggested ``visualization/io/`` because
-``metric_analysis.movement`` is now a consumer, and ``metric_analysis`` must not
-import from ``visualization``.
+Resolves the session directory, reads the combined tracking table and back-fills
+the behaviour views.
+
+- Lives in ``io/``, not ``visualization/``: ``metric_analysis.movement`` is a
+  consumer, and ``metric_analysis`` must not import from ``visualization``.
 """
 
 import pandas as pd
@@ -21,8 +20,6 @@ from hypnose_behavior.io.paths import (
     get_rawdata_root,
     get_server_root,
 )
-# Was a function-level import while `load_session_results` lived in
-# `metric_analysis`, to keep `io/` from importing it. Phase 4b moved it here.
 from hypnose_behavior.io.load_results import load_session_results
 from hypnose_behavior.utils.helpers import (
     _get_from_cache,
@@ -120,6 +117,5 @@ def _load_tracking_and_behavior(subjid, date, tracking_source='sleap'):
 
     return tracking, behavior
 
-# Public alias. The underscore name is what six call sites across
-# `visualization/` already use, so it stays bound until Phase 5 repoints them.
+# Public alias; the underscore name is what the `visualization/` call sites import.
 load_tracking_and_behavior = _load_tracking_and_behavior

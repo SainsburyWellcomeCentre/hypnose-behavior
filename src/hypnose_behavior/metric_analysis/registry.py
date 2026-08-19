@@ -4,9 +4,8 @@ from __future__ import annotations
 
 """What metrics exist, which frame each one reads, and how each is reported.
 
-restructure_2 Phase 4b. `run_all_metrics` used to name 25 wrappers and their
-banners inline, so adding a metric meant editing the orchestrator as well as
-defining it. A metric now declares itself where it is defined:
+A metric declares itself where it is defined, so adding one does not touch the
+orchestrator:
 
     @metric(frame="trials", title="Decision Accuracy")
     def decision_accuracy(trials): ...
@@ -14,25 +13,18 @@ defining it. A metric now declares itself where it is defined:
     @session_metric(decision_accuracy)
     def decision_accuracy_session(results): ...
 
-**The frame is a decorator argument, not a file boundary** (confirmed
-2026-08-05). Grouping stays by behavioural construct, so `sampling.py` holds
-both `trials` and `position_data` metrics and `fa_latency_from_pokeout` sits
-with the false alarms rather than with the other latencies -- while
-`spec.call(results)` still knows which frame to hand each core.
-
-**Only `f(frame) -> value` is registrable.** That is the shape 4a's decision D0
-delivered, and it is what makes the registry mean anything: given a `results`
-dict, every entry can be evaluated the same way. So `fa_port_ratio(n_a, n_b)`
-and `get_fa_ratio_a_stats(subjid, dates)` are deliberately absent -- they are
-useful functions in `metric_analysis`, but they are not metrics over a frame.
-
-**The report order is not the registry's.** `run.py` keeps an explicit ordered
-list, because that order is baked into every `metrics_*.txt` already on disk and
-is what the QC stdout parity check compares. Deriving it from registration order
-would make it a function of import order -- i.e. of the file layout this phase
-just changed. Registering a metric therefore makes it *discoverable*; naming it
-in `run.REPORT` is the separate decision to *save* it. Most of the metrics 4a
-recovered from `visualization/` are registered and deliberately not reported.
+- **The frame is a decorator argument, not a file boundary.** Modules group by
+  behavioural construct, so `sampling.py` holds both `trials` and `position_data`
+  metrics, while `spec.call(results)` still knows which frame to hand each core.
+- **Only `f(frame) -> value` is registrable.** `fa_port_ratio(n_a, n_b)` and
+  `get_fa_ratio_a_stats(subjid, dates)` are deliberately absent: useful functions,
+  not metrics over a frame.
+- **The report order lives in `run.REPORT`, not here.** Deriving it from
+  registration order would make it a function of import order. Registering makes a
+  metric discoverable; naming it in `REPORT` is the separate decision to save it.
+- **Re-registering the same function is a reload, not a clash** -- the notebooks run
+  under `%autoreload 2`. A *different* function claiming a registered name still
+  raises. See DECISIONS.md section 4.
 """
 
 from dataclasses import dataclass
