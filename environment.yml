@@ -6,6 +6,7 @@ dependencies:
   - python>=3.9,<3.13
   - numpy<2
   - pandas
+  - pyarrow
   - matplotlib
   - scipy
   - tqdm

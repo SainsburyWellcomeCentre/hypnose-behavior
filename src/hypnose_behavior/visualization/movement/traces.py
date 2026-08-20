@@ -857,10 +857,10 @@ def plot_trial_traces_by_mode(
     aborted_color = "#555555"
     timeout_color = "#9E9E9E"
     unrewarded_color = "#000000"
-    index_cmap = cm.get_cmap("plasma")
+    index_cmap = plt.get_cmap("plasma")
     index_norm = Normalize(vmin=0.0, vmax=1.0)
-    trial_cmap = cm.get_cmap("Blues")
-    speed_cmap = cm.get_cmap("viridis")
+    trial_cmap = plt.get_cmap("Blues")
+    speed_cmap = plt.get_cmap("viridis")
     speed_vals_global = []
 
     subj_str = normalize_subjid(subjid)

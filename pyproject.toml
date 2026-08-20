@@ -15,6 +15,7 @@ requires-python = ">=3.9,<3.13"
 dependencies = [
     "numpy<2",
     "pandas",
+    "pyarrow",
     "matplotlib",
     "scipy",
     "tqdm",

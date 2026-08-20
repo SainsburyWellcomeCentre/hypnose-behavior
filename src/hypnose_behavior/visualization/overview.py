@@ -12,7 +12,6 @@ computes through the registry and never reads ``metrics_*.json``.
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib import cm
 from typing import (
     Iterable,
     Optional,
@@ -250,7 +249,7 @@ def plot_behavior_metrics(
                 unique_protocols.append(p)
         if "Unknown" in df["protocol"].unique():
             unique_protocols.append("Unknown")
-        cmap = cm.get_cmap("tab20", max(20, len(unique_protocols)))
+        cmap = plt.get_cmap("tab20", max(20, len(unique_protocols)))
         prot_to_color = {p: cmap(i % cmap.N) for i, p in enumerate(unique_protocols)}
         if "Unknown" in prot_to_color:
             prot_to_color["Unknown"] = (0.6, 0.6, 0.6, 1.0)
@@ -296,7 +295,7 @@ def plot_behavior_metrics(
         # (tab20), and all markers collapse to a uniform dot.
         subject_colored_mode = (not hr_series_mode) and (not black_white)
         if subject_colored_mode:
-            subj_cmap = cm.get_cmap("tab20")
+            subj_cmap = plt.get_cmap("tab20")
             subj_to_color = {sid: subj_cmap(i % 20) for i, sid in enumerate(unique_subj)}
         else:
             subj_to_color = {}
@@ -312,7 +311,7 @@ def plot_behavior_metrics(
             series_to_ls = {s: linestyle_cycle[i % len(linestyle_cycle)] for i, s in enumerate(series_values)}
             series_to_lw = {s: (2.5 if s == "Total" else 1.2) for s in series_values}
         else:
-            series_cmap = cm.get_cmap("tab20", max(3, len(series_values)))
+            series_cmap = plt.get_cmap("tab20", max(3, len(series_values)))
             series_to_color = {}
             for i, s in enumerate(series_values):
                 mapped = _map_series_color(s)
