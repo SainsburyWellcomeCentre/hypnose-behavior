@@ -77,8 +77,8 @@ tolerate.
 
 | # | item | gate | risk |
 |---|---|---|---|
-| 1 | metadata and documentation truth | none needed | none |
-| 2 | `qc/check_layering.py` — the gate, before the moves | itself | none |
+| 1 | ~~metadata and documentation truth~~ **done 2026-08-20** | none needed | none |
+| 2 | ~~`qc/check_layering.py` — the gate, before the moves~~ **done 2026-08-20** | itself | none |
 | 3 | selection helpers `utils/` → `io/layout.py` | `ast_move_check` | low |
 | 4 | `detect_settings` / `detect_stage` → `io/` | `ast_move_check` | low |
 | 5 | the `outcome.py` exception — decide and whitelist | `check_layering` | none |
@@ -92,6 +92,8 @@ Item 9 is independent of 1–8 and can be taken at any point as a short session.
 ---
 
 ## Item 1 — metadata and documentation truth
+
+**Done 2026-08-20** (`e82f15c`). `regression` GREEN 9/9, `check_imports` PASS.
 
 Pure deletion and correction. No gate can fail because nothing executable changes.
 
@@ -165,6 +167,16 @@ map. `debug/` is deliberately left out of this item; see "Deferred" below.
 ---
 
 ## Item 2 — `qc/check_layering.py`, written *before* the moves
+
+**Done 2026-08-20.** `qc/check_layering.py`, `ast` only, zero pipeline imports — `qc/`
+measures fan-in 0 with it in place. Baseline as it reports today: 102 modules (103 with
+itself), 311 edges, module graph a DAG, and **three** cycles at directory granularity —
+`io ↔ utils`, `io ↔ trial_classification`, and `io → trial_classification → utils → io`,
+the third because `trial_classification/detect_trials.py:19` and `run.py:43` import
+`utils.helpers` one-way. All three open when item 3 removes `utils/helpers.py:7`. Every
+cycle prints with every edge; a declared edge is *marked*, never removed, and a `DECLARED`
+entry that no longer matches the tree fails the gate. Simulated against items 3–5: one
+cycle left, declared, RESULT PASS.
 
 **Do the measurement first, as its own commit.** This is Item 1 of the previous plan's
 technique, and it applies here: write the gate, watch it report today's two cycles as the
