@@ -81,7 +81,7 @@ tolerate.
 | 2 | ~~`qc/check_layering.py` — the gate, before the moves~~ **done 2026-08-20** | itself | none |
 | 3 | ~~selection helpers `utils/` → `io/layout.py`~~ **done 2026-08-20** | `ast_move_check` | low |
 | 4 | ~~`detect_settings` / `detect_stage` → `io/`~~ **done 2026-08-20** | `ast_move_check` | low |
-| 5 | the `outcome.py` exception — decide and whitelist | `check_layering` | none |
+| 5 | ~~the `outcome.py` exception — decide and whitelist~~ **done 2026-08-20** | `check_layering` | none |
 | 6 | `results_dir()` / `table_path()` and the 47 sites | `regression`, `plot_regression` | low |
 | 7 | retire `_filter_session_dirs` → `SessionRef` | `plot_regression`, `regression` | medium |
 | 8 | `prep.iter_sessions()` and the plotter preambles | `plot_regression` (44) | medium |
@@ -272,6 +272,12 @@ disassembles function bodies and will catch it; a plain import test will not.
 ---
 
 ## Item 5 — the `outcome.py` exception: decide it, do not move it
+
+**Done 2026-08-20.** `check_layering` PASS with one `DECLARED` entry. The cycle is still
+printed in full and marked, never hidden. The leaf rule rides on the entry rather than in
+a list of its own, so the reason and the fact that makes it true are checked together;
+`outcome.py` reaching past `parameters` / `frames` — including to a sibling in its own
+package — turns the gate red.
 
 **Decision: `outcome.py` stays in `trial_classification/`.** The earlier suggestion to
 promote it to a package-root leaf beside `frames.py` and `parameters.py` is **withdrawn**.

@@ -2,7 +2,7 @@
 """Static layering checker.
 
 Parses every module under ``src/hypnose_behavior`` with ``ast``, builds the
-module -> module import graph, and asserts two things about it:
+module -> module import graph, and asserts three things about it:
 
 1. **The module graph is a DAG.** No file-to-file import cycle, at any depth.
    This is the invariant worth protecting: it is what lets a reader follow an
@@ -10,6 +10,11 @@ module -> module import graph, and asserts two things about it:
 2. **Every cycle at directory granularity is a declared decision.** Directories
    are tiers, and a loop between tiers fails unless one of its tier-to-tier
    edges is listed in ``DECLARED`` below, carrying the reason it is accepted.
+3. **Every declared decision still holds.** An accepted upward edge is safe
+   because the module it reaches is a leaf, so each entry names what that module
+   may import. The day it reaches further, the entry's reason has stopped being
+   true, and a leaf rule that has quietly stopped being true is worse than no
+   leaf rule at all (DECISIONS.md section 31).
 
 Nothing is hidden. Every cycle is printed with every edge that forms it, and a
 declared edge is *marked*, never removed -- an accepted cycle stays visible in
@@ -56,17 +61,39 @@ CYCLE_CAP = 200
 
 
 class Declared(NamedTuple):
-    """One accepted edge: which module imports which, and why that is allowed."""
+    """One accepted edge: which module imports which, why that is allowed, and the
+    leaf rule the reason rests on.
+
+    ``imported_may_import`` is the complete set of package modules ``imported`` may
+    reach. It is what makes the edge safe, so it is required: an exception whose
+    justification is unchecked is prose, and prose drifts.
+    """
 
     importer: str
     imported: str
     reason: str
+    imported_may_import: frozenset[str]
 
 
 # Each entry is a decision that has been taken and written down. The cycle it
 # covers is still reported in full, marked with this reason. An entry whose
-# import no longer exists, or that covers no cycle, fails the gate.
-DECLARED: tuple[Declared, ...] = ()
+# import no longer exists, that covers no cycle, or whose leaf rule has stopped
+# holding, fails the gate.
+DECLARED: tuple[Declared, ...] = (
+    Declared(
+        importer="hypnose_behavior.io.save_results",
+        imported="hypnose_behavior.trial_classification.outcome",
+        reason="outcome.py is an 84-line trial-classification rule with three sibling "
+               "callers in that package, so it stays there rather than being promoted "
+               "to the root tier. It imports nothing from the package except the "
+               "root-level leaves, which is what lets io/save_results.py reach it "
+               "without pulling trial_classification down with it.",
+        imported_may_import=frozenset({
+            "hypnose_behavior.parameters",
+            "hypnose_behavior.frames",
+        }),
+    ),
+)
 
 
 class Edge(NamedTuple):
@@ -340,7 +367,7 @@ def main() -> int:
             print(f"    FAIL -- no declared edge closes this cycle; narrowest leg "
                   f"{thin[0]} -> {thin[1]} ({n_thin} edge{'' if n_thin == 1 else 's'})")
 
-    # 3. the allow-list must still describe the tree
+    # 3. the allow-list must still describe the tree, and each leaf rule must hold
     plural = "entry" if len(DECLARED) == 1 else "entries"
     print(f"\n[DECLARED] {len(DECLARED)} {plural}")
     present = {(e.importer, e.imported) for e in edges}
@@ -349,15 +376,35 @@ def main() -> int:
         if not entry.reason.strip():
             failures.append(f"declared {label}")
             print(f"    [NO REASON] {label} -- an exception without a reason is a suppression")
-        elif (entry.importer, entry.imported) not in present:
+            continue
+        if not entry.imported_may_import:
+            failures.append(f"declared {label}")
+            print(f"    [NO LEAF RULE] {label} -- name what {_short(entry.imported)} may "
+                  f"import, or the reason is unchecked prose")
+            continue
+        if (entry.importer, entry.imported) not in present:
             failures.append(f"declared {label}")
             print(f"    [STALE] {label} -- no such import in the tree")
-        elif (tier[entry.importer], tier[entry.imported]) not in cyclic_pairs:
+            continue
+        if (tier[entry.importer], tier[entry.imported]) not in cyclic_pairs:
             failures.append(f"declared {label}")
             print(f"    [UNUSED] {label} -- the import exists but closes no cycle")
+            continue
+
+        print(f"    {label}")
+        print(_reason_lines(entry.reason, 8))
+        reached = sorted({e for e in edges if e.importer == entry.imported},
+                         key=lambda e: (e.imported, e.lineno))
+        broken = [e for e in reached if e.imported not in entry.imported_may_import]
+        allowed = ", ".join(sorted(_short(m) for m in entry.imported_may_import))
+        print(f"        leaf rule: {_short(entry.imported)} may import {allowed}")
+        if broken:
+            failures.append(f"leaf rule {label}")
+            for edge in broken:
+                print(f"        [LEAF BROKEN] {_site(edge, modules)} -> {_short(edge.imported)}")
         else:
-            print(f"    {label}")
-            print(_reason_lines(entry.reason, 8))
+            names = ", ".join(_short(e.imported) for e in reached) or "nothing"
+            print(f"        holds -- it imports {names}")
 
     if args.tiers:
         _print_tiers(modules, edges, tier)
