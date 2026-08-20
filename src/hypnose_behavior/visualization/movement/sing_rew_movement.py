@@ -34,7 +34,7 @@ from matplotlib.lines import Line2D
 from hypnose_behavior.frames import position_entries_by_trial
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.metric_analysis.sing_rew_metrics import _classify_trial
-from hypnose_behavior.utils.helpers import session_selectors
+from hypnose_behavior.io.layout import session_selectors
 from hypnose_behavior.visualization.prep import resample_trace, smooth_xy
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
 from hypnose_behavior.visualization.prep import _collect_sessions
@@ -324,7 +324,7 @@ def plot_category_traces(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,

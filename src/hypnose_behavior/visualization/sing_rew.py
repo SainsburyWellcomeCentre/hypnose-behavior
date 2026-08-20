@@ -24,7 +24,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
 from hypnose_behavior.io.save import save_figure
-from hypnose_behavior.utils.helpers import session_selectors
+from hypnose_behavior.io.layout import session_selectors
 from hypnose_behavior.io.loaders import _load_position_data
 from hypnose_behavior.visualization.prep import (
     _collect_sessions,
@@ -194,7 +194,7 @@ def FR_ratio(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
@@ -479,7 +479,7 @@ def FR_latency(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
@@ -1055,7 +1055,7 @@ def outcome_composition(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
@@ -1310,7 +1310,7 @@ def plot_cumulative_hit_cr(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
@@ -1348,7 +1348,7 @@ def plot_cumulative_hit_cr_by_trial(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,

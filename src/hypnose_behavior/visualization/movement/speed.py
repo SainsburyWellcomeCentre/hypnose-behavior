@@ -21,15 +21,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from hypnose_behavior.frames import position_entries_by_trial
 from hypnose_behavior.io.paths import get_derivatives_root
-from hypnose_behavior.utils.helpers import (
-    _filter_session_dirs,
-    _get_from_cache,
-    _update_cache,
-    session_selectors,
-)
+from hypnose_behavior.utils.helpers import _get_from_cache, _update_cache
 from hypnose_behavior.io.layout import (
+    _filter_session_dirs,
     derivatives,
     normalize_subjid,
+    session_selectors,
 )
 from hypnose_behavior.io.loaders import (
     _load_position_data,
@@ -88,7 +85,7 @@ def plot_epoch_speeds_by_condition(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
@@ -356,7 +353,7 @@ def plot_traces_with_speed_threshold(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,

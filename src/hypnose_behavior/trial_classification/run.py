@@ -23,7 +23,7 @@ from hypnose_behavior.io.loaders import (
     load_experiment, load_all_streams, load_experiment_events, load_odor_mapping,
 )
 from hypnose_behavior.io.save_results import save_session_analysis_results
-from hypnose_behavior.io.layout import rawdata
+from hypnose_behavior.io.layout import rawdata, session_selectors
 from hypnose_behavior.io.protocol_schema import ConflictingProtocolError
 from hypnose_behavior.trial_classification.aborted_trials import (
     abortion_classification, classify_noninitiated_FA,
@@ -40,7 +40,7 @@ from hypnose_behavior.trial_classification.params import (
 from hypnose_behavior.trial_classification.response_times import analyze_response_times
 from hypnose_behavior.trial_classification.merge import merge_classifications
 from hypnose_behavior.trial_classification.summary import print_merged_session_summary
-from hypnose_behavior.utils.helpers import session_selectors, vprint
+from hypnose_behavior.utils.helpers import vprint
 
 # --------------------------------------------------------------------------------------
 # One run: detect -> classify -> response times -> abortions, assembled into one dict.
@@ -621,7 +621,7 @@ def batch_analyze_sessions(
     - Handles missing subjects/dates gracefully.
     Returns a dict: {(subjid, date): result_dict}
 
-    **The six selectors intersect and none is required** (`utils.helpers.session_selectors`):
+    **The six selectors intersect and none is required** (`io.layout.session_selectors`):
     `None` means "do not filter on this". They resolve through
     `rawdata.find_sessions(...)` rather than by slicing a listing here, because
     `session_index` is only defined *against* a listing -- `docs/DECISIONS.md` section 8.

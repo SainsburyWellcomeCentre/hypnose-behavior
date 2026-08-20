@@ -12,10 +12,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-from hypnose_behavior.utils.helpers import (
-	_filter_session_dirs,
-	_iter_subject_dirs,
-	session_selectors,
+from hypnose_behavior.io.layout import (
+    _filter_session_dirs,
+    _iter_subject_dirs,
+    session_selectors,
 )
 from hypnose_behavior.frames import position_entries_by_trial
 from hypnose_behavior.io.loaders import _load_position_data
@@ -282,7 +282,7 @@ def last_odor_poke_time(
 
 	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
 	selection further; they intersect with ``dates`` and with each other, and ``index``
-	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+	is the subject's gap-free chronological rank (`io.layout.session_selectors`).
 	"""
 	select = session_selectors(
 		ses=ses, index=index, date_range=date_range,
@@ -397,7 +397,7 @@ def trial_poke_duration(
 
 	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
 	selection further; they intersect with ``dates`` and with each other, and ``index``
-	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+	is the subject's gap-free chronological rank (`io.layout.session_selectors`).
 	"""
 	select = session_selectors(
 		ses=ses, index=index, date_range=date_range,
@@ -508,7 +508,7 @@ def first_odor_poke_duration(
 
 	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
 	selection further; they intersect with ``dates`` and with each other, and ``index``
-	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+	is the subject's gap-free chronological rank (`io.layout.session_selectors`).
 	"""
 	select = session_selectors(
 		ses=ses, index=index, date_range=date_range,
@@ -614,7 +614,7 @@ def poke_time_all_pos(
 
 	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
 	selection further; they intersect with ``dates`` and with each other, and ``index``
-	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+	is the subject's gap-free chronological rank (`io.layout.session_selectors`).
 	"""
 	select = session_selectors(
 		ses=ses, index=index, date_range=date_range,
@@ -729,7 +729,7 @@ def response_time(
 
 	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
 	selection further; they intersect with ``dates`` and with each other, and ``index``
-	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+	is the subject's gap-free chronological rank (`io.layout.session_selectors`).
 	"""
 	select = session_selectors(
 		ses=ses, index=index, date_range=date_range,
@@ -876,7 +876,7 @@ def fa_analysis(
 
 	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
 	selection further; they intersect with ``dates`` and with each other, and ``index``
-	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+	is the subject's gap-free chronological rank (`io.layout.session_selectors`).
 	"""
 	select = session_selectors(
 		ses=ses, index=index, date_range=date_range,
@@ -1184,7 +1184,7 @@ def valve_to_reward(
 
 	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
 	selection further; they intersect with ``dates`` and with each other, and ``index``
-	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+	is the subject's gap-free chronological rank (`io.layout.session_selectors`).
 	"""
 	select = session_selectors(
 		ses=ses, index=index, date_range=date_range,
@@ -1471,7 +1471,7 @@ def performance(
 
 	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
 	selection further; they intersect with ``dates`` and with each other, and ``index``
-	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+	is the subject's gap-free chronological rank (`io.layout.session_selectors`).
 	"""
 	select = session_selectors(
 		ses=ses, index=index, date_range=date_range,
@@ -1541,7 +1541,7 @@ def cummulative_poke_time(
 
 	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
 	selection further; they intersect with ``dates`` and with each other, and ``index``
-	is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+	is the subject's gap-free chronological rank (`io.layout.session_selectors`).
 	"""
 	select = session_selectors(
 		ses=ses, index=index, date_range=date_range,

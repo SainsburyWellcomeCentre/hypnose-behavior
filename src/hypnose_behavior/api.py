@@ -32,7 +32,7 @@ notice.
 from hypnose_behavior.accessors import (
     Session, metric_names, pooled, pooled_metrics, session, sessions,
 )
-from hypnose_behavior.io.layout import SessionRef, derivatives, rawdata
+from hypnose_behavior.io.layout import SessionRef, derivatives, rawdata, session_selectors
 from hypnose_behavior.io.load_results import (
     SessionResults, load_position_data, load_results_dir,
 )
@@ -44,7 +44,6 @@ from hypnose_behavior.io.protocol_schema import (
 from hypnose_behavior.metric_analysis.registry import REGISTRY, MetricSpec
 from hypnose_behavior.metric_analysis.run import REPORT, metric_value
 from hypnose_behavior.parameters import scoring_parameters
-from hypnose_behavior.utils.helpers import session_selectors
 
 __all__ = [
     # -- a session, resolved once -----------------------------------------------------

@@ -16,7 +16,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from hypnose_behavior.metric_analysis.metrics.false_alarm import FA_avg_response_times
 from hypnose_behavior.metric_analysis.metrics.timing import avg_response_time
-from hypnose_behavior.utils.helpers import (
+from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     _iter_subject_dirs,
     session_selectors,
@@ -76,7 +76,7 @@ def plot_response_times_completed_vs_fa(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
@@ -452,7 +452,7 @@ def plot_latency_over_time(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
@@ -499,7 +499,7 @@ def plot_iti_over_time(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,

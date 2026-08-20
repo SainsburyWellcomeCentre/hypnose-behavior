@@ -30,7 +30,13 @@ import json
 
 import matplotlib.colors as mcolors
 
-from hypnose_behavior.io.layout import derivatives, normalize_subjid
+from hypnose_behavior.io.layout import (
+    _filter_session_dirs,
+    _iter_subject_dirs,
+    derivatives,
+    normalize_subjid,
+    session_selectors,
+)
 from hypnose_behavior.io.load_results import load_results_dir, load_session_results
 from hypnose_behavior.io.loaders import _load_trial_views
 from hypnose_behavior.metric_analysis.metrics.hidden_rule import hr_odor_associations
@@ -40,8 +46,10 @@ from hypnose_behavior.io.paths import (
 )
 from hypnose_behavior.metric_analysis.metrics.timing import inter_trial_interval
 from hypnose_behavior.utils.helpers import (
-    _filter_session_dirs, _get_from_cache, _iter_subject_dirs, _update_cache,
-    find_tracking_file, read_tracking_table, session_selectors,
+    _get_from_cache,
+    _update_cache,
+    find_tracking_file,
+    read_tracking_table,
 )
 
 __all__ = [
@@ -386,7 +394,7 @@ def _load_subject_trial_timeline(subjid, subj_dates, *, ses=None, index=None,
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,

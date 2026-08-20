@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 from hypnose_behavior.io.loaders import _load_trial_views, _odor_to_letter
-from hypnose_behavior.utils.helpers import _filter_session_dirs, _iter_subject_dirs
+from hypnose_behavior.io.layout import _filter_session_dirs, _iter_subject_dirs
 
 # Truthy spellings of hidden_rule_success: bool in parquet, str via the CSV fallback.
 # Mirrors the coercion the visualization helpers use.

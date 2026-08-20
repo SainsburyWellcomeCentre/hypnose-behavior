@@ -11,14 +11,12 @@ from hypnose_behavior.metric_analysis.metrics.sampling import (
     poke_duration_by_position,
     poke_durations,
 )
-from hypnose_behavior.utils.helpers import (
+from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     _iter_subject_dirs,
-    session_selectors,
-)
-from hypnose_behavior.io.layout import (
     derivatives,
     normalize_subjid,
+    session_selectors,
 )
 from hypnose_behavior.io.paths import (
     get_rawdata_root,
@@ -63,7 +61,7 @@ def plot_sampling_times_analysis(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
@@ -448,7 +446,7 @@ def plot_poke_duration_by_position(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
@@ -726,7 +724,7 @@ def plot_poke_duration_by_odor(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,

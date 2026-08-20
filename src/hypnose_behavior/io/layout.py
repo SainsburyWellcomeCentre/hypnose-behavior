@@ -22,6 +22,9 @@ the `_id-` suffix.
 """
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Iterable, Optional, Union
+
 from hypnose_helpers.io.layout import (  # noqa: F401  (re-exported: one import for callers)
     DuplicateSessionError,
     SessionLayout,
@@ -60,8 +63,84 @@ def layout_for(root=None) -> SessionLayout:
     return SessionLayout(root, name="derivatives", subject_pattern=SUBJECT_PATTERN)
 
 
+def _iter_subject_dirs(derivatives_dir: Optional[Path], subjids: Optional[Iterable[int]]):
+    """Yield (subjid, subject_dir) tuples from derivatives.
+
+    Thin wrapper over the shared layout walker. A named subject that does not exist is
+    skipped rather than raised on; two directories for one subject raise.
+    """
+    yield from layout_for(derivatives_dir).iter_subjects(subjids)
+
+
+def session_selectors(*, ses=None, index=None, date_range=None,
+                      ses_range=None, index_range=None) -> dict:
+    """Bundle the non-date session selectors for forwarding, unchanged.
+
+    Every public plotter takes these five alongside `dates` and passes them straight
+    to `_filter_sessions` / `_filter_session_dirs`, which hand them to the shared
+    `filter_sessions`. This exists so that threading them through ~40 plotters is one
+    line each rather than five, and -- more to the point -- so no plotter is tempted
+    to *interpret* them. `find_sessions` already takes exactly these keywords.
+
+    Nothing is validated or rejected here, deliberately: **the keys intersect**, so
+    `ses_range=(1, 9), index_range=(3, 5)` legitimately means "of ses 1-9, the 3rd to
+    5th sessions chronologically". `None` means "do not filter on this" and an empty
+    list means "match nothing" -- see `_filter_sessions`.
+    """
+    return {"ses": ses, "index": index, "date_range": date_range,
+            "ses_range": ses_range, "index_range": index_range}
+
+
+def _filter_sessions(subj_dir: Path,
+                     dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
+                     *, ses=None, index=None,
+                     date_range=None, ses_range=None, index_range=None) -> list:
+    """`SessionRef`s for a subject directory, narrowed by any of the six selectors.
+
+    `dates` stays positional because ~36 call sites pass it that way. A 2-tuple is an
+    inclusive range (either bound may be None); any other iterable is a membership
+    test; None means every session -- unchanged, and now handled by `filter_sessions`
+    itself, whose `_split_selector` reads a 2-tuple as a range exactly as the explicit
+    branch here used to.
+
+    **The selectors intersect; none is required.** `None` means "do not filter on
+    this", and an empty list means "match nothing" -- load-bearing rather than
+    incidental, because callers build a per-subject date list and pass it straight
+    through, so a subject with no requested dates must yield no sessions rather than
+    its whole history.
+
+    `index` is the subject's gap-free chronological rank over its *whole* history, so
+    it stays comparable across cohorts. **It selects; it does not position** -- see
+    `docs/DECISIONS.md` section 8.
+
+    Prefer this over `_filter_session_dirs` in new code: a `SessionRef` carries `ses`,
+    `date` and `session_index` alongside the path, which saves the caller re-parsing the
+    directory name -- the habit that produced 17 copies of this lookup.
+    """
+    return filter_sessions(
+        list_sessions(subj_dir),
+        date=dates, ses=ses, index=index,
+        date_range=date_range, ses_range=ses_range, index_range=index_range,
+    )
+
+
+def _filter_session_dirs(subj_dir: Path,
+                         dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
+                         *, ses=None, index=None,
+                         date_range=None, ses_range=None, index_range=None):
+    """Session directories for a subject, narrowed by any of the six selectors.
+
+    The paths-only shim over `_filter_sessions`; see there for the semantics.
+    """
+    return [s.path for s in _filter_sessions(
+        subj_dir, dates, ses=ses, index=index,
+        date_range=date_range, ses_range=ses_range, index_range=index_range,
+    )]
+
+
 __all__ = [
     "rawdata", "derivatives", "layout_for", "SUBJECT_PATTERN",
+    "session_selectors",
     "SessionRef", "SessionLayout", "DuplicateSessionError",
     "list_sessions", "filter_sessions", "normalize_subjid",
     "parse_subject", "parse_subject_dirname", "parse_session_dirname",

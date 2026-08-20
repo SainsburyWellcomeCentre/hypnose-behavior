@@ -41,7 +41,10 @@ from typing import Iterable, List, Optional, Sequence, Union
 import pandas as pd
 
 from hypnose_behavior.io.layout import (
-    derivatives, parse_session_dirname, parse_subject_dirname,
+    derivatives,
+    parse_session_dirname,
+    parse_subject_dirname,
+    session_selectors,
 )
 from hypnose_behavior.io.load_results import load_results_dir
 from hypnose_behavior.io.parquet_peek import DEFAULT_ROWS, peek
@@ -53,7 +56,6 @@ from hypnose_behavior.metric_analysis.registry import REGISTRY
 # `REGISTRY`, since a metric registers itself where it is defined and `run` imports
 # every definition module for exactly that side effect (section 4).
 from hypnose_behavior.metric_analysis.run import REPORT, metric_value
-from hypnose_behavior.utils.helpers import session_selectors
 
 __all__ = ["Session", "session", "sessions", "metric_names", "pooled", "pooled_metrics"]
 

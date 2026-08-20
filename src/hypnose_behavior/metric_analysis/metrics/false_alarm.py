@@ -33,7 +33,7 @@ from hypnose_behavior.metric_analysis.metrics.common import (
     _latency_ms,
     _reduce_rate,
 )
-from hypnose_behavior.utils.helpers import _filter_session_dirs, _iter_subject_dirs
+from hypnose_behavior.io.layout import _filter_session_dirs, _iter_subject_dirs
 from hypnose_behavior.metric_analysis.registry import (
     as_dict,
     metric,

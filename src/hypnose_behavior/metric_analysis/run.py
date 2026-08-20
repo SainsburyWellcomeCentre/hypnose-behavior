@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from hypnose_behavior.io.layout import derivatives
+from hypnose_behavior.io.layout import _filter_session_dirs, derivatives, session_selectors
 from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.io.load_results import load_session_results
 from hypnose_behavior.metric_analysis.merge import pool_results_dicts
@@ -33,7 +33,6 @@ from hypnose_behavior.metric_analysis.summary import (
     format_fa_abortion_tables,
     save_merged_metrics_txt,
 )
-from hypnose_behavior.utils.helpers import _filter_session_dirs, session_selectors
 # Imported for their **registrations**: a metric declares itself where it is
 # defined, so every definition module must be imported before REGISTRY is read.
 from hypnose_behavior.metric_analysis.metrics import (  # noqa: F401

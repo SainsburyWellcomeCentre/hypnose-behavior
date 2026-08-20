@@ -18,14 +18,12 @@ from hypnose_behavior.metric_analysis.metrics.false_alarm import (
     fa_port_share_a,
     fa_rate_by_position,
 )
-from hypnose_behavior.utils.helpers import (
+from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     _iter_subject_dirs,
-    session_selectors,
-)
-from hypnose_behavior.io.layout import (
     derivatives,
     normalize_subjid,
+    session_selectors,
 )
 from hypnose_behavior.io.paths import (
     get_rawdata_root,
@@ -107,7 +105,7 @@ def plot_abortion_and_fa_rates(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
@@ -525,7 +523,7 @@ def plot_fa_ratio_a_over_sessions(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
@@ -701,7 +699,7 @@ def plot_false_alarm_rate_by_position(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
@@ -933,7 +931,7 @@ def plot_fa_ratio_by_abort_odor(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,

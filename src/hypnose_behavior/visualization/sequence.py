@@ -12,13 +12,11 @@ here counts the first.
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from hypnose_behavior.metric_analysis.metrics.sequence import abortion_rate_positionX
-from hypnose_behavior.utils.helpers import (
-    _filter_session_dirs,
-    session_selectors,
-)
 from hypnose_behavior.io.layout import (
+    _filter_session_dirs,
     derivatives,
     normalize_subjid,
+    session_selectors,
 )
 from hypnose_behavior.io.paths import get_derivatives_root
 import numpy as np
@@ -103,7 +101,7 @@ def plot_position_completion_rate(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,

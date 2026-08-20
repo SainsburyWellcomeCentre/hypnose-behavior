@@ -26,16 +26,17 @@ import numpy as np
 import pandas as pd
 
 from hypnose_behavior.frames import position_entries_by_trial
-from hypnose_behavior.io.layout import derivatives, normalize_subjid
+from hypnose_behavior.io.layout import (
+    _filter_session_dirs,
+    _iter_subject_dirs,
+    derivatives,
+    normalize_subjid,
+    session_selectors,
+)
 from hypnose_behavior.io.loaders import _load_position_data, _load_trial_views
 from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
-from hypnose_behavior.utils.helpers import (
-    _filter_session_dirs,
-    _iter_subject_dirs,
-    _update_cache,
-    session_selectors,
-)
+from hypnose_behavior.utils.helpers import _update_cache
 
 __all__ = ["binned_speed", "compute_speed_analysis", "run_speed_analysis_batch",
            "speed_threshold", "THRESHOLD_COLUMNS"]

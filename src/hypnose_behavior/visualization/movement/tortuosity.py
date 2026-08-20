@@ -7,15 +7,12 @@ from __future__ import annotations
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from hypnose_behavior.utils.helpers import (
-    _filter_session_dirs,
-    _get_from_cache,
-    _update_cache,
-    session_selectors,
-)
+from hypnose_behavior.utils.helpers import _get_from_cache, _update_cache
 from hypnose_behavior.io.layout import (
+    _filter_session_dirs,
     derivatives,
     normalize_subjid,
+    session_selectors,
 )
 from hypnose_behavior.io.loaders import _load_trial_views
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
@@ -54,7 +51,7 @@ def plot_tortuosity_lines_overlay(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`utils.helpers.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
     """
     select = session_selectors(
         ses=ses, index=index, date_range=date_range,
