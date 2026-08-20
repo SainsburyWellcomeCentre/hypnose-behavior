@@ -21,7 +21,7 @@ from hypnose_behavior.metric_analysis.metrics.hidden_rule import hidden_rule_mas
 from hypnose_behavior.metric_analysis.resolvers import by_group
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_session_dirs,
+    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
@@ -145,10 +145,10 @@ def plot_decision_accuracy_by_odor(
         return collected
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
-        for ses_dir in ses_dirs:
-            date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses_dir)
+        ses_refs = _filter_sessions(subj_dir, dates, **select)
+        for ref in ses_refs:
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
             
@@ -357,10 +357,10 @@ def plot_decision_accuracy_rolling_average(
     # Collect per-session trial tables in chronological order.
     session_rows = []
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
-        for ses_dir in ses_dirs:
-            date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses_dir)
+        ses_refs = _filter_sessions(subj_dir, dates, **select)
+        for ref in ses_refs:
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
             td = _load_table_with_trial_data(results_dir, "trial_data")
@@ -381,7 +381,7 @@ def plot_decision_accuracy_rolling_average(
 
             td = td.reset_index(drop=True)
             td["date"] = int(date_str) if str(date_str).isdigit() else date_str
-            td["_session_uid"] = str(ses_dir.name)
+            td["_session_uid"] = str(ref.path.name)
             session_rows.append(td)
 
     if not session_rows:
@@ -679,7 +679,7 @@ def plot_decision_accuracy(
         """Reject malformed date tokens (must be 8-digit YYYYMMDD).
 
         A typo like ``2025118`` (7 digits) or ``202251120`` (9 digits) would
-        otherwise be treated by ``_filter_session_dirs`` as a numeric range
+        otherwise be treated by ``_filter_sessions`` as a numeric range
         endpoint and silently match every real session, so we guard here.
         """
         def _ok(tok):
@@ -731,8 +731,8 @@ def plot_decision_accuracy(
             continue
 
         main_vals, hr_vals = [], []
-        for ses_dir in _filter_session_dirs(subj_dir, subj_dates, **select):
-            results_dir = layout.results_dir(ses_dir)
+        for ref in _filter_sessions(subj_dir, subj_dates, **select):
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
             td = _load_trial_views(results_dir)["trial_data"]

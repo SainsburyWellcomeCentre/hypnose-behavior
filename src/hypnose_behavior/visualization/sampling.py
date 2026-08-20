@@ -13,7 +13,7 @@ from hypnose_behavior.metric_analysis.metrics.sampling import (
 )
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_session_dirs,
+    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
@@ -78,10 +78,10 @@ def plot_sampling_times_analysis(
     session_by_odor = []
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
-        for session_num, ses_dir in enumerate(ses_dirs, start=1):
-            date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses_dir)
+        ses_refs = _filter_sessions(subj_dir, dates, **select)
+        for session_num, ref in enumerate(ses_refs, start=1):
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
 
@@ -488,9 +488,9 @@ def plot_poke_duration_by_position(
             print(f"Warning: No date range provided in dict for subject {sid}, skipping")
             continue
 
-        ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
-        for ses_dir in ses_dirs:
-            results_dir = layout.results_dir(ses_dir)
+        ses_refs = _filter_sessions(subj_dir, subj_dates, **select)
+        for ref in ses_refs:
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
             position_data = _load_position_data(
@@ -832,11 +832,11 @@ def plot_poke_duration_by_odor(
         session_series = []  # per session-day: {series_key: [poke_ms, ...]}
         session_ind = []     # per session-day: {odor_letter: [poke_ms, ...]} (for show_lines)
         started = False
-        for ses_dir in _filter_session_dirs(subj_dir, subj_date, **select):
-            date_str = ses_dir.name.split("_date-")[-1]
+        for ref in _filter_sessions(subj_dir, subj_date, **select):
+            date_str = ref.date
             if not (str(date_str).isdigit() and len(str(date_str)) == 8):
                 continue
-            results_dir = layout.results_dir(ses_dir)
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
             td = _load_trial_views(results_dir)["trial_data"]

@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
 from hypnose_behavior.io.layout import (
-    _filter_session_dirs,
     _iter_subject_dirs,
     session_selectors,
 )

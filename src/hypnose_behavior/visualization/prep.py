@@ -32,7 +32,7 @@ import matplotlib.colors as mcolors
 
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_session_dirs,
+    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
@@ -142,13 +142,13 @@ def _collect_sessions(subjids, dates, *, ses=None, index=None,
             continue
         date_vals = []
         results_dirs = []
-        for ses_dir in _filter_session_dirs(subj_dir, dates, **select):
-            date_part = ses_dir.name.split("_date-")[-1]
+        for ref in _filter_sessions(subj_dir, dates, **select):
+            date_part = ref.date
             date_val = _normalize_date(date_part)
             if date_val is None:
                 continue
             date_vals.append(date_val)
-            results_dirs.append(layout.results_dir(ses_dir))
+            results_dirs.append(layout.results_dir(ref))
         if results_dirs:
             yield subjid, date_vals, results_dirs
 
@@ -409,9 +409,9 @@ def _load_subject_trial_timeline(subjid, subj_dates, *, ses=None, index=None,
         return None
 
     sessions = []
-    for ses_dir in _filter_session_dirs(subj_dir, subj_dates, **select):
-        date_str = ses_dir.name.split("_date-")[-1]
-        results_dir = layout.results_dir(ses_dir)
+    for ref in _filter_sessions(subj_dir, subj_dates, **select):
+        date_str = ref.date
+        results_dir = layout.results_dir(ref)
         if results_dir.exists():
             sessions.append((date_str, results_dir))
     sessions.sort(key=lambda t: t[0])

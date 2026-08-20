@@ -20,7 +20,7 @@ from hypnose_behavior.metric_analysis.metrics.false_alarm import (
 )
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_session_dirs,
+    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
@@ -133,10 +133,10 @@ def plot_abortion_and_fa_rates(
     fa_port_rows = []
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
-        for ses_dir in ses_dirs:
-            date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses_dir)
+        ses_refs = _filter_sessions(subj_dir, dates, **select)
+        for ref in ses_refs:
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
             
@@ -537,11 +537,11 @@ def plot_fa_ratio_a_over_sessions(
     fa_data = {}  # {odor: [(session_num, ratio, n_a, n_b, n_total), ...]}
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
+        ses_refs = _filter_sessions(subj_dir, dates, **select)
         
-        for session_num, ses_dir in enumerate(ses_dirs, start=1):
-            date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses_dir)
+        for session_num, ref in enumerate(ses_refs, start=1):
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
             
@@ -757,9 +757,9 @@ def plot_false_alarm_rate_by_position(
                 print(f"Warning: No subject directory found for {subj_str}")
             continue
 
-        ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
-        for ses_dir in ses_dirs:
-            results_dir = layout.results_dir(ses_dir)
+        ses_refs = _filter_sessions(subj_dir, subj_dates, **select)
+        for ref in ses_refs:
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
             views = _load_trial_views(results_dir)
@@ -963,11 +963,11 @@ def plot_fa_ratio_by_abort_odor(
     }
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
+        ses_refs = _filter_sessions(subj_dir, dates, **select)
         
-        for session_num, ses_dir in enumerate(ses_dirs, 1):
-            date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses_dir)
+        for session_num, ref in enumerate(ses_refs, 1):
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
             
             if not results_dir.exists():
                 continue

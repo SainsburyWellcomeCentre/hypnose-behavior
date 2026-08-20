@@ -18,7 +18,7 @@ from hypnose_behavior.metric_analysis.metrics.false_alarm import FA_avg_response
 from hypnose_behavior.metric_analysis.metrics.timing import avg_response_time
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_session_dirs,
+    _filter_sessions,
     _iter_subject_dirs,
     session_selectors,
 )
@@ -90,10 +90,10 @@ def plot_response_times_completed_vs_fa(
     rows = []
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
-        for ses_dir in ses_dirs:
-            date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses_dir)
+        ses_refs = _filter_sessions(subj_dir, dates, **select)
+        for ref in ses_refs:
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
 

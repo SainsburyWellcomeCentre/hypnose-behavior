@@ -28,7 +28,7 @@ import pandas as pd
 from hypnose_behavior.frames import position_entries_by_trial
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_session_dirs,
+    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
@@ -134,8 +134,8 @@ def run_speed_analysis_batch(
     processed: list[tuple[int, Union[int, str]]] = []
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, subjids):
-        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
-        if not ses_dirs:
+        ses_refs = _filter_sessions(subj_dir, dates, **select)
+        if not ses_refs:
             if verbose:
                 print(f"[run_speed_analysis_batch] No sessions found for sub-{sid:03d} with given dates.")
             continue
@@ -143,8 +143,8 @@ def run_speed_analysis_batch(
         # Extract ordered unique dates from session directories
         date_list = []
         seen_dates = set()
-        for ses in ses_dirs:
-            date_str = ses.name.split("_date-")[-1]
+        for ref in ses_refs:
+            date_str = ref.date
             try:
                 date_val = int(date_str) if str(date_str).isdigit() else date_str
             except Exception:
@@ -294,8 +294,8 @@ def compute_speed_analysis(
     derivatives_dir = get_derivatives_root()
     subj_dir = derivatives.subject_dir(subjid)
 
-    ses_dirs = _filter_session_dirs(subj_dir, dates)
-    if not ses_dirs:
+    ses_refs = _filter_sessions(subj_dir, dates)
+    if not ses_refs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
     bin_s = bin_ms / 1000.0
@@ -486,9 +486,9 @@ def compute_speed_analysis(
     per_session = []
     combined_data = {"rewarded": [], "unrewarded": [], "fa": []}
 
-    for ses in ses_dirs:
-        date_str = ses.name.split("_date-")[-1]
-        results_dir = layout.results_dir(ses)
+    for ref in ses_refs:
+        date_str = ref.date
+        results_dir = layout.results_dir(ref)
         if not results_dir.exists():
             continue
 

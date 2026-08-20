@@ -73,12 +73,13 @@ def layout_for(root=None) -> SessionLayout:
 def results_dir(session) -> Path:
     """The analysis-output directory of a session directory or a `SessionRef`.
 
-    Either, because both are in circulation: `_filter_sessions` hands back `SessionRef`s
-    and `_filter_session_dirs` hands back the bare paths. Nothing is checked -- a session
-    the pipeline has never analysed yields a path that does not exist, and whether that
-    is an error or a session to skip is the caller's decision, not this function's.
+    Either, because both are in circulation: selecting sessions hands back `SessionRef`s,
+    while a caller that assembles a session directory itself -- out of a `sub-`/`ses-`
+    pair, or out of a path it was given -- holds only the `Path`. Nothing is checked -- a
+    session the pipeline has never analysed yields a path that does not exist, and whether
+    that is an error or a session to skip is the caller's decision, not this function's.
 
-    Import the module rather than the name (`layout.results_dir(ses_dir)`): `results_dir`
+    Import the module rather than the name (`layout.results_dir(ref)`): `results_dir`
     is the local variable and the parameter name at most of the call sites, so a bare
     import would be shadowed by the very assignment that calls it.
     """
@@ -117,11 +118,11 @@ def session_selectors(*, ses=None, index=None, date_range=None,
                       ses_range=None, index_range=None) -> dict:
     """Bundle the non-date session selectors for forwarding, unchanged.
 
-    Every public plotter takes these five alongside `dates` and passes them straight
-    to `_filter_sessions` / `_filter_session_dirs`, which hand them to the shared
-    `filter_sessions`. This exists so that threading them through ~40 plotters is one
-    line each rather than five, and -- more to the point -- so no plotter is tempted
-    to *interpret* them. `find_sessions` already takes exactly these keywords.
+    Every public plotter takes these five alongside `dates` and passes them straight to
+    `_filter_sessions`, which hands them to the shared `filter_sessions`. This exists so
+    that threading them through ~40 plotters is one line each rather than five, and --
+    more to the point -- so no plotter is tempted to *interpret* them. `find_sessions`
+    already takes exactly these keywords.
 
     Nothing is validated or rejected here, deliberately: **the keys intersect**, so
     `ses_range=(1, 9), index_range=(3, 5)` legitimately means "of ses 1-9, the 3rd to
@@ -154,29 +155,16 @@ def _filter_sessions(subj_dir: Path,
     it stays comparable across cohorts. **It selects; it does not position** -- see
     `docs/DECISIONS.md` section 8.
 
-    Prefer this over `_filter_session_dirs` in new code: a `SessionRef` carries `ses`,
-    `date` and `session_index` alongside the path, which saves the caller re-parsing the
-    directory name -- the habit that produced 17 copies of this lookup.
+    **The one way into a subject's sessions**, and it returns a `list`: several callers
+    `enumerate` the result or take its `len()`. Each `SessionRef` carries `ses`, `date`
+    and `session_index` alongside the path, so no caller re-parses the directory name to
+    recover what the listing already read out of it.
     """
     return filter_sessions(
         list_sessions(subj_dir),
         date=dates, ses=ses, index=index,
         date_range=date_range, ses_range=ses_range, index_range=index_range,
     )
-
-
-def _filter_session_dirs(subj_dir: Path,
-                         dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
-                         *, ses=None, index=None,
-                         date_range=None, ses_range=None, index_range=None):
-    """Session directories for a subject, narrowed by any of the six selectors.
-
-    The paths-only shim over `_filter_sessions`; see there for the semantics.
-    """
-    return [s.path for s in _filter_sessions(
-        subj_dir, dates, ses=ses, index=index,
-        date_range=date_range, ses_range=ses_range, index_range=index_range,
-    )]
 
 
 __all__ = [

@@ -20,7 +20,7 @@ from pathlib import Path
 import pandas as pd
 
 from hypnose_behavior.io import layout
-from hypnose_behavior.io.layout import _filter_session_dirs, derivatives, session_selectors
+from hypnose_behavior.io.layout import _filter_sessions, derivatives, session_selectors
 from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.io.load_results import load_session_results
 from hypnose_behavior.metric_analysis.merge import pool_results_dicts
@@ -478,7 +478,7 @@ def batch_run_all_metrics_with_merge(
     Also computes and saves merged metrics across all sessions, per subject, and across all subjects.
 
     **The six selectors intersect and none is required** -- `None` means "do not filter on
-    this". They are forwarded to `_filter_session_dirs`, i.e. to the shared
+    this". They are forwarded to `_filter_sessions`, i.e. to the shared
     `filter_sessions`, rather than being interpreted here: an index is only defined
     *against* a listing (`docs/DECISIONS.md` section 8).
 
@@ -512,18 +512,18 @@ def batch_run_all_metrics_with_merge(
         session_stats[subjid] = {'analyzed': [], 'skipped': [], 'failed': []}
 
         # Find all session directories for this subject
-        ses_dirs = _filter_session_dirs(
+        ses_refs = _filter_sessions(
             subj_dir, dates,
             **session_selectors(ses=ses, index=index, date_range=date_range,
                                 ses_range=ses_range, index_range=index_range),
         )
         
-        if not ses_dirs:
+        if not ses_refs:
             continue
-        for ses_dir in ses_dirs:
-            results_dir = layout.results_dir(ses_dir)
+        for ref in ses_refs:
+            results_dir = layout.results_dir(ref)
             summary_path = layout.table_path(results_dir, "summary.json")
-            date = ses_dir.name.split("_date-")[-1]
+            date = ref.date
             
             if not summary_path.exists():
                 if verbose:

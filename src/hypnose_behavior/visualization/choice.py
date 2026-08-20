@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from hypnose_behavior.io.load_results import load_session_results
 from hypnose_behavior.io import layout
-from hypnose_behavior.io.layout import _filter_session_dirs, derivatives, session_selectors
+from hypnose_behavior.io.layout import _filter_sessions, derivatives, session_selectors
 from hypnose_behavior.io.paths import (
     get_rawdata_root,
     get_derivatives_root,
@@ -101,16 +101,16 @@ def plot_choice_history(
     subject_dir = derivatives.subject_dir(subjid)
     
     # Get session directories
-    ses_dirs = _filter_session_dirs(subject_dir, dates, **select)
-    if not ses_dirs:
+    ses_refs = _filter_sessions(subject_dir, dates, **select)
+    if not ses_refs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
     
     # Collect all trials across sessions
     all_trials = []
     
-    for session_idx, ses_dir in enumerate(ses_dirs):
-        date_str = ses_dir.name.split("_date-")[-1]
-        results_dir = layout.results_dir(ses_dir)
+    for session_idx, ref in enumerate(ses_refs):
+        date_str = ref.date
+        results_dir = layout.results_dir(ref)
         if not results_dir.exists():
             continue
 

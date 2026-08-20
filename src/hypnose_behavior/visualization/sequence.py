@@ -14,7 +14,7 @@ from matplotlib.lines import Line2D
 from hypnose_behavior.metric_analysis.metrics.sequence import abortion_rate_positionX
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_session_dirs,
+    _filter_sessions,
     derivatives,
     normalize_subjid,
     session_selectors,
@@ -73,7 +73,7 @@ def plot_position_completion_rate(
     dates : list | tuple | dict | None
         Specific dates [YYYYMMDD, ...] or inclusive range (start, end). If a dict,
         must map ``subjid → date_range`` (each value itself a list/tuple/None
-        passed through to ``_filter_session_dirs``); this lets each subject use
+        passed through to ``_filter_sessions``); this lets each subject use
         its own date window — useful when animals are offset in calendar time.
         Subjids not present as keys are skipped with a warning. ``None`` = all
         sessions for every subject.
@@ -151,9 +151,9 @@ def plot_position_completion_rate(
                 print(f"Warning: No subject directory found for {subj_str}")
             continue
 
-        ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
-        for ses_dir in ses_dirs:
-            results_dir = layout.results_dir(ses_dir)
+        ses_refs = _filter_sessions(subj_dir, subj_dates, **select)
+        for ref in ses_refs:
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
             views = _load_trial_views(results_dir)

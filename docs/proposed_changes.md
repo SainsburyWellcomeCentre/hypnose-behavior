@@ -83,7 +83,7 @@ tolerate.
 | 4 | ~~`detect_settings` / `detect_stage` → `io/`~~ **done 2026-08-20** | `ast_move_check` | low |
 | 5 | ~~the `outcome.py` exception — decide and whitelist~~ **done 2026-08-20** | `check_layering` | none |
 | 6 | ~~`results_dir()` / `table_path()` and the 47 sites~~ **done 2026-08-20** | `regression`, `plot_regression` | low |
-| 7 | retire `_filter_session_dirs` → `SessionRef` | `plot_regression`, `regression` | medium |
+| 7 | ~~retire `_filter_session_dirs` → `SessionRef`~~ **done 2026-08-20** | `plot_regression`, `regression` | medium |
 | 8 | `prep.iter_sessions()` and the plotter preambles | `plot_regression` (44) | medium |
 | 9 | collapse `metric_value` / `run_all_metrics` | `regression` | low |
 
@@ -402,6 +402,24 @@ must go through the seam, or the subfolder flip writes to two layouts.
 ---
 
 ## Item 7 — retire `_filter_session_dirs`
+
+**Done 2026-08-20.** `_filter_sessions` is the package's only entry into a subject's
+sessions. The **32 invocations across 18 files** take `SessionRef`s and read `ref.date`
+and `layout.results_dir(ref)`, and the shim is gone. Eighteen of the 19 import lines are
+repointed and one is dropped: `visualization/pred_seq_utils.py:16` imported the name and
+never called it, so repointing it would only have moved the dead import. The four
+`io/layout.py` mentions go with the shim, `results_dir()`'s own docstring included — it
+still takes either a session directory or a `SessionRef`, because several callers assemble
+the directory themselves and hold only the `Path`. All eight `enumerate(..., 1)` counters
+and the one `len()` are untouched, and `session_index` is read at no new site.
+
+**Gate.** `plot_regression` 44/44 GREEN, 3,437,588 drawn values · `regression` GREEN 9/9,
+90 fingerprints · `verify_scripts` GREEN · `check_imports` PASS · `check_layering` PASS
+with its one `DECLARED` entry, still one directory cycle, 328 edges unchanged — the shim
+carried no import of its own. `modelling/switchpoint/data.py:147`, the one call site no
+gate reaches, was verified by hand: `prepare_subject` compared elementwise against the
+same loop driven by the paths the shim returned, over both `rewarded_only` settings of
+every fixture subject.
 
 **Delivers.** The 32 call sites take `SessionRef` from `_filter_sessions` and read
 `ref.date` and `layout.results_dir(ref)` instead of rebuilding both out of the directory

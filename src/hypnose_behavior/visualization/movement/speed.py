@@ -24,7 +24,7 @@ from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.utils.helpers import _get_from_cache, _update_cache
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_session_dirs,
+    _filter_sessions,
     derivatives,
     normalize_subjid,
     session_selectors,
@@ -136,8 +136,8 @@ def plot_epoch_speeds_by_condition(
     derivatives_dir = get_derivatives_root()
     subj_dir = derivatives.subject_dir(subjid)
 
-    ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
-    if not ses_dirs:
+    ses_refs = _filter_sessions(subj_dir, dates, **select)
+    if not ses_refs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
     bin_s = bin_ms / 1000.0
@@ -146,9 +146,9 @@ def plot_epoch_speeds_by_condition(
     combined_data = {"rewarded": [], "unrewarded": [], "fa": []}
     _warned_missing_threshold = False
 
-    for ses_dir in ses_dirs:
-        date_str = ses_dir.name.split("_date-")[-1]
-        results_dir = layout.results_dir(ses_dir)
+    for ref in ses_refs:
+        date_str = ref.date
+        results_dir = layout.results_dir(ref)
         if not results_dir.exists():
             continue
 
@@ -428,8 +428,8 @@ def plot_traces_with_speed_threshold(
     derivatives_dir = get_derivatives_root()
     subj_dir = derivatives.subject_dir(subjid)
 
-    ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
-    if not ses_dirs:
+    ses_refs = _filter_sessions(subj_dir, dates, **select)
+    if not ses_refs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
 
@@ -530,9 +530,9 @@ def plot_traces_with_speed_threshold(
 
     traces = {"rewarded": [], "unrewarded": [], "fa": []}
     markers = {"rewarded": [], "unrewarded": [], "fa": []}
-    for ses_dir in ses_dirs:
-        date_str = ses_dir.name.split("_date-")[-1]
-        results_dir = layout.results_dir(ses_dir)
+    for ref in ses_refs:
+        date_str = ref.date
+        results_dir = layout.results_dir(ref)
         if not results_dir.exists():
             continue
         skipped_no_poke_end = []

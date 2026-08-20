@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from hypnose_behavior.metric_analysis.metrics.accuracy import decision_accuracy
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_session_dirs,
+    _filter_sessions,
     derivatives,
     normalize_subjid,
     session_selectors,
@@ -64,7 +64,7 @@ def plot_cumulative_rewards(
         Subject ID(s)
     dates : list, tuple, dict, or None
         Dates to include. If a dict, must map subjid → date range (each value
-        is itself a list/tuple/None passed through to ``_filter_session_dirs``
+        is itself a list/tuple/None passed through to ``_filter_sessions``
         for that subject). This allows each subject to be filtered to its own
         date window — useful for comparing animals across matched training
         conditions when they are offset in calendar time. Subjids not present
@@ -157,11 +157,10 @@ def plot_cumulative_rewards(
             print(f"Warning: No subject directory found for {subj_str}")
             continue
 
-        # Use _filter_session_dirs to get session directories
-        ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
-        for ses_dir in ses_dirs:
-            date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses_dir)
+        ses_refs = _filter_sessions(subj_dir, subj_dates, **select)
+        for ref in ses_refs:
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
             
@@ -469,9 +468,9 @@ def plot_cumulative_rewards_by_trial(
 
         # Sessions in chronological (date) order.
         sessions = []
-        for ses_dir in _filter_session_dirs(subj_dir, subj_dates, **select):
-            date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses_dir)
+        for ref in _filter_sessions(subj_dir, subj_dates, **select):
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
             if results_dir.exists():
                 sessions.append((date_str, results_dir))
         sessions.sort(key=lambda t: t[0])

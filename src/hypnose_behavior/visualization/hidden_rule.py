@@ -24,7 +24,7 @@ from hypnose_behavior.metric_analysis.metrics.hidden_rule import (
 )
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_session_dirs,
+    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
@@ -179,10 +179,10 @@ def hidden_rule_and_false_alarm(
     rows = []
     observed_hr_letters = set()
     for sid, subj_dir, subj_dates in subject_iter:
-        ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
-        for session_num, ses_dir in enumerate(ses_dirs, start=1):
-            date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses_dir)
+        ses_refs = _filter_sessions(subj_dir, subj_dates, **select)
+        for session_num, ref in enumerate(ses_refs, start=1):
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
 
@@ -511,11 +511,11 @@ def plot_fa_ratio_by_hr_position(
     rows = []  # {date, session_num, odor_num, hr_odor, category, port_a, port_b, total, ratio}
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
+        ses_refs = _filter_sessions(subj_dir, dates, **select)
         
-        for session_num, ses_dir in enumerate(ses_dirs, 1):
-            date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses_dir)
+        for session_num, ref in enumerate(ses_refs, 1):
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
             
             if not results_dir.exists():
                 continue
@@ -955,16 +955,16 @@ def plot_hidden_rule_abort_poke_gap(
     rows = []
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
+        ses_refs = _filter_sessions(subj_dir, dates, **select)
 
-        for ses_dir in ses_dirs:
-            date_str = ses_dir.name.split("_date-")[-1]
+        for ref in ses_refs:
+            date_str = ref.date
             try:
                 date_val = int(date_str)
             except Exception:
                 date_val = date_str
 
-            results_dir = layout.results_dir(ses_dir)
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
 
@@ -1159,15 +1159,15 @@ def plot_hr_reward_fraction_over_trials(
 
     frames = []
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
-        for ses_dir in ses_dirs:
-            date_str = ses_dir.name.split("_date-")[-1]
+        ses_refs = _filter_sessions(subj_dir, dates, **select)
+        for ref in ses_refs:
+            date_str = ref.date
             try:
                 date_val = int(date_str)
             except Exception:
                 date_val = date_str
 
-            results_dir = layout.results_dir(ses_dir)
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
 

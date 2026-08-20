@@ -34,7 +34,7 @@ from hypnose_behavior.metric_analysis.metrics.common import (
     _reduce_rate,
 )
 from hypnose_behavior.io import layout
-from hypnose_behavior.io.layout import _filter_session_dirs, _iter_subject_dirs
+from hypnose_behavior.io.layout import _filter_sessions, _iter_subject_dirs
 from hypnose_behavior.metric_analysis.registry import (
     as_dict,
     metric,
@@ -542,11 +542,11 @@ Its FA filter is every `FA_*` label, wider than `plot_fa_ratio_a_over_sessions`'
     rows = []
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_dirs = _filter_session_dirs(subj_dir, dates)
+        ses_refs = _filter_sessions(subj_dir, dates)
 
-        for session_num, ses in enumerate(ses_dirs, start=1):
-            date_str = ses.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses)
+        for session_num, ref in enumerate(ses_refs, start=1):
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
 
             if not results_dir.exists():
                 continue

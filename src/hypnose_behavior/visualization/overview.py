@@ -20,7 +20,7 @@ from typing import (
 )
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_session_dirs,
+    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
@@ -168,10 +168,10 @@ def plot_behavior_metrics(
 
     # Gather sessions
     for sid, subj_dir, subj_dates in subject_iter:
-        ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
-        for session_num, ses_dir in enumerate(ses_dirs, start=1):
-            date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = layout.results_dir(ses_dir)
+        ses_refs = _filter_sessions(subj_dir, subj_dates, **select)
+        for session_num, ref in enumerate(ses_refs, start=1):
+            date_str = ref.date
+            results_dir = layout.results_dir(ref)
             if not results_dir.exists():
                 continue
             # Protocol (for coloring)
