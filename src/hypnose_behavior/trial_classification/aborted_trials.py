@@ -15,7 +15,7 @@ from bisect import bisect_right
 import numpy as np
 import pandas as pd
 
-import hypnose_behavior.trial_classification.detect_settings as detect_settings
+import hypnose_behavior.io.detect_settings as detect_settings
 import hypnose_behavior.trial_classification.windows as windows
 from hypnose_behavior.trial_classification.outcome import latency_label
 from hypnose_behavior.trial_classification.params import get_experiment_parameters

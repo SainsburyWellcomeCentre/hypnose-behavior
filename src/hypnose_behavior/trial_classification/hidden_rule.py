@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 
-import hypnose_behavior.trial_classification.detect_settings as detect_settings
+import hypnose_behavior.io.detect_settings as detect_settings
 
 
 def _ensure_int_list(value, *, subtract_one: bool = False) -> list[int]:

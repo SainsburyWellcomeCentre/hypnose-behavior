@@ -13,7 +13,7 @@ from collections.abc import Mapping
 
 import pandas as pd
 
-import hypnose_behavior.trial_classification.detect_stage as detect_stage_module
+import hypnose_behavior.io.detect_stage as detect_stage_module
 import hypnose_behavior.trial_classification.windows as windows
 from hypnose_behavior.trial_classification.params import _sampling_parameters_ms
 from hypnose_behavior.utils.helpers import vprint

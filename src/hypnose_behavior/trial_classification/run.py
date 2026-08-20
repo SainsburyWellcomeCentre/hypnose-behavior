@@ -18,7 +18,7 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
-import hypnose_behavior.trial_classification.detect_settings as detect_settings
+import hypnose_behavior.io.detect_settings as detect_settings
 from hypnose_behavior.io.loaders import (
     load_experiment, load_all_streams, load_experiment_events, load_odor_mapping,
 )
@@ -283,7 +283,7 @@ def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verb
 
             # Detect stage for THIS run
             try:
-                import hypnose_behavior.trial_classification.detect_stage as detect_stage_module
+                import hypnose_behavior.io.detect_stage as detect_stage_module
                 stage = detect_stage_module.detect_stage(root)
             except Exception:
                 stage = {'stage_name': str(root)}

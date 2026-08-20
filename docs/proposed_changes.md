@@ -79,8 +79,8 @@ tolerate.
 |---|---|---|---|
 | 1 | ~~metadata and documentation truth~~ **done 2026-08-20** | none needed | none |
 | 2 | ~~`qc/check_layering.py` — the gate, before the moves~~ **done 2026-08-20** | itself | none |
-| 3 | selection helpers `utils/` → `io/layout.py` | `ast_move_check` | low |
-| 4 | `detect_settings` / `detect_stage` → `io/` | `ast_move_check` | low |
+| 3 | ~~selection helpers `utils/` → `io/layout.py`~~ **done 2026-08-20** | `ast_move_check` | low |
+| 4 | ~~`detect_settings` / `detect_stage` → `io/`~~ **done 2026-08-20** | `ast_move_check` | low |
 | 5 | the `outcome.py` exception — decide and whitelist | `check_layering` | none |
 | 6 | `results_dir()` / `table_path()` and the 47 sites | `regression`, `plot_regression` | low |
 | 7 | retire `_filter_session_dirs` → `SessionRef` | `plot_regression`, `regression` | medium |
@@ -204,6 +204,11 @@ importing the package, so it runs with no mount and no behavioural dependencies.
 
 ## Item 3 — the selection helpers move to `io/layout.py`
 
+**Done 2026-08-20.** `utils/` is a leaf: fan-out 1, `parameters.py` only, and its importers
+drop from 7 to 4. `check_layering` goes from three cycles to one — both cycles that ran
+through `utils/` close together, since `helpers.py:7` was the single edge in each.
+24 importers and 44 prose references repointed.
+
 **Breaks `io ↔ utils`.** `utils/helpers.py:7` imports `filter_sessions`, `layout_for`,
 `list_sessions` from `io.layout`, while `io/loaders.py:31`, `io/save_results.py:20` and
 `io/tracking.py:24` import `utils.helpers`.
@@ -229,15 +234,33 @@ still resolves.
 
 ## Item 4 — `detect_settings.py` and `detect_stage.py` move to `io/`
 
-**Removes 7 of the 9 `io ↔ trial_classification` edges.** Both files (377 and 254 lines)
-import exactly one package module between them — `io.readers` — and nothing from
+**Done 2026-08-20.** `io -> trial_classification` is one edge: `save_results.py:28 ->
+outcome`, which is item 5's. The 11 edges in the other direction all point downward.
+`check_layering` still reports the cycle and stays red until that entry is declared.
+
+**Halves the upward edges: `io -> trial_classification` goes 2 to 1.** Both files (377 and
+254 lines) import exactly one package module between them — `io.readers` — and nothing from
 `trial_classification`. They parse settings and stage out of the raw tree. They are
 readers, misfiled.
 
-After the move, `io/loaders.py:25` becomes an intra-`io` import, and the five
-`trial_classification` modules that use them (`run.py:21`, `params.py:18`,
-`hidden_rule.py:16`, `aborted_trials.py:18`, `detect_trials.py:16`) point *downward*,
-which is the correct direction.
+**Measured with `check_layering`, simulating the move.** The `io ↔ trial_classification`
+count is 9 in *both* directions — 2 up, 7 down — and it becomes 12: 1 up, 11 down.
+
+| | before | after |
+|---|---|---|
+| `io` imports `trial_classification` (upward) | 2 | **1** |
+| `trial_classification` imports `io` (downward) | 7 | 11 |
+
+Three of the nine go: `io/loaders.py:25` becomes an intra-`io` import, and
+`detect_settings.py:9` / `detect_stage.py:9` travel with their files. Six arrive, all
+downward — imports that exist today inside `trial_classification` and only become visible
+when their target crosses the boundary. **The count going up is not a cost**; a directory
+may import downward as often as it likes, and the gate counts only cycles.
+
+**Six sites import the two modules, not five** — `run.py:21`, `params.py:18`,
+`hidden_rule.py:16`, `aborted_trials.py:18`, `detect_trials.py:16`, and **`run.py:286`,
+which is nested inside a function body** and so is invisible to a grep for imports at the
+top of a file. After the move all six point *downward*, which is the correct direction.
 
 **Gate.** `ast_move_check` + `check_imports` + `verify_scripts` (both files are reachable
 from the CLIs) + `regression`.

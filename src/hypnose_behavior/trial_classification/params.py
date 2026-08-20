@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 from dotmap import DotMap
 
-import hypnose_behavior.trial_classification.detect_settings as detect_settings
+import hypnose_behavior.io.detect_settings as detect_settings
 
 
 def get_experiment_parameters(root):

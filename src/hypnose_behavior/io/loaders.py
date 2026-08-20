@@ -22,7 +22,7 @@ from dotmap import DotMap
 from aeon.io.reader import Reader, Csv
 import aeon.io.api as api
 
-import hypnose_behavior.trial_classification.detect_settings as detect_settings
+import hypnose_behavior.io.detect_settings as detect_settings
 from hypnose_behavior.io.load_results import (  # noqa: F401
     load_position_data as _load_position_data,
 )
