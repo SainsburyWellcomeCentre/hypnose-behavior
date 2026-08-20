@@ -11,6 +11,7 @@ from hypnose_behavior.metric_analysis.metrics.sampling import (
     poke_duration_by_position,
     poke_durations,
 )
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     _iter_subject_dirs,
@@ -80,7 +81,7 @@ def plot_sampling_times_analysis(
         ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         for session_num, ses_dir in enumerate(ses_dirs, start=1):
             date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
 
@@ -489,7 +490,7 @@ def plot_poke_duration_by_position(
 
         ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
         for ses_dir in ses_dirs:
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
             position_data = _load_position_data(
@@ -764,7 +765,7 @@ def plot_poke_duration_by_odor(
     def _session_hr_odors(results_dir):
         """Hidden-rule odor letters for a session (from summary.json), or [] if
         the session has none / isn't a hidden-rule session."""
-        summary_path = results_dir / "summary.json"
+        summary_path = layout.table_path(results_dir, "summary.json")
         if not summary_path.exists():
             return []
         try:
@@ -835,7 +836,7 @@ def plot_poke_duration_by_odor(
             date_str = ses_dir.name.split("_date-")[-1]
             if not (str(date_str).isdigit() and len(str(date_str)) == 8):
                 continue
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
             td = _load_trial_views(results_dir)["trial_data"]

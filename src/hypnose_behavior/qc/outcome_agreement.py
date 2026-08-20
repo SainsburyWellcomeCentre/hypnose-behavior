@@ -46,6 +46,7 @@ if str(_SRC) not in sys.path:
 
 import pandas as pd  # noqa: E402
 
+from hypnose_behavior.io import layout  # noqa: E402
 from hypnose_behavior.qc import _common  # noqa: E402
 from hypnose_behavior.io.save_results import _derive_outcome  # noqa: E402
 
@@ -121,7 +122,7 @@ def measure_session(subjid, date) -> pd.DataFrame:
                 str(subjid), str(date), verbose=False, save=True, print_summary=False,
                 save_csv=True)   # reads trial_data.csv below; ask for it explicitly
 
-        matches = list(Path(tmp).glob(f"**/ses-*_date-{date}/saved_analysis_results/trial_data.csv"))
+        matches = list(Path(tmp).glob(f"**/ses-*_date-{date}/{layout.RESULTS_DIRNAME}/trial_data.csv"))
         if not matches:
             raise FileNotFoundError(f"trial_data.csv not found for sub-{subjid} {date}")
         trial_data = pd.read_csv(matches[0])

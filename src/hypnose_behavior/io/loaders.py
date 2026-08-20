@@ -27,6 +27,7 @@ from hypnose_behavior.io.load_results import (  # noqa: F401
     load_position_data as _load_position_data,
 )
 from hypnose_behavior.io.paths import get_rawdata_root, get_derivatives_root, get_server_root
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import rawdata
 from hypnose_behavior.utils.helpers import vprint, _get_from_cache, _update_cache
 from hypnose_behavior.io.readers import (  # noqa: F401
@@ -661,14 +662,14 @@ def _load_table_with_trial_data(results_dir: Path, name: str) -> pd.DataFrame:
                 return cached_td
         # Fallback to disk and cache once loaded
         df = None
-        pq = results_dir / "trial_data.parquet"
+        pq = layout.table_path(results_dir, "trial_data.parquet")
         if pq.exists():
             try:
                 df = pd.read_parquet(pq)
             except Exception:
                 df = None
         if df is None:
-            tcsv = results_dir / "trial_data.csv"
+            tcsv = layout.table_path(results_dir, "trial_data.csv")
             if tcsv.exists():
                 try:
                     df = pd.read_csv(tcsv)
@@ -684,8 +685,8 @@ def _load_table_with_trial_data(results_dir: Path, name: str) -> pd.DataFrame:
     allowed = {"non_initiated_attempts",
                "non_initiated_sequences", "non_initiated_odor1_attempts", "non_initiated_FA"}
     if name in allowed:
-        for path, reader in ((results_dir / f"{name}.parquet", pd.read_parquet),
-                             (results_dir / f"{name}.csv", pd.read_csv)):
+        for path, reader in ((layout.table_path(results_dir, f"{name}.parquet"), pd.read_parquet),
+                             (layout.table_path(results_dir, f"{name}.csv"), pd.read_csv)):
             if path.exists():
                 try:
                     return reader(path)

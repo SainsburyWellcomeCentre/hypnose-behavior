@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import _filter_session_dirs, derivatives, session_selectors
 from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.io.load_results import load_session_results
@@ -330,7 +331,7 @@ def run_all_metrics(results, save_txt=True, save_json=True, save_tables=True):
         ses_comp = _clean_folder_component(ses_folder)
         if not sub_comp or not ses_comp:
             return None
-        return derivatives_dir / sub_comp / ses_comp / "saved_analysis_results"
+        return layout.results_dir(derivatives_dir / sub_comp / ses_comp)
 
     def _session_dir_from_ids() -> Path | None:
         # One link in a fallback chain, so every failure is None rather than an
@@ -344,7 +345,7 @@ def run_all_metrics(results, save_txt=True, save_json=True, save_tables=True):
             found = derivatives.find_sessions(sub_norm, date=date_norm, missing_ok=True)
         except (ValueError, OSError):
             return None
-        return found[0].path / "saved_analysis_results" if found else None
+        return layout.results_dir(found[0]) if found else None
 
     def _determine_output_dir() -> Path:
         if results_dir_hint:
@@ -429,12 +430,12 @@ def run_all_metrics(results, save_txt=True, save_json=True, save_tables=True):
 
     # --- Save TXT and JSON ---
     if save_txt:
-        txt_path = out_dir / f"metrics_{subjid}_{date}.txt"
+        txt_path = layout.table_path(out_dir, f"metrics_{subjid}_{date}.txt")
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write(buffer.getvalue())
         print(f"Saved metrics summary to {txt_path}")
     if save_json:
-        json_path = out_dir / f"metrics_{subjid}_{date}.json"
+        json_path = layout.table_path(out_dir, f"metrics_{subjid}_{date}.json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(metrics, f, indent=2, default=str)
         print(f"Saved metrics values to {json_path}")
@@ -448,7 +449,7 @@ def run_all_metrics(results, save_txt=True, save_json=True, save_tables=True):
                             ("metrics_by_poke", _build_metrics_by_poke(results))):
             if not isinstance(table, pd.DataFrame) or table.empty:
                 continue
-            table_path = out_dir / f"{name}.parquet"
+            table_path = layout.table_path(out_dir, f"{name}.parquet")
             try:
                 table.to_parquet(table_path, index=False)
                 print(f"Saved {name} ({len(table)} rows) to {table_path}")
@@ -520,8 +521,8 @@ def batch_run_all_metrics_with_merge(
         if not ses_dirs:
             continue
         for ses_dir in ses_dirs:
-            results_dir = ses_dir / "saved_analysis_results"
-            summary_path = results_dir / "summary.json"
+            results_dir = layout.results_dir(ses_dir)
+            summary_path = layout.table_path(results_dir, "summary.json")
             date = ses_dir.name.split("_date-")[-1]
             
             if not summary_path.exists():

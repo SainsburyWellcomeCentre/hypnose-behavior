@@ -16,6 +16,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from hypnose_behavior.metric_analysis.metrics.false_alarm import FA_avg_response_times
 from hypnose_behavior.metric_analysis.metrics.timing import avg_response_time
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     _iter_subject_dirs,
@@ -92,7 +93,7 @@ def plot_response_times_completed_vs_fa(
         ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         for ses_dir in ses_dirs:
             date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
 

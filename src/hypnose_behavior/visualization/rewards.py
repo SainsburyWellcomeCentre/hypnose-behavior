@@ -11,6 +11,7 @@ made contiguous across sessions.
 import pandas as pd
 import matplotlib.pyplot as plt
 from hypnose_behavior.metric_analysis.metrics.accuracy import decision_accuracy
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     derivatives,
@@ -160,7 +161,7 @@ def plot_cumulative_rewards(
         ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
         for ses_dir in ses_dirs:
             date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
             
@@ -184,7 +185,7 @@ def plot_cumulative_rewards(
             all_rewarded.append(rewarded_trials)
             
             # OPTIMIZATION 2: Load ONLY manifest.json for session timing
-            manifest_path = results_dir / "summary.json"
+            manifest_path = layout.table_path(results_dir, "summary.json")
             if manifest_path.exists():
                 try:
                     with open(manifest_path, 'r', encoding='utf-8') as f:
@@ -470,7 +471,7 @@ def plot_cumulative_rewards_by_trial(
         sessions = []
         for ses_dir in _filter_session_dirs(subj_dir, subj_dates, **select):
             date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if results_dir.exists():
                 sessions.append((date_str, results_dir))
         sessions.sort(key=lambda t: t[0])

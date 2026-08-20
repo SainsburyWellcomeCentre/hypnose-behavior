@@ -40,6 +40,7 @@ from typing import Iterable, List, Optional, Sequence, Union
 
 import pandas as pd
 
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     derivatives,
     parse_session_dirname,
@@ -422,7 +423,7 @@ def session(subjid, date=None, *, ses=None, index=None) -> Session:
     failure belongs at the call the caller made.
     """
     ref = derivatives.find_session(subjid, date=date, ses=ses, index=index)
-    results_dir = ref.path / "saved_analysis_results"
+    results_dir = layout.results_dir(ref)
     if not results_dir.exists():
         raise FileNotFoundError(
             f"{ref.path.name} has no saved_analysis_results -- it is in the "
@@ -466,7 +467,7 @@ def sessions(subjids, *, dates=None, ses=None, index=None, date_range=None,
     for subjid in wanted:
         for ref in derivatives.find_sessions(subjid, date=dates, **selectors):
             matched += 1
-            results_dir = ref.path / "saved_analysis_results"
+            results_dir = layout.results_dir(ref)
             if results_dir.exists():
                 out.append(Session(results_dir, ref=ref))
             else:

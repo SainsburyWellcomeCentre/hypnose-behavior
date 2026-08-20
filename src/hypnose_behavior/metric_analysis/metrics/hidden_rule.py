@@ -24,6 +24,7 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import list_sessions
 from hypnose_behavior.io.loaders import _load_trial_views, _odor_to_letter
 from hypnose_behavior.frames import parse_json_column
@@ -388,8 +389,8 @@ Session metadata rather than a plotting concern, and it uses the package's
         if subj_dir is None:
             continue
         for session in list_sessions(subj_dir):
-            results_dir = session.path / "saved_analysis_results"
-            summary_path = results_dir / "summary.json"
+            results_dir = layout.results_dir(session)
+            summary_path = layout.table_path(results_dir, "summary.json")
             if not summary_path.exists():
                 continue
             try:

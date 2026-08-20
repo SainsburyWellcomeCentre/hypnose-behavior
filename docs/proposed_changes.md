@@ -82,7 +82,7 @@ tolerate.
 | 3 | ~~selection helpers `utils/` → `io/layout.py`~~ **done 2026-08-20** | `ast_move_check` | low |
 | 4 | ~~`detect_settings` / `detect_stage` → `io/`~~ **done 2026-08-20** | `ast_move_check` | low |
 | 5 | ~~the `outcome.py` exception — decide and whitelist~~ **done 2026-08-20** | `check_layering` | none |
-| 6 | `results_dir()` / `table_path()` and the 47 sites | `regression`, `plot_regression` | low |
+| 6 | ~~`results_dir()` / `table_path()` and the 47 sites~~ **done 2026-08-20** | `regression`, `plot_regression` | low |
 | 7 | retire `_filter_session_dirs` → `SessionRef` | `plot_regression`, `regression` | medium |
 | 8 | `prep.iter_sessions()` and the plotter preambles | `plot_regression` (44) | medium |
 | 9 | collapse `metric_value` / `run_all_metrics` | `regression` | low |
@@ -340,6 +340,33 @@ leaves.
 
 ## Item 6 — `results_dir()` / `table_path()`, and the 47 sites
 
+**Done 2026-08-20.** `RESULTS_DIRNAME`, `results_dir()` and `table_path()` in
+`io/layout.py`, and **88 expressions repointed across 30 files**: the 44 directory
+literals, the 3 `qc/` globs, and the 41 file-name constructions that are what make the
+deferred subfolder split a one-file change. One literal is left in the package, at
+`io/layout.py:52`, and one deliberate exception below.
+
+**The call sites import the module, not the name** — `layout.results_dir(ses_dir)`,
+`layout.table_path(results_dir, name)`. A bare `from io.layout import results_dir` cannot
+be used at **39 of the 44** sites: the line every one of them writes is
+`results_dir = ...`, so Python binds the name as a local for the whole function and the
+call raises `UnboundLocalError` before the first iteration. The name is a local or a
+parameter at 282 sites repo-wide, including the public `load_results_dir(results_dir)`
+and `_computed_metrics(results_dir, keys)`, and `table_path` is a local at
+`metric_analysis/run.py:451`. Module-qualified access is the one spelling immune to both,
+and it is why the docstring on `results_dir()` says so at the definition.
+`debug/debug.py:444` took a parameter named `layout`; renamed to `tree`.
+
+**`io/parquet_peek.py:140` keeps its literal, deliberately.** `DECISIONS.md` §29 declares
+that module standard-library-and-pandas only, and `manifest.json` is not a table, so the
+mapping would not move it anyway. The site in that file the split does have to revisit is
+`_parquet_files`'s glob — recorded under "Deferred" below, where it belongs.
+
+**Gate.** `regression` GREEN 9/9 · `plot_regression` 44/44 GREEN · `verify_scripts` GREEN
+· `check_imports` PASS · `check_layering` PASS with its one `DECLARED` entry, still one
+directory cycle. Edges go 299 → 328, exactly the 29 new import statements in `src/`; every
+one is intra-`io/` or downward, and no tier-to-tier pair is new.
+
 **Delivers.** In `io/layout.py` (the module that already holds "the part only this repo
 knows"):
 
@@ -464,9 +491,19 @@ used to be swallowed and loses the ones it had.
 - **Split `saved_analysis_results/` into subfolders.** Carried over from
   `followup_plan.md`. After item 6 this is **one file** — `table_path()` gains the
   name→subfolder mapping plus a flat fallback (section 2's rule, since every existing
-  session is flat) — not the 44 sites it is today. **Do it before the server
-  re-analysis**, or the tree is analysed twice. `movement/` cannot be done unilaterally:
-  this repo writes no tracking file, so that folder needs the SLEAP repo to write into it.
+  session is flat). **Do it before the server re-analysis**, or the tree is analysed
+  twice. `movement/` cannot be done unilaterally: this repo writes no tracking file, so
+  that folder needs the SLEAP repo to write into it.
+
+  **Four sites the mapping cannot reach, because they discover rather than look up.** A
+  name→path mapping answers "where does `trial_data.parquet` live"; it cannot answer
+  "what is in this directory", so each of these needs its own line at flip time:
+  `io/parquet_peek._parquet_files` lists a session's tables with a non-recursive
+  `glob("*.parquet")` and needs `rglob` to see a nested one, and the three `qc/` globs
+  (`_common.py:285`, `outcome_agreement.py:125`, `verify_scripts.py:80`) spell
+  `{RESULTS_DIRNAME}/trial_data.csv` and break the moment `trial_data` moves down a
+  level. `rglob` is the right spelling for all four: it reads a flat session and a nested
+  one alike, which is also what a half-re-analysed tree needs.
 
 - **The single-reward metrics are outside the registry.** `run.py:387-425` hardcodes the
   whole family, against 70 `@metric` / `@session_metric` registrations elsewhere. It is

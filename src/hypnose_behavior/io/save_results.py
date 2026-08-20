@@ -16,6 +16,7 @@ from datetime import datetime, timezone, date
 import numpy as np
 import pandas as pd
 
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.paths import get_rawdata_root, get_derivatives_root
 from hypnose_behavior.utils.helpers import vprint
 from hypnose_helpers.provenance import provenance
@@ -118,7 +119,7 @@ def resolve_derivatives_output_dir(root) -> tuple[Path, dict]:
     if sub_dir is None or ses_dir is None:
         raise ValueError(f"Could not resolve sub-/ses- from: {root}")
 
-    out_dir = get_derivatives_root() / sub_dir.name / ses_dir.name / "saved_analysis_results"
+    out_dir = layout.results_dir(get_derivatives_root() / sub_dir.name / ses_dir.name)
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir, {
         "hypnose_dir": str(hypnose_dir),
@@ -274,9 +275,9 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
             return False
         if name in saved_names:
             return True
-        f_csv = out_dir / f"{name}.csv"
-        f_schema = out_dir / f"{name}.schema.json"
-        f_parquet = out_dir / f"{name}.parquet"
+        f_csv = layout.table_path(out_dir, f"{name}.csv")
+        f_schema = layout.table_path(out_dir, f"{name}.schema.json")
+        f_parquet = layout.table_path(out_dir, f"{name}.parquet")
         try:
             df_norm, json_cols = _normalize_df_for_io(df)
             try:
@@ -362,7 +363,7 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     manifest["session"]["runs"] = runs
     
     # 5) Indices
-    indices_dir = out_dir / "indices"
+    indices_dir = layout.table_path(out_dir, "indices")
     indices_dir.mkdir(parents=True, exist_ok=True)
     idx_payloads = {
         "index": classification.get("index", {}),
@@ -376,7 +377,7 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
     rta = classification.get("response_time_analysis")
     if isinstance(rta, dict):
         try:
-            with open(out_dir / "response_time_analysis.json", "w", encoding="utf-8") as f:
+            with open(layout.table_path(out_dir, "response_time_analysis.json"), "w", encoding="utf-8") as f:
                 json.dump(_json_safe(rta), f, indent=2)
         except Exception as e:
             vprint(verbose, f"[save] WARNING: failed writing response_time_analysis.json: {e}")
@@ -387,7 +388,7 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
 
     # 7) Manifest + summary
     try:
-        with open(out_dir / "manifest.json", "w", encoding="utf-8") as f:
+        with open(layout.table_path(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(_json_safe(manifest), f, indent=2)
     except Exception as e:
         vprint(verbose, f"[save] WARNING: failed writing manifest.json: {e}")
@@ -412,7 +413,7 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
                 run_info['parameters'] = matching_params
 
     # Save manifest
-    with open(out_dir / "manifest.json", "w", encoding="utf-8") as f:
+    with open(layout.table_path(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(_json_safe(manifest), f, indent=2)
         
     # Add combined non-initiated total (baseline + pos1 attempts)
@@ -439,7 +440,7 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
         "counts": counts,
         "params": params,
     }
-    with open(out_dir / "summary.json", "w", encoding="utf-8") as f:
+    with open(layout.table_path(out_dir, "summary.json"), "w", encoding="utf-8") as f:
         json.dump(_json_safe(summary), f, indent=2)
 
     vprint(verbose, f"Saved analysis to: {out_dir} ({'some tables' if saved_any else 'no tables'})")

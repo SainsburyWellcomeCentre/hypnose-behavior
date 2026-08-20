@@ -2,8 +2,10 @@
 
 The walking itself is layout knowledge, not data knowledge, so it lives in
 `hypnose_helpers.io.layout`. What stays here is the part only this repo knows: that it
-has *two* trees, where each is rooted, and that its subject directories always carry
-the `_id-` suffix.
+has *two* trees, where each is rooted, that its subject directories always carry the
+`_id-` suffix, and where an analysed session keeps its outputs -- `results_dir()` and
+`table_path()`, the two functions every reader and writer of that directory goes
+through.
 
     from hypnose_behavior.io.layout import derivatives, rawdata
 
@@ -44,6 +46,11 @@ from hypnose_behavior.io.paths import get_derivatives_root, get_rawdata_root
 # calls returned, rather than picking up any other `sub-`-prefixed directory.
 SUBJECT_PATTERN = "{subject}_id-*"
 
+# An analysed session keeps its outputs in one directory beside the raw session. The
+# name is `hypnose_behavior`'s convention, not a property of a session, which is why it
+# lives here and not on `SessionRef` -- that class is shared with the other modalities.
+RESULTS_DIRNAME = "saved_analysis_results"
+
 rawdata = SessionLayout(
     get_rawdata_root, name="rawdata", subject_pattern=SUBJECT_PATTERN
 )
@@ -61,6 +68,40 @@ def layout_for(root=None) -> SessionLayout:
     if root is None:
         return derivatives
     return SessionLayout(root, name="derivatives", subject_pattern=SUBJECT_PATTERN)
+
+
+def results_dir(session) -> Path:
+    """The analysis-output directory of a session directory or a `SessionRef`.
+
+    Either, because both are in circulation: `_filter_sessions` hands back `SessionRef`s
+    and `_filter_session_dirs` hands back the bare paths. Nothing is checked -- a session
+    the pipeline has never analysed yields a path that does not exist, and whether that
+    is an error or a session to skip is the caller's decision, not this function's.
+
+    Import the module rather than the name (`layout.results_dir(ses_dir)`): `results_dir`
+    is the local variable and the parameter name at most of the call sites, so a bare
+    import would be shadowed by the very assignment that calls it.
+    """
+    return Path(getattr(session, "path", session)) / RESULTS_DIRNAME
+
+
+def table_path(results_dir, name: str) -> Path:
+    """One entry of a results directory, by file name.
+
+    **The single place the layout inside a results directory is decided.** Flat: every
+    table, sidecar, manifest and export sits directly in `results_dir`. It stays a
+    one-liner precisely so that the decision has one site -- a caller spelling
+    `results_dir / name` for itself is a caller this function cannot reach.
+
+    Scope is one level: a path built off the results directory comes through here, while
+    a path built off something already inside it (`indices/`) belongs to that
+    subdirectory's own layout.
+
+    It answers *where a named file lives*, never *what the directory holds*. A caller
+    that globs a results directory is discovering rather than looking up, so it does not
+    come through here and has to be found on its own.
+    """
+    return Path(results_dir) / name
 
 
 def _iter_subject_dirs(derivatives_dir: Optional[Path], subjids: Optional[Iterable[int]]):
@@ -140,6 +181,7 @@ def _filter_session_dirs(subj_dir: Path,
 
 __all__ = [
     "rawdata", "derivatives", "layout_for", "SUBJECT_PATTERN",
+    "RESULTS_DIRNAME", "results_dir", "table_path",
     "session_selectors",
     "SessionRef", "SessionLayout", "DuplicateSessionError",
     "list_sessions", "filter_sessions", "normalize_subjid",

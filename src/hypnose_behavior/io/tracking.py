@@ -13,6 +13,7 @@ the behaviour views.
 
 import pandas as pd
 
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import derivatives
 from hypnose_behavior.io.loaders import _load_trial_views
 from hypnose_behavior.io.paths import (
@@ -47,7 +48,7 @@ def _load_tracking_and_behavior(subjid, date, tracking_source='sleap'):
 
     session_dir = derivatives.find_session(subjid, date=date).path
 
-    results_dir = session_dir / "saved_analysis_results"
+    results_dir = layout.results_dir(session_dir)
     if not results_dir.exists():
         raise FileNotFoundError(f"Results directory not found: {results_dir}")
 

@@ -12,6 +12,7 @@ from hypnose_behavior.frames import position_entries_by_trial
 from hypnose_behavior.io.loaders import (
     _load_position_data, load_all_streams, load_odor_mapping,
 )
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import derivatives, normalize_subjid, rawdata
 
 
@@ -38,15 +39,15 @@ def _resolve_session_paths(subjid, date) -> tuple[Path, Path, Path, Path]:
 	raw_subject_dir = raw_session.subject_dir
 	raw_session_dir = raw_session.path
 	deriv_session_dir = derivatives.find_session(subjid, date=_normalize_date(date)).path
-	results_dir = deriv_session_dir / "saved_analysis_results"
+	results_dir = layout.results_dir(deriv_session_dir)
 	if not results_dir.exists():
 		raise FileNotFoundError(f"Results directory not found: {results_dir}")
 	return raw_subject_dir, raw_session_dir, deriv_session_dir, results_dir
 
 
 def _load_trial_data(results_dir: Path) -> pd.DataFrame:
-	trial_parquet = results_dir / "trial_data.parquet"
-	trial_csv = results_dir / "trial_data.csv"
+	trial_parquet = layout.table_path(results_dir, "trial_data.parquet")
+	trial_csv = layout.table_path(results_dir, "trial_data.csv")
 	if trial_parquet.exists():
 		trial_df = pd.read_parquet(trial_parquet)
 	elif trial_csv.exists():
@@ -376,7 +377,7 @@ def high_speed_before_0(subjid, date, *, threshold: float = 200.0, t_min: float 
 	_, _, _, results_dir = _resolve_session_paths(subjid, date)
 	trial_df = _load_trial_data(results_dir)
 
-	speed_path = results_dir / "speed_analysis.parquet"
+	speed_path = layout.table_path(results_dir, "speed_analysis.parquet")
 	if not speed_path.exists():
 		raise FileNotFoundError(f"speed_analysis.parquet not found at {speed_path}")
 	speed_df = pd.read_parquet(speed_path)
@@ -440,9 +441,9 @@ def _normalize_pairs(subjids, dates):
 	return list(product(subj_list, date_list))
 
 
-def _available_session_dates(layout, subjid) -> list[str]:
+def _available_session_dates(tree, subjid) -> list[str]:
 	"""Return all session date tokens that exist on disk for a subject."""
-	return sorted({session.date for session in layout.find_sessions(subjid)})
+	return sorted({session.date for session in tree.find_sessions(subjid)})
 
 
 def _expand_date_range(subjid, start, end) -> list[str]:

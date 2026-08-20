@@ -18,6 +18,7 @@ from hypnose_behavior.metric_analysis.metrics.false_alarm import (
     fa_port_share_a,
     fa_rate_by_position,
 )
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     _iter_subject_dirs,
@@ -135,7 +136,7 @@ def plot_abortion_and_fa_rates(
         ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         for ses_dir in ses_dirs:
             date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
             
@@ -540,7 +541,7 @@ def plot_fa_ratio_a_over_sessions(
         
         for session_num, ses_dir in enumerate(ses_dirs, start=1):
             date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
             
@@ -758,7 +759,7 @@ def plot_false_alarm_rate_by_position(
 
         ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
         for ses_dir in ses_dirs:
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
             views = _load_trial_views(results_dir)
@@ -966,12 +967,12 @@ def plot_fa_ratio_by_abort_odor(
         
         for session_num, ses_dir in enumerate(ses_dirs, 1):
             date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             
             if not results_dir.exists():
                 continue
             
-            summary_path = results_dir / "summary.json"
+            summary_path = layout.table_path(results_dir, "summary.json")
             if not summary_path.exists():
                 continue
 

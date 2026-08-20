@@ -22,6 +22,7 @@ from hypnose_behavior.metric_analysis.metrics.hidden_rule import (
     hr_abort_poke_gap,
     rolling_hr_reward_fraction,
 )
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     _iter_subject_dirs,
@@ -181,7 +182,7 @@ def hidden_rule_and_false_alarm(
         ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
         for session_num, ses_dir in enumerate(ses_dirs, start=1):
             date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
 
@@ -514,12 +515,12 @@ def plot_fa_ratio_by_hr_position(
         
         for session_num, ses_dir in enumerate(ses_dirs, 1):
             date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             
             if not results_dir.exists():
                 continue
             
-            summary_path = results_dir / "summary.json"
+            summary_path = layout.table_path(results_dir, "summary.json")
             if not summary_path.exists():
                 continue
 
@@ -963,7 +964,7 @@ def plot_hidden_rule_abort_poke_gap(
             except Exception:
                 date_val = date_str
 
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
 
@@ -1166,7 +1167,7 @@ def plot_hr_reward_fraction_over_trials(
             except Exception:
                 date_val = date_str
 
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
 

@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 from hypnose_behavior.frames import position_entries_by_trial
 from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.utils.helpers import _get_from_cache, _update_cache
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     derivatives,
@@ -147,13 +148,13 @@ def plot_epoch_speeds_by_condition(
 
     for ses_dir in ses_dirs:
         date_str = ses_dir.name.split("_date-")[-1]
-        results_dir = ses_dir / "saved_analysis_results"
+        results_dir = layout.results_dir(ses_dir)
         if not results_dir.exists():
             continue
 
         df_speed = _get_from_cache(subjid, date_str, kind="speed_analysis")
         if df_speed is None:
-            path_speed = results_dir / "speed_analysis.parquet"
+            path_speed = layout.table_path(results_dir, "speed_analysis.parquet")
             if not path_speed.exists():
                 raise FileNotFoundError(f"Missing speed_analysis.parquet for {date_str}; run compute_speed_analysis first")
             df_speed = pd.read_parquet(path_speed)
@@ -531,11 +532,11 @@ def plot_traces_with_speed_threshold(
     markers = {"rewarded": [], "unrewarded": [], "fa": []}
     for ses_dir in ses_dirs:
         date_str = ses_dir.name.split("_date-")[-1]
-        results_dir = ses_dir / "saved_analysis_results"
+        results_dir = layout.results_dir(ses_dir)
         if not results_dir.exists():
             continue
         skipped_no_poke_end = []
-        analysis_path = results_dir / "speed_analysis.parquet"
+        analysis_path = layout.table_path(results_dir, "speed_analysis.parquet")
 
         trial_data = None
         use_saved_thresholds = False

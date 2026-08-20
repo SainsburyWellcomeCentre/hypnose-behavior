@@ -14,6 +14,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from hypnose_behavior.frames import odor_letter
 from hypnose_behavior.utils.helpers import _get_from_cache, _update_cache
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     derivatives,
@@ -291,7 +292,7 @@ def plot_movement_analysis_statistics(
         date_str = ses_dir.name.split("_date-")[-1]
         date_scope = [int(date_str)] if str(date_str).isdigit() else [date_str]
         date_slug = _slugify(date_str)
-        results_dir = ses_dir / "saved_analysis_results"
+        results_dir = layout.results_dir(ses_dir)
         if not results_dir.exists():
             continue
 
@@ -307,7 +308,7 @@ def plot_movement_analysis_statistics(
         # load speed_analysis
         speed_df = _get_from_cache(subjid, date_str, kind="speed_analysis")
         if speed_df is None:
-            path_speed = results_dir / "speed_analysis.parquet"
+            path_speed = layout.table_path(results_dir, "speed_analysis.parquet")
             if not path_speed.exists():
                 print(f"No speed_analysis.parquet for {date_str}")
                 continue

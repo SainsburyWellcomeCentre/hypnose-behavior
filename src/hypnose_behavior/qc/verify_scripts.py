@@ -38,8 +38,9 @@ sys.path.insert(0, str(REPO / "src"))
 import _common  # canonicalization + md5 helpers (single import surface)
 import json
 
-PY = sys.executable
+from hypnose_behavior.io import layout
 
+PY = sys.executable
 
 def _load_fixtures(filter_keys):
     sessions = yaml.safe_load((HERE / "sessions.yml").read_text())["sessions"]
@@ -76,7 +77,7 @@ def _n_sessions_written(deriv: Path) -> int:
 
 
 def _trial_data_md5(deriv: Path, date: str):
-    m = list(deriv.glob(f"**/ses-*_date-{date}/saved_analysis_results/trial_data.csv"))
+    m = list(deriv.glob(f"**/ses-*_date-{date}/{layout.RESULTS_DIRNAME}/trial_data.csv"))
     return _common._md5(_common._canonical_trial_data(m[0])) if m else None
 
 

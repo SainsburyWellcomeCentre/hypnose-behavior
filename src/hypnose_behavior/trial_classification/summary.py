@@ -13,6 +13,8 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
+from hypnose_behavior.io import layout
+
 def print_merged_session_summary(merged_classification: dict, subjid=None, date=None, save=False, out_dir=None) -> None:
     """
     Summary for merged multi-run results, now showing per-run parameters.
@@ -621,11 +623,11 @@ def print_merged_session_summary(merged_classification: dict, subjid=None, date=
             if root is None:
                 print("No output directory found for saving summary.")
                 return
-            out_dir = Path(root).parent / "derivatives" / f"sub-{subjid}" / f"ses-{date}" / "saved_analysis_results"
+            out_dir = layout.results_dir(Path(root).parent / "derivatives" / f"sub-{subjid}" / f"ses-{date}")
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         fname = f"merged_summary_{subjid}_{date}.txt"
-        with open(out_dir / fname, "w", encoding="utf-8") as f:
+        with open(layout.table_path(out_dir, fname), "w", encoding="utf-8") as f:
             f.write(buffer.getvalue())
-        print(f"Saved merged session summary to {out_dir / fname}")
+        print(f"Saved merged session summary to {layout.table_path(out_dir, fname)}")
     

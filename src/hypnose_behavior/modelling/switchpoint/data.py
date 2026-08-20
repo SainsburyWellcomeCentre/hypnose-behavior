@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from hypnose_behavior.io.loaders import _load_trial_views, _odor_to_letter
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import _filter_session_dirs, _iter_subject_dirs
 
 # Truthy spellings of hidden_rule_success: bool in parquet, str via the CSV fallback.
@@ -144,7 +145,7 @@ def prepare_subject(
 
     segments, ab_segments, labels, sizes = [], [], [], []
     for ses_dir in _filter_session_dirs(subj_dir, date_range):
-        results_dir = ses_dir / "saved_analysis_results"
+        results_dir = layout.results_dir(ses_dir)
         if not results_dir.exists():
             continue
         views = _load_trial_views(results_dir)

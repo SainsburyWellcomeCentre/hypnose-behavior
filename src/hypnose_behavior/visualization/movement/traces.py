@@ -31,6 +31,7 @@ from hypnose_behavior.io.paths import (
     get_server_root,
 )
 from hypnose_behavior.utils.helpers import _get_from_cache, _update_cache
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     derivatives,
@@ -105,7 +106,7 @@ def plot_movement_trace(subjid, date, smooth_window=10, linewidth=1, alpha=0.5, 
     session_dir = session.path
     date_str = session.date  # used in the figure title below
 
-    results_dir = session_dir / "saved_analysis_results"
+    results_dir = layout.results_dir(session_dir)
     if not results_dir.exists():
         raise FileNotFoundError(f"Results directory not found: {results_dir}")
 
@@ -986,7 +987,7 @@ def plot_trial_traces_by_mode(
 
     for ses_dir in ses_dirs:
         date_str = ses_dir.name.split("_date-")[-1]
-        results_dir = ses_dir / "saved_analysis_results"
+        results_dir = layout.results_dir(ses_dir)
         if not results_dir.exists():
             continue
 
@@ -1024,7 +1025,7 @@ def plot_trial_traces_by_mode(
         # Load speed analysis parquet if available (per-bin speeds + threshold times)
         speed_df = _get_from_cache(subjid, date_str, kind="speed_analysis")
         if speed_df is None:
-            path_speed = results_dir / "speed_analysis.parquet"
+            path_speed = layout.table_path(results_dir, "speed_analysis.parquet")
             if path_speed.exists():
                 try:
                     speed_df = pd.read_parquet(path_speed)
@@ -1270,7 +1271,7 @@ def plot_trial_traces_by_mode(
                 continue
             # Determine hidden-rule odors for this session (from summary.json)
             hr_odors_raw = []
-            summary_path = results_dir / "summary.json"
+            summary_path = layout.table_path(results_dir, "summary.json")
             if summary_path.exists():
                 try:
                     with open(summary_path, "r", encoding="utf-8") as f:

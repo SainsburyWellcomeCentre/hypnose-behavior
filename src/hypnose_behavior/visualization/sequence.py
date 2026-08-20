@@ -12,6 +12,7 @@ here counts the first.
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from hypnose_behavior.metric_analysis.metrics.sequence import abortion_rate_positionX
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     derivatives,
@@ -152,7 +153,7 @@ def plot_position_completion_rate(
 
         ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
         for ses_dir in ses_dirs:
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
             views = _load_trial_views(results_dir)

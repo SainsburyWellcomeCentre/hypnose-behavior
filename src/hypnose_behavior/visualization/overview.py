@@ -18,6 +18,7 @@ from typing import (
     Union,
     Tuple,
 )
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     _iter_subject_dirs,
@@ -170,7 +171,7 @@ def plot_behavior_metrics(
         ses_dirs = _filter_session_dirs(subj_dir, subj_dates, **select)
         for session_num, ses_dir in enumerate(ses_dirs, start=1):
             date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
             # Protocol (for coloring)

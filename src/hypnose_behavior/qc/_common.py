@@ -36,6 +36,7 @@ import pandas as pd
 # Update ONLY these lines as modules move during the restructuring. The md5
 # fingerprints they produce must remain identical at every step.
 import hypnose_behavior.io.paths as _paths
+from hypnose_behavior.io import layout
 from hypnose_behavior.trial_classification.run import analyze_session_multi_run_by_id_date
 from hypnose_behavior.io.load_results import load_session_results
 from hypnose_behavior.metric_analysis.run import run_all_metrics
@@ -281,7 +282,7 @@ def fingerprint_session(subjid, date) -> dict:
                 subjid, date, verbose=False, save=True, print_summary=False, save_csv=True
             )
 
-        matches = list(tmp.glob(f"**/ses-*_date-{date}/saved_analysis_results/trial_data.csv"))
+        matches = list(tmp.glob(f"**/ses-*_date-{date}/{layout.RESULTS_DIRNAME}/trial_data.csv"))
         if not matches:
             raise FileNotFoundError(
                 f"trial_data.csv not found for subj={subjid} date={date} under {tmp}"
@@ -306,7 +307,7 @@ def fingerprint_session(subjid, date) -> dict:
         }
 
         for name in SIDE_TABLES:
-            path = results_dir / f"{name}.parquet"
+            path = layout.table_path(results_dir, f"{name}.parquet")
             if path.exists():
                 table_md5, table_columns = _table_fingerprint(path)
             else:

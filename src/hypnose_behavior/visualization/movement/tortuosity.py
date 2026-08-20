@@ -8,6 +8,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from hypnose_behavior.utils.helpers import _get_from_cache, _update_cache
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     derivatives,
@@ -188,7 +189,7 @@ def plot_tortuosity_lines_overlay(
 
     for ses_dir in ses_dirs:
         date_str = ses_dir.name.split("_date-")[-1]
-        results_dir = ses_dir / "saved_analysis_results"
+        results_dir = layout.results_dir(ses_dir)
         if not results_dir.exists():
             continue
 
@@ -220,7 +221,7 @@ def plot_tortuosity_lines_overlay(
 
         speed_df = _get_from_cache(subjid, date_str, kind="speed_analysis")
         if speed_df is None:
-            path_speed = results_dir / "speed_analysis.parquet"
+            path_speed = layout.table_path(results_dir, "speed_analysis.parquet")
             if not path_speed.exists():
                 print(f"No speed_analysis.parquet for {date_str}; run plot_epoch_speeds_by_condition first")
                 continue

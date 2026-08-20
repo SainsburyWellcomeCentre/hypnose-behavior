@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import derivatives
 from hypnose_behavior.io.protocol_schema import (
     mode_independent_columns, trial_data_columns,
@@ -183,7 +184,7 @@ def load_session_results(subjid, date):
     # than warning on an ambiguous subject or date.
     session = derivatives.find_session(subjid, date=date)
 
-    results_dir = session.path / "saved_analysis_results"
+    results_dir = layout.results_dir(session)
     if not results_dir.exists():
         raise FileNotFoundError(f"Results directory not found: {results_dir}")
     return load_results_dir(results_dir)
@@ -201,14 +202,14 @@ def load_results_dir(results_dir):
     results_dir = Path(results_dir)
 
     # Load manifest and summary
-    manifest = json.load(open(results_dir / "manifest.json"))
-    summary = json.load(open(results_dir / "summary.json"))
+    manifest = json.load(open(layout.table_path(results_dir, "manifest.json")))
+    summary = json.load(open(layout.table_path(results_dir, "summary.json")))
 
     results = SessionResults()
 
     # Prefer the unified trial_data parquet; fall back to CSV if needed
-    trial_parquet = results_dir / "trial_data.parquet"
-    trial_csv = results_dir / "trial_data.csv"
+    trial_parquet = layout.table_path(results_dir, "trial_data.parquet")
+    trial_csv = layout.table_path(results_dir, "trial_data.csv")
     trial_df = pd.DataFrame()
     if trial_parquet.exists():
         try:

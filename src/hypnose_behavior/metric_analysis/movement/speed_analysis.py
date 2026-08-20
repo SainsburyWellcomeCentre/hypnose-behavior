@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from hypnose_behavior.frames import position_entries_by_trial
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     _iter_subject_dirs,
@@ -487,7 +488,7 @@ def compute_speed_analysis(
 
     for ses in ses_dirs:
         date_str = ses.name.split("_date-")[-1]
-        results_dir = ses / "saved_analysis_results"
+        results_dir = layout.results_dir(ses)
         if not results_dir.exists():
             continue
 
@@ -770,7 +771,7 @@ def compute_speed_analysis(
             rec["threshold_beta"] = threshold_beta
             rec["speed_threshold"] = thr_max
 
-        analysis_path = results_dir / "speed_analysis.parquet"
+        analysis_path = layout.table_path(results_dir, "speed_analysis.parquet")
         try:
             analysis_path.parent.mkdir(parents=True, exist_ok=True)
             pd.DataFrame(epoch_records).to_parquet(analysis_path, index=False)

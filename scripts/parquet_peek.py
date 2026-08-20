@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import derivatives
 from hypnose_behavior.io.parquet_peek import peek, DEFAULT_ROWS
 
@@ -74,7 +75,7 @@ def main() -> int:
 
     status = 0
     for i, ses in enumerate(sessions):
-        results_dir = ses.path / "saved_analysis_results"
+        results_dir = layout.results_dir(ses)
         if len(sessions) > 1:
             print(f"{'' if i == 0 else chr(10)}=== {ses.subject} {ses.path.name} ===")
         if not results_dir.exists():

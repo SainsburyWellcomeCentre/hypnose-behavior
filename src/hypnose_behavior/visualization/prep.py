@@ -30,6 +30,7 @@ import json
 
 import matplotlib.colors as mcolors
 
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     _iter_subject_dirs,
@@ -147,13 +148,13 @@ def _collect_sessions(subjids, dates, *, ses=None, index=None,
             if date_val is None:
                 continue
             date_vals.append(date_val)
-            results_dirs.append(ses_dir / "saved_analysis_results")
+            results_dirs.append(layout.results_dir(ses_dir))
         if results_dirs:
             yield subjid, date_vals, results_dirs
 
 
 def _load_trial_data(results_dir: Path) -> pd.DataFrame:
-    parquet_path = results_dir / "trial_data.parquet"
+    parquet_path = layout.table_path(results_dir, "trial_data.parquet")
     if not parquet_path.exists():
         raise FileNotFoundError(f"Missing trial_data.parquet at {parquet_path}")
     return pd.read_parquet(parquet_path)
@@ -276,7 +277,7 @@ def _coerce_tz_naive(series):
 
 def _load_protocol_from_summary(results_dir: Path) -> str:
     try:
-        with open(results_dir / "summary.json", "r", encoding="utf-8") as f:
+        with open(layout.table_path(results_dir, "summary.json"), "r", encoding="utf-8") as f:
             summary = json.load(f)
         runs = summary.get("session", {}).get("runs", [])
         if runs and isinstance(runs, list):
@@ -350,7 +351,7 @@ def load_tracking_with_behavior(subjid, date):
         base_path = get_rawdata_root()
         server_root = get_server_root()
         derivatives_dir = get_derivatives_root()
-        results_dir = derivatives.find_session(subjid, date=date).path / "saved_analysis_results"
+        results_dir = layout.results_dir(derivatives.find_session(subjid, date=date))
         tracking = load_tracking_frame(results_dir)
         tracking['time'] = pd.to_datetime(tracking['time'])
         behavior = load_session_results(subjid, date)
@@ -410,7 +411,7 @@ def _load_subject_trial_timeline(subjid, subj_dates, *, ses=None, index=None,
     sessions = []
     for ses_dir in _filter_session_dirs(subj_dir, subj_dates, **select):
         date_str = ses_dir.name.split("_date-")[-1]
-        results_dir = ses_dir / "saved_analysis_results"
+        results_dir = layout.results_dir(ses_dir)
         if results_dir.exists():
             sessions.append((date_str, results_dir))
     sessions.sort(key=lambda t: t[0])
@@ -431,7 +432,7 @@ def _load_subject_trial_timeline(subjid, subj_dates, *, ses=None, index=None,
         rtc = df.get("response_time_category")
         df["is_rewarded"] = (rtc == "rewarded") if rtc is not None else False
         runs = []
-        summary_path = results_dir / "summary.json"
+        summary_path = layout.table_path(results_dir, "summary.json")
         if summary_path.exists():
             try:
                 with open(summary_path, "r", encoding="utf-8") as f:

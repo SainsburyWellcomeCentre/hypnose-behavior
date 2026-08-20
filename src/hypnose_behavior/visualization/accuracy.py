@@ -19,6 +19,7 @@ from hypnose_behavior.metric_analysis.metrics.accuracy import (
 )
 from hypnose_behavior.metric_analysis.metrics.hidden_rule import hidden_rule_mask
 from hypnose_behavior.metric_analysis.resolvers import by_group
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _filter_session_dirs,
     _iter_subject_dirs,
@@ -147,7 +148,7 @@ def plot_decision_accuracy_by_odor(
         ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         for ses_dir in ses_dirs:
             date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
             
@@ -359,7 +360,7 @@ def plot_decision_accuracy_rolling_average(
         ses_dirs = _filter_session_dirs(subj_dir, dates, **select)
         for ses_dir in ses_dirs:
             date_str = ses_dir.name.split("_date-")[-1]
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
             td = _load_table_with_trial_data(results_dir, "trial_data")
@@ -731,7 +732,7 @@ def plot_decision_accuracy(
 
         main_vals, hr_vals = [], []
         for ses_dir in _filter_session_dirs(subj_dir, subj_dates, **select):
-            results_dir = ses_dir / "saved_analysis_results"
+            results_dir = layout.results_dir(ses_dir)
             if not results_dir.exists():
                 continue
             td = _load_trial_views(results_dir)["trial_data"]

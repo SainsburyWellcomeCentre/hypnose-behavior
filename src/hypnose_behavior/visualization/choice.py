@@ -8,6 +8,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from hypnose_behavior.io.load_results import load_session_results
+from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import _filter_session_dirs, derivatives, session_selectors
 from hypnose_behavior.io.paths import (
     get_rawdata_root,
@@ -109,7 +110,7 @@ def plot_choice_history(
     
     for session_idx, ses_dir in enumerate(ses_dirs):
         date_str = ses_dir.name.split("_date-")[-1]
-        results_dir = ses_dir / "saved_analysis_results"
+        results_dir = layout.results_dir(ses_dir)
         if not results_dir.exists():
             continue
 
