@@ -273,6 +273,25 @@ it into two assertions in `check_layering.py`:
    (and `frames`), and
 2. `io/` may import from `trial_classification` **only** `outcome`.
 
+**How that lands in `check_layering.py`.** One entry in `DECLARED`, which is empty until
+this item:
+
+```python
+Declared(
+    importer="hypnose_behavior.io.save_results",
+    imported="hypnose_behavior.trial_classification.outcome",
+    reason="outcome.py imports nothing from the package except the root-level leaves, "
+           "so reaching it from io/ cannot pull trial_classification down with it.",
+)
+```
+
+**Measured — assertion 2 needs no code, assertion 1 does.** A tier-to-tier pair counts as
+declared only when *every* edge realising it is declared, so with the entry in place a
+second `io -> trial_classification` import still turns the gate red: assertion 2 is
+enforced by the allow-list itself. Assertion 1 is not — `outcome.py` gaining an
+`io.readers` import leaves the gate green, because the leaf property is what *justifies*
+the entry rather than something the cycle check reads. It is the assertion to write.
+
 **Why not the third option.** Moving the derivation upstream so `io/` never reaches for
 the rule was considered and rejected on measurement: `_derive_outcome` is applied at
 `save_results.py:195`, inside `save_session_analysis_results` (lines 130–446), *after*
@@ -281,7 +300,12 @@ that function assembles `trial_df` by merging `aborted_sequences_detailed` and
 assembly — a refactor of a 316-line function, for one import. Not worth it; revisit only
 if that function is being split for its own reasons.
 
-**Gate.** `check_layering` goes green with two recorded exceptions.
+**Gate.** `check_layering` RESULT PASS carrying **one** `DECLARED` entry (the two above are
+assertions, not two entries). Green means all four of: no module-level cycle; one cycle left
+at directory granularity, `io -> trial_classification -> io`, printed in full and marked
+with its reason; `io/` reaching into `trial_classification/` exactly once, at
+`save_results.py:28`; and `outcome.py` importing nothing from the package but root-level
+leaves.
 
 ---
 
