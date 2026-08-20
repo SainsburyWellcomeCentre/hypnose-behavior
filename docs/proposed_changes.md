@@ -404,19 +404,56 @@ must go through the seam, or the subfolder flip writes to two layouts.
 ## Item 7 — retire `_filter_session_dirs`
 
 **Delivers.** The 32 call sites take `SessionRef` from `_filter_sessions` and read
-`ref.results` / `ref.date` instead of rebuilding both. This is the commit that pays: it
-removes the 35 `exists()` guards and the 18 `_date-` splits along with the path rebuilds.
+`ref.date` and `layout.results_dir(ref)` instead of rebuilding both out of the directory
+name. `_filter_session_dirs` then goes: its only function is loss — it receives the refs
+and returns `[s.path for s in ...]`, and 30 sites re-derive the date by string surgery on
+the name it kept.
 
-`SessionRef` lives in `hypnose_helpers` and is modality-agnostic — `saved_analysis_results`
-is this repo's convention, so the accessor belongs in `hypnose_behavior/io/layout.py`
-(item 6), **not** in the helpers repo.
+**The accessor is `io/layout.results_dir()`; `SessionRef` gains nothing.** That class lives
+in `hypnose_helpers` and is shared with the modality repos, which have no
+`saved_analysis_results` directory of their own — the dirname is this repo's convention,
+which is why item 6 put `results_dir()` in `io/layout.py`. A `.results` property on
+`SessionRef` would move repo-specific knowledge into the shared class and turn this
+refactor into a cross-repo change.
+
+**The name, counted at `3302511`:** 60 occurrences in `src/` + `scripts/` — 32
+invocations, 19 import lines (15 of them bare-name lines inside a multi-line
+`from ... import (` block, which a grep for `import` misses), 5 docstring mentions, and 4
+in `io/layout.py`: the definition plus three docstrings, one of which is `results_dir()`'s
+and stops being true the moment the shim goes.
+
+**The 37 `results_dir.exists()` guards belong to item 8, not here.** A `SessionRef` says a
+session is in the derivatives tree; it says nothing about whether that session has been
+*analysed*, which is what the guard tests. `iter_sessions()` yields one record per
+*analysed* session, and that is what retires them.
+
+**The date substitution cannot move a value — structural, not sampled.** `SESSION_DIR_RE`
+is `^ses-([^_]+)_date-(\d{8})$`: the `ses` token forbids `_` and the date group is anchored
+to the end of the name, so a name that parses holds exactly one `_date-` and group 2 *is*
+`name.split("_date-")[-1]`. Both are `str`. The session set cannot move either, because
+`_filter_session_dirs` is `[s.path for s in _filter_sessions(...)]` — every `ses_dir` a
+caller holds today already came from the `SessionRef` that replaces it.
 
 **Gate.** `plot_regression` (44 cases) is the instrument — most call sites are plotters —
 plus `regression` and `verify_scripts`.
 
-**Trap.** `_filter_session_dirs` returns a list; `_filter_sessions` may be consumed once if
-it becomes a generator. Several callers use `enumerate(ses_dirs, start=1)` and at least one
-takes `len()`. Keep it returning a list.
+**Traps.**
+
+- **Keep it a list.** `_filter_sessions` may be consumed once if it becomes a generator.
+  Eight callers use `enumerate(ses_dirs, ...)`, and `movement/summary_stats.py:187` takes
+  `len()`.
+- **`session_index` comes within one attribute of 32 sites.** Section 8: it selects, it does
+  not position. The eight `enumerate(..., 1)` counters count *within the filtered
+  selection*, so every plot's x starts at 1; `session_index` is the animal's full-history
+  rank and would plot at x=12,27,33 against a mostly empty axis. Leave every counter alone.
+  This is the item that puts section 8's temptation in reach.
+- **One caller wants the directory itself**, not the results dir or the date:
+  `accuracy.py:384` writes `td["_session_uid"] = str(ses_dir.name)`, which is
+  `ref.path.name`. The only non-mechanical substitution of the 32.
+- **One caller is gated by nothing:** `modelling/switchpoint/data.py:146`. 17 of the 18
+  caller files are in `plot_regression`'s `MODULES`; that one is in neither `MODULES` nor a
+  case, and `check_qlearning.py` reaches only `switchpoint.qlearning`, synthetically and
+  with no mount. Section 1's reachability trap, live — verify that site by hand.
 
 ---
 
