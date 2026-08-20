@@ -478,9 +478,9 @@ plus `regression` and `verify_scripts`.
 ## Item 8 — `prep.iter_sessions()` and the plotter preambles
 
 **Do not split `visualization/` again.** Phase 10 already moved the boundary *between*
-files (`3604 -> 4 modules`, `3efa16c`); doing it again redistributes 16,196 lines without
-reducing anything. The 900-line `movement/traces.py:733` is not 900 lines of drawing — it
-is a repeated ~15-line preamble wrapped around drawing.
+files (`3604 -> 4 modules`, `3efa16c`); doing it again redistributes 16,185 lines without
+reducing anything. The 900-line `movement/traces.py:731` is not 900 lines of drawing — it
+is a repeated preamble wrapped around drawing.
 
 **Delivers.** In `visualization/prep.py` (fan-in 12 — already the shared layer):
 
@@ -489,13 +489,41 @@ def iter_sessions(subjid, dates=None, **select):
     """Yield one record per *analysed* session: .results_dir, .date_str, .views, .ref."""
 ```
 
-On top of items 6 and 7 this collapses the
-`_filter_session_dirs` → `results_dir` → `exists()` → `_load_trial_views` → `date_str`
-quintuple that appears at all 32 sites. `_load_trial_views` is already single-sourced in
-`io/loaders.py` and called from six `visualization` modules, so half the seam exists.
+**The preamble as it stands, measured over the 32 `for ref in ...` loops** — exactly one
+per `_filter_sessions` invocation, in all 18 files; AST-scoped to each loop body, at
+`e728e04`:
+
+| step | loops carrying it |
+|---|---|
+| `results_dir = layout.results_dir(ref)` | 31 |
+| `if not results_dir.exists(): continue` | 29 |
+| `_load_trial_views(results_dir)` | 22 |
+| `date_str = ref.date` | 28 |
+
+**22 of the 32 carry the first three together** — that is the seam. The three loops with
+no `exists()` guard are the ones to read before writing the signature, because each is
+gated on something else: `speed_analysis.py:146` collects dates and never opens a results
+directory, `run.py:523` guards on `summary_path.exists()` instead, and `prep.py:145`
+collects `results_dirs` and defers the decision to its caller. An `iter_sessions` that
+yields only *analysed* sessions is right for the 29 and wrong for those three, so they
+either keep their own loop or need the raw refs as well.
+
+`date_str` is a one-attribute read since item 7, not a derivation — it rides along on the
+record because callers want it, not because it costs anything to recover.
+
+**The shape already exists once, in the accessor layer.** `accessors.sessions()`
+(`accessors.py:468-474`) is exactly this loop — refs in, `layout.results_dir(ref)`,
+`exists()`, a handle out — reached through `derivatives.find_sessions` rather than
+`_filter_sessions`. It differs in one deliberate way: it **warns, naming the skipped
+sessions**, where all 29 guards `continue` in silence. Read it first; do not quietly give
+the plotters its warning, because "fewer sessions than matched" is a change the 44 cases
+cannot see.
+
+`_load_trial_views` is single-sourced in `io/loaders.py` and called from 13 `visualization`
+modules and 26 sites overall, so that half of the seam exists already.
 
 **Extract the preamble, never the plots.** The function-length numbers (42 functions over
-150 lines, 72 over 100, of 912) are a consequence of one plotter = one function, which is
+150 lines, 71 over 100, of 901) are a consequence of one plotter = one function, which is
 defensible for figure code. Let them shrink where this makes them shrink for free.
 
 **Gate.** `plot_regression`, 44 cases — exactly the right instrument, because only what
