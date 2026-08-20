@@ -529,9 +529,21 @@ defensible for figure code. Let them shrink where this makes them shrink for fre
 **Gate.** `plot_regression`, 44 cases — exactly the right instrument, because only what
 *feeds* the drawing changes.
 
-**Trap.** `prep.py` is imported by 12 modules and `prep._computed_metrics` is what makes
-`plot_regression` reachable at all (section 34). A mistake here is invisible to
-`regression.py`, which never sees a figure.
+**Traps.**
+
+- **`iter_sessions` cannot be a bare generator, whatever the docstring says.** Nine sites
+  spell `if not ses_refs:` before the loop — a generator is always truthy, so every one of
+  them silently stops firing. `movement/summary_stats.py` is the worst case and the one to
+  design against: it consumes the selection **four times** — truthiness at `:116`,
+  `len()` at `:187`, the loop at `:291`, and `[ref.date for ref in ses_refs]` at `:589`.
+  Return a `list` of records, or a small sequence object; `yield` in the signature above is
+  shorthand for "one record per analysed session", not a promise of laziness.
+- **`prep.py` is imported by 12 modules** and `prep._computed_metrics` is what makes
+  `plot_regression` reachable at all (section 34). A mistake here is invisible to
+  `regression.py`, which never sees a figure.
+- **`modelling/switchpoint/data.py:147` is reached by no gate** — 17 of the 18 files are in
+  `plot_regression`'s `MODULES`, that one is in neither `MODULES` nor a case. Section 1's
+  reachability trap, same site as item 7. Verify it by hand.
 
 ---
 
