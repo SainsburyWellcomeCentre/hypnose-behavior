@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Golden-master regression: confirm the pipeline output is unchanged.
 
-Fingerprints nine things for each coverage session in ``sessions.yml`` and compares
+Fingerprints ten things for each coverage session in ``sessions.yml`` and compares
 them against stored baselines in ``fixtures/``:
 
   ``trial_data``                    the canonical CSV
@@ -9,16 +9,17 @@ them against stored baselines in ``fixtures/``:
   ``position_data``                 the per-position side-table, as written
   ``metrics_by_trial``              the per-trial metric table, as written
   ``metrics_by_poke``               the per-poke metric table, as written
-  ``non_initiated_sequences``       failed sampling attempts, as written
-  ``non_initiated_odor1_attempts``  failed position-1 attempts, as written
-  ``non_initiated_FA``              both of the above, annotated with FA outcome
+  ``non_initiated_attempts``        failed sampling attempts, as written
   ``unreported_metrics``            the 16 registered metrics ``REPORT`` does not save
 
-Four of those were added in Phase 7b.6 and three more for Item 5, both times closing a
-real gap of the same shape: the tables were written by code no gate read back, and 18
-registered metrics were computed by code no gate ran, so the GREENs that landed them
-measured *additivity* rather than coverage. A fingerprint that never looks at a file
-cannot tell "unchanged" from "unwatched".
+and three **deletion guards** -- ``non_initiated_sequences``,
+``non_initiated_odor1_attempts`` and ``non_initiated_FA`` -- which no longer name a
+written table and fingerprint as the md5 of ``"ABSENT"``, so resurrecting any of those
+files is a RED. See ``_common.SIDE_TABLES`` for why they stay on the list.
+
+A fingerprint that never looks at a file cannot tell "unchanged" from "unwatched",
+which is why the list covers everything the pipeline writes rather than the two
+outputs a caller happens to read.
 
 On a mismatch it reports *what* changed (added / removed / changed columns, and
 added / removed / changed metric keys), so an intended change is easy to confirm as

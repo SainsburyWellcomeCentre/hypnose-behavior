@@ -14,6 +14,10 @@ read-only `rawdata` and redirect all derivatives I/O to a throwaway temp dir
 | [`figure_provenance.py`](figure_provenance.py) | Does a saved figure's provenance record still name the plotter that drew it? (`DECISIONS.md` §9) — the one gate that exercises `save_figure`, which `plot_regression` deliberately never calls |
 | [`check_imports.py`](check_imports.py) | Static check: flag any referenced global that isn't imported |
 | [`check_qlearning.py`](check_qlearning.py) | Structural self-check of the Q-learning null model — **synthetic data only, no mount needed** |
+| [`ast_move_check.py`](ast_move_check.py) | AST byte-identity check for a pure move: every definition reappears with a byte-identical source segment |
+| [`verbose_diff.py`](verbose_diff.py) | Old-vs-new diff of what `trial_classification` **prints** — `regression.py` never looks at stdout |
+| [`outcome_agreement.py`](outcome_agreement.py) | How far the three independent rewarded/unrewarded/timeout derivations agree (`DECISIONS.md` §14) |
+| [`position_data_lossless.py`](position_data_lossless.py) | Is `position_data` a lossless projection of the three per-trial blobs? (`DECISIONS.md` §24) |
 | [`validate.py`](validate.py) | `validate_subject()` — pre-flight data-existence check used by the scripts |
 
 ## What `regression.py` checks

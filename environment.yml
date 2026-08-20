@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python>=3.9,<3.13
+  - python>=3.12,<3.13
   - numpy<2
   - pandas
   - pyarrow
@@ -23,4 +23,4 @@ dependencies:
     - moviepy
     - swc-aeon==0.1.0
     - harp-python
-    - -e .[behavioral]
+    - -e .

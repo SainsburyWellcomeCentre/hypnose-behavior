@@ -7,11 +7,7 @@ name = "hypnose-behavior"
 version = "2.0.0"
 description = "Analysis tools for hypnose experiments"
 readme = "README.md"
-requires-python = ">=3.9,<3.13"
-# Base install: everything needed for the shared helpers (io.paths, io.save and the
-# figure styles) plus the general analysis code. Every one of these supports Python
-# 3.9, so repos pinned there — hypnose-eeg-preprocessing, via pomegranate/somnotate —
-# can install this package and reuse those helpers.
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "numpy<2",
     "pandas",
@@ -26,15 +22,8 @@ dependencies = [
     "ipykernel",
     "ipympl",
     "pyyaml",
-]
 
-# Behavioural-data and video stack. 
-
-#   pip install -e ".[behavioral]"   full install (what environment.yml does)
-#   pip install -e .                 base only — helpers, no behavioural loaders
-
-[project.optional-dependencies]
-behavioral = [
+    # Behavioural-data and video stack.
     "swc-aeon==0.1.0",
     "harp-python",
     "moviepy",
@@ -45,11 +34,13 @@ behavioral = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-# device_schemas carries an __init__.py (importlib.resources.files() cannot resolve a
-# namespace package on Python 3.9), so it is a package in its own right and its data
+# device_schemas carries an __init__.py, so it is a package in its own right and its data
 # is keyed by that package name. The top-level `hypnose_behavior` key is kept as a
 # belt-and-braces fallback for older setuptools resolution.
 "hypnose_behavior.resources.device_schemas" = ["*.yml"]
+# qc/regression.py resolves both of these package-relative (regression.py:56 and :84), so
+# an install that does not ship them has the gate but not its baselines.
+"hypnose_behavior.qc" = ["fixtures/*.json", "sessions.yml"]
 hypnose_behavior = [
     "resources/device_schemas/*.yml",
 ]

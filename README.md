@@ -35,12 +35,7 @@ Within your working directory use a terminal to clone the repo to your local fol
 
 3. Install hypnose-behavior as a editable install
 
-- In the repo's main folder, run `pip install -e ".[behavioral]"`.
-
-- This install all helpers. pip install -e . omits the behavioral dependencies (like swc-aeon or harp). 
-
-- The split exists because swc-aeon==0.1.0 requires python ≥3.11, while somnotate (sibling repo) is bound to Python 3.9. 
-    the split allows for cross-repo compatibility of core functions. 
+- In the repo's main folder, run `pip install -e .`.
 
 4. Add the environment as a kernel to run notebooks
 
@@ -108,6 +103,8 @@ src/hypnose_behavior/
                          module per behavioural construct), run/merge/summary
                          (orchestration), resolvers, registry
     visualization/       figure-making (valve/poke, metrics, pred-seq, movement)
+    modelling/           switchpoint/: Q-learning and switch models, bootstrap,
+                         permutation, autocorrelation, model comparison
     utils/               small shared helpers
     qc/                  quality control: data validation + golden-master regression tools (see below)
     resources/device_schemas/  harp schemas (behavior.yml, olfactometer.yml), loaded as package data
@@ -131,8 +128,8 @@ from hypnose_behavior.api import session, sessions, pooled, pooled_metrics
 s = session(57, 20260709)        # or session(57, ses=40) / session(57, index=1)
 ```
 
-That resolution walks the derivatives tree **once** (~14.6 s on a cold mount, ~0.2 s
-warm). Everything below is a file read against the path it found — nothing re-resolves.
+That resolution walks the derivatives tree **once** (io takes the longest time). 
+Everything below is a file read against the path it found — nothing re-resolves.
 
 ```python
 s.trial_data()                                        # one row per trial, every column
