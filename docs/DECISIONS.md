@@ -2761,11 +2761,10 @@ So the handle is not a third path; it is the union of the two that already exist
 no overlap. `fa_abortion_stats` stays special-cased inside it, for the reason it is
 special-cased in both places it replaces.
 
-> **`run_all_metrics` is deliberately NOT repointed onto it.** Its loop's stdout *is*
-> `metrics_<subj>_<date>.txt`, and `metric_value` suppresses stdout because a consumer
-> asking for a value is not asking for a report. Routing the reporting path through it
-> would empty that file. Unifying the last one means threading a `quiet` flag through and
-> is a `verbose_diff`-gated change; it was out of this item's scope, not overlooked.
+> **`run_all_metrics` reaches its values through it too**, passing `capture=False`. Its
+> loop's stdout *is* `metrics_<subj>_<date>.txt`, so the reporting path needs the prints
+> the default swallows — a consumer asking for a value is not asking for a report. See
+> §37 for what that parameter has to leave alone.
 
 **Gate:** `plot_regression` **GREEN, 43 cases counted, 2,828,307 drawn values** --
 byte-equal to the figure §33 recorded, so the re-plumb moved nothing.
@@ -3151,3 +3150,60 @@ exercised. **Proved able to fail (section 17):** a single flipped `s` value repo
 a dropped session reports `['session_labels']`, and a one-trial shift in the boundaries
 reports `['session_ends']` — the middle one being exactly the densification this item
 refused.
+
+---
+
+## 37. Where a metric's stdout goes is the caller's choice, not a second dispatch *(Item 9, 2026-08-21)*
+
+`metric_analysis.run.metric_value(spec, results, *, capture=True)` is the only place the
+three-branch dispatch of §34 is written down. `run_all_metrics`' reporting loop calls it
+with `capture=False`; every other consumer takes the default.
+
+**The parameter is what made one definition possible.** §34 could not repoint the
+reporting loop because the two callers wanted opposite things from the same expression —
+a value with the wrapper's prints swallowed, and a report that *is* those prints. That is
+a property of the caller, so it belongs in the signature. `capture=True` opens a
+`redirect_stdout(io.StringIO())`; `capture=False` opens a `nullcontext` and adds no
+redirection of its own.
+
+**Keyword-only and defaulted, because the name is public.** `api.py` exports it and
+`accessors.Session.metrics` and `prep._computed_metrics` call it positionally. Additive is
+the only safe shape.
+
+### Three things the collapse has to leave alone
+
+- **The section header is part of the report, not of the value.** `f"\n--- {spec.title} ---"`
+  is printed by the loop *before* the call. Inside `metric_value` it would be swallowed for
+  every other consumer, and `metrics_<subj>_<date>.txt` would lose all 25 of its headings.
+- **`capture=False` is not "print to the terminal".** The loop stays inside its own
+  `redirect_stdout(buffer)`, and the buffer is the file. `nullcontext` declines to add a
+  *second*, inner redirection; it does not remove the outer one.
+- **The unreachable branch stays.** `spec.call(results)` cannot fire for a `REPORT` name,
+  because a `session` wrapper exists for exactly the 25 in `REPORT` and none of the 18
+  outside it — re-measured on the registry, 43 specs, and `spec.name` is the registry key
+  by construction, so dispatching on either spelling of the name is the same test.
+
+### The artefact at risk is the one no gate watches
+
+`regression` hashes the metrics **dict**, and `qc/` contains no `.txt` reference at all —
+the only two matches for "txt" under it are `save_txt=False` arguments. So the `.txt` was
+verified by hand, the same way §36 verified `switchpoint/data.py`: `run_all_metrics` writes
+it as `buffer.getvalue()` and prints that identical string one line earlier, so with all
+three save flags `False` the captured stdout **is** the file, and no mount path is written.
+Captured for all nine fixture sessions on both sides: **9/9 byte-identical, md5 for md5.**
+
+**Proved able to fail (§17):** forcing the reporting loop onto `capture=True` — trap 2 of
+this item — collapses sub-057 20260709 from 6,475 to 1,979 characters, every wrapper's
+output gone and only the headers and the single-reward block left.
+
+### Gate
+
+`regression` **GREEN, 90 fingerprints**, all byte-identical · `check_imports` PASS ·
+`plot_regression` **GREEN, 44/44, 3,437,588 drawn values** — the count §36 recorded, run
+because `prep._computed_metrics` reaches `metric_value`. The two `detect_stage.py`
+tracebacks on sub-048 20260306 are the documented unreadable `SessionSettings` path
+(`qc/sessions.yml:24-25`), not a failure.
+
+**The single-reward family at `run.py:395-431` is untouched.** It is hardcoded outside the
+registry, sits inside the same buffer, and is on the Deferred list — registering it is a
+real item, not a cleanup.

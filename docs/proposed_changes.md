@@ -85,9 +85,9 @@ tolerate.
 | 6 | ~~`results_dir()` / `table_path()` and the 47 sites~~ **done 2026-08-20** | `regression`, `plot_regression` | low |
 | 7 | ~~retire `_filter_session_dirs` → `SessionRef`~~ **done 2026-08-20** | `plot_regression`, `regression` | medium |
 | 8 | ~~`iter_sessions()` and the plotter preambles~~ **done 2026-08-21** | `plot_regression` (44) | medium |
-| 9 | collapse `metric_value` / `run_all_metrics` | `regression` | low |
+| 9 | ~~collapse `metric_value` / `run_all_metrics`~~ **done 2026-08-21** | `regression` | low |
 
-Item 9 is independent of 1–8 and can be taken at any point as a short session.
+All nine are closed. The forward-looking content lives in `docs/TODO.md`.
 
 ---
 
@@ -585,6 +585,11 @@ defensible for figure code. Let them shrink where this makes them shrink for fre
 ---
 
 ## Item 9 — one dispatch for a metric value
+
+**Done 2026-08-21.** `regression` GREEN 9/9, 90 fingerprints · `check_imports` PASS ·
+`plot_regression` as insurance · the `.txt` verified by hand, 9/9 byte-identical. Recorded
+at `DECISIONS.md` section 37, which also carries the invariant that makes the swap
+equivalent and the proof the by-hand check can fail.
 
 **Independent of items 1–8.** `metric_analysis/run.py:113` `metric_value` and the loop at
 `run.py:376-384` are two spellings of the identical three-branch dispatch

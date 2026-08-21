@@ -111,13 +111,13 @@ def _report_fa_abortion_stats(results):
     return payload
 
 
-def metric_value(spec, results):
+def metric_value(spec, results, *, capture=True):
     """One registered metric's value for one session. **Computes; never reads a file.**
 
     **The single definition of the expression every consumer must evaluate a metric
-    with** -- `prep._computed_metrics` and `accessors.Session.metrics` both call it. A
-    second spelling of it is how two figures come to show the same quantity and disagree.
-    See DECISIONS.md sections 5 and 34.
+    with** -- `run_all_metrics`, `prep._computed_metrics` and `accessors.Session.metrics`
+    all call it. A second spelling of it is how two figures come to show the same quantity
+    and disagree. See DECISIONS.md sections 5 and 34.
 
     - **Has a `session` wrapper** -> `adapter(session(results))`, which is what
       `metrics_*.json` holds. Not `spec.call`: several cores need session configuration
@@ -126,12 +126,19 @@ def metric_value(spec, results):
     - **Has none** -> `spec.call(results)` at declared defaults, the same expression
       `qc/_common._unreported_metrics_fingerprint` watches.
     - `fa_abortion_stats` is special-cased: it reports three tables rather than a value.
-    - **Wrappers print; this suppresses it.** That is why `run_all_metrics` does *not*
-      call it -- its loop's stdout **is** `metrics_<subj>_<date>.txt`.
+    - **Wrappers print, and `capture` decides where that goes.** The default swallows it,
+      because a consumer asking for a value is not asking for a report. `run_all_metrics`
+      passes `capture=False` so the wrapper prints into the buffer its loop writes as
+      `metrics_<subj>_<date>.txt`.
     - Raises whatever the metric raises: the two rolling metrics take `window`
       positionally with no default, so a caller wanting a clearer message checks first.
+
+    The first two branches partition the registry rather than overlapping, which is what
+    lets the reporting loop share this dispatch: a `session` wrapper exists for exactly
+    the 25 names in `REPORT` and for none of the 18 outside it (section 34).
     """
-    with contextlib.redirect_stdout(io.StringIO()):
+    ctx = contextlib.redirect_stdout(io.StringIO()) if capture else contextlib.nullcontext()
+    with ctx:
         if spec.name == "fa_abortion_stats":
             return _report_fa_abortion_stats(results)
         if spec.session is not None:
@@ -378,12 +385,9 @@ def run_all_metrics(results, save_txt=True, save_json=True, save_tables=True):
     with contextlib.redirect_stdout(buffer):
         for name in REPORT:
             spec = REGISTRY[name]
+            # The header belongs to the report, not to the value, so it stays out here.
             print(f"\n--- {spec.title} ---")
-            if name == "fa_abortion_stats":
-                metrics[spec.key] = _report_fa_abortion_stats(results)
-                continue
-            value = spec.session(results)
-            metrics[spec.key] = spec.adapter(value) if spec.adapter else value
+            metrics[spec.key] = metric_value(spec, results, capture=False)
 
         # Single-reward protocol only: outcome-category metrics (Hit / Miss / FA / CR)
         # built from the singrew trial_data columns. Only computed when the session's
