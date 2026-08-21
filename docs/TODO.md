@@ -34,15 +34,6 @@ SLEAP steps for a session **before** migrating it, or migrate that repo first.
 
 ---
 
-## `debug_sleap.csv` has no owner
-
-Left at the top level by the migration because no rule claims it: it does not start with
-`sleap_`, and nothing in this repo writes or reads it. Either it belongs in
-`movement_analysis/` and the SLEAP repo should say so, or it is a stray debugging artefact
-and can go. A decision, not a task.
-
----
-
 ## The single-reward metrics are outside the registry
 
 `metric_analysis/run.py:395-431` hardcodes the whole family, against 70 `@metric` /
