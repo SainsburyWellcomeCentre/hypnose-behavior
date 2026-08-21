@@ -31,10 +31,7 @@ from hypnose_behavior.metric_analysis.sing_rew_metrics import (
     is_singrew_session,
 )
 from hypnose_behavior.metric_analysis.registry import REGISTRY
-from hypnose_behavior.metric_analysis.summary import (
-    format_fa_abortion_tables,
-    save_merged_metrics_txt,
-)
+from hypnose_behavior.metric_analysis.summary import format_fa_abortion_tables
 # Imported for their **registrations**: a metric declares itself where it is
 # defined, so every definition module must be imported before REGISTRY is read.
 from hypnose_behavior.metric_analysis.metrics import (  # noqa: F401
@@ -480,7 +477,7 @@ def batch_run_all_metrics_with_merge(
 ):
     """
     Batch run metrics for combinations of subjids and dates, with optional protocol filter.
-    Also computes and saves merged metrics across all sessions, per subject, and across all subjects.
+    Pooled metrics per subject and overall are reported to the console, not saved.
 
     **The six selectors intersect and none is required** -- `None` means "do not filter on
     this". They are forwarded through `iter_sessions` to the shared
@@ -492,7 +489,6 @@ def batch_run_all_metrics_with_merge(
     `index=5` names a different session to each of them -- see that function's docstring
     for the measurement and section 32 for what the chained script does about it.
     """
-    derivatives_dir = get_derivatives_root()
     results = []
     results_dicts = []
 
@@ -591,85 +587,29 @@ def batch_run_all_metrics_with_merge(
                 return unique_sorted[0] if len(unique_sorted) == 1 else f"{unique_sorted[0]}-{unique_sorted[-1]}"
 
             pooled_results = pool_results_dicts(subj_results)
-            # --- Capture pretty print output ---
+            # Called for its stdout: that is the summary printed below.
             buffer = io.StringIO()
             with contextlib.redirect_stdout(buffer):
-                merged_metrics = run_all_metrics(pooled_results, save_txt=False, save_json=False, save_tables=False)
+                run_all_metrics(pooled_results, save_txt=False, save_json=False, save_tables=False)
             pretty_print_str = buffer.getvalue()
             if len(subj_results) > 1:
                 banner_range = _range_str(subj_dates)
                 print(f"\n======================= Subject {subjid} Summary {banner_range} =======================")
                 print(pretty_print_str)
             elif verbose:
-                print(f"Merged metrics not echoed to console for subjid={subjid} (single session). Files still saved.")
-            # Prepare header
-            header = (
-                "Merged Results for:\n"
-                f"Subjid: {subjid}\n"
-                f"Date(s): {', '.join(subj_dates)}\n"
-                f"Protocol: {protocol if protocol else 'all'}"
-            )
-            subj_dates_sorted = sorted(subj_dates)
-            first_date = subj_dates_sorted[0][4:]
-            last_date = subj_dates_sorted[-1][4:]
-            # Output directory and filenames
-            merged_dir = subj_dir / "merged_results"
-            merged_dir.mkdir(parents=True, exist_ok=True)
-            fname = f"merged_{subjid}_{protocol if protocol else 'all'}_{first_date}_to_{last_date}"
-            txt_path = merged_dir / f"{fname}.txt"
-            json_path = merged_dir / f"{fname}.json"
-            # Save txt using the pretty print string
-            save_merged_metrics_txt(merged_metrics, header, txt_path, pretty_print_str=pretty_print_str)
-            if verbose:
-                print(f"Saved merged metrics summary for subjid={subjid} to {txt_path}")
-            # Save json
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(merged_metrics, f, indent=2, default=str)
-            if verbose:
-                print(f"Saved merged metrics values for subjid={subjid} to {json_path}")
+                print(f"Merged metrics not echoed to console for subjid={subjid} (single session).")
 
     # --- Total merged metrics across all subjects ---
     if results_dicts:
         pooled_results = pool_results_dicts(results_dicts)
-        # --- Capture pretty print output ---
+        # Reported, not saved -- this call is here for its stdout.
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            merged_metrics = run_all_metrics(pooled_results, save_txt=False, save_json=False, save_tables=False)
+            run_all_metrics(pooled_results, save_txt=False, save_json=False, save_tables=False)
         pretty_print_str = buffer.getvalue()
-        # Prepare header
         subjids_merged = pooled_results["manifest"]["merged_subjects"]
         dates_merged = pooled_results["manifest"]["merged_dates"]
-        protocol_merged = pooled_results["manifest"]["protocol"]
-        header = (
-            "Merged Results for:\n"
-            f"Subjid(s): {', '.join(subjids_merged)}\n"
-            f"Date(s): {', '.join(dates_merged)}\n"
-            f"Protocol: {protocol_merged if protocol_merged else 'all'}"
-        )
-        # Extract first and last dates
-        dates_sorted = sorted(dates_merged)
-        first_date = dates_sorted[0][4:]  # Extract MMDD from YYYYMMDD
-        last_date = dates_sorted[-1][4:]  # Extract MMDD from YYYYMMDD
-        # Output directory and filenames
-        merged_dir = derivatives_dir / "merged"
-        if protocol is not None:
-            merged_dir = merged_dir / "protocol_merged"
-        else:
-            merged_dir = merged_dir / "merged"
-        merged_dir.mkdir(parents=True, exist_ok=True)
         subjids_str = "_".join(subjids_merged)
-        fname = f"merged_subjids_{subjids_str}_{protocol_merged if protocol_merged else 'all'}_{first_date}_to_{last_date}"
-        txt_path = merged_dir / f"{fname}.txt"
-        json_path = merged_dir / f"{fname}.json"
-        # Save txt using the pretty print string
-        save_merged_metrics_txt(merged_metrics, header, txt_path, pretty_print_str=pretty_print_str)
-        if verbose:
-            print(f"Saved total merged metrics summary to {txt_path}")
-        # Save json
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(merged_metrics, f, indent=2, default=str)
-        if verbose:
-            print(f"Saved total merged metrics values to {json_path}")
         # Only echo the combined summary when spanning multiple subjects or dates
         if len(subjids_merged) > 1 or len(set(dates_merged)) > 1:
             banner_dates = sorted(set(dates_merged))

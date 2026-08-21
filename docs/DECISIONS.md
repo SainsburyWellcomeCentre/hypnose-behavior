@@ -3299,3 +3299,26 @@ of every filename literal found exactly one other, `parquet_peek._manifest_heade
 `utils/`, so naming `io.layout` from there -- at module level *or* inside the function,
 since `check_layering` reads the AST -- turned `utils` <-> `io` into a directory cycle.
 It decides where inside a results directory to look, which is what `io/layout.py` is for.
+
+---
+
+## 39. Pooled metrics are reported, not saved *(Analysis layout, 2026-08-21)*
+
+`batch_run_all_metrics_with_merge` prints the per-subject and across-subject summaries and
+writes no file for either. Each `run_all_metrics` call on a pooled dict is there for its
+**stdout**; its return value is dropped.
+
+A pooled file is keyed by the selection that produced it, so every distinct set of
+subjects or dates left a permanent artefact -- measured, 788 files across 26 subject
+directories plus 496 more in the tree-level `merged/`. The key carried only `MMDD`
+(`dates_sorted[0][4:]`), so the same day-range in two years wrote the same name and the
+older run's numbers were silently replaced. Nothing in this repo, its notebooks or
+`sleap-hypnose` ever read one.
+
+Pooling is `pool_results_dicts` plus a metric pass over frames that are already saved --
+the section 5 rule, where a cache of a cheap derivation buys nothing and a stale one on
+disk costs correctness.
+
+**Gate:** `regression` **GREEN, 90 fingerprints across all nine sessions**, byte-identical
+· `check_imports` PASS. The per-session write path is untouched; only the batch layer
+above it changed.
