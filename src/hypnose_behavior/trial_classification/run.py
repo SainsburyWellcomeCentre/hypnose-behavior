@@ -33,7 +33,6 @@ from hypnose_behavior.trial_classification.detect_trials import detect_trials
 from hypnose_behavior.trial_classification.hidden_rule import (
     _drop_final_hidden_rule_index, _ensure_int_list, _resolve_hidden_rule_from_stage,
 )
-from hypnose_behavior.trial_classification.index import build_classification_index
 from hypnose_behavior.trial_classification.params import (
     _get_single_reward_info, get_experiment_parameters,
 )
@@ -111,9 +110,6 @@ def classify_and_analyze_with_response_times(data, events, trial_counts, odor_ma
             aborted_detailed['run_id'] = run_id
     classification['aborted_sequences_detailed'] = aborted_detailed
 
-    # 3) Build fast lookup indices for downstream use
-    classification['index'] = build_classification_index(classification)
-
     # 4) Hidden rule position from stage name/index
     hidden_rule_indices, sequence_name = _resolve_hidden_rule_from_stage(stage)
     schema_settings = {}
@@ -188,9 +184,6 @@ def classify_and_analyze_with_response_times(data, events, trial_counts, odor_ma
                 completed_with_rt['response_time_category'] = np.nan
 
     classification['completed_sequences_with_response_times'] = completed_with_rt
-
-    # 7) Build indices after everything is attached
-    classification['index'] = build_classification_index(classification)
 
     # 8) Return wrapper payload
     return {
@@ -396,7 +389,6 @@ def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verb
 
     # Merge classifications (now preserves per-run params)
     merged = merge_classifications(merge_inputs, verbose=verbose)
-    merged['aborted_index'] = merged.get('index', {}).get('aborted', {})
     merged['non_initiated_attempts'] = merged.get('non_initiated_attempts', pd.DataFrame())
 
     save_dir = None

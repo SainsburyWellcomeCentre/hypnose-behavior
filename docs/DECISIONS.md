@@ -3207,3 +3207,95 @@ tracebacks on sub-048 20260306 are the documented unreadable `SessionSettings` p
 **The single-reward family at `run.py:395-431` is untouched.** It is hardcoded outside the
 registry, sits inside the same buffer, and is on the Deferred list — registering it is a
 real item, not a cleanup.
+
+---
+
+## 38. Outputs are grouped by the stage that wrote them, and both layouts stay readable *(Analysis layout, 2026-08-21)*
+
+A results directory groups its outputs into `metric_analysis/`,
+`trial_classification_results/` and `movement_analysis/`. `manifest.json` and
+`summary.json` stay at the top level: they describe the session rather than any one
+stage, and all three groups' readers depend on them.
+
+`io/layout.table_path()` decides this for every reader, and `write_path()` -- the same
+lookup plus `mkdir(parents=True)` -- for every writer. The split exists because a lookup
+that creates directories would leave an empty `metric_analysis/` behind every time a
+reader asked for a file that is not there.
+
+### The fallback is per file, not per session
+
+`table_path` returns the grouped path when it exists, the flat path when *that* exists,
+and otherwise the grouped path -- which is what a writer needs. So a session
+half-migrated by an interrupted move still reads correctly, file by file, and the flip
+does **not** have to happen before the server re-analysis. That was the ordering
+constraint the plan carried for two revisions, and the fallback dissolves it.
+
+### `summary.json` is not contained in `manifest.json`
+
+Measured on `sub-057` `ses-060`: `summary` adds `counts` and `params` to the manifest's
+`created_at` and `session`, and all ten `params` keys are unique to it --
+`hidden_rule_odors`, `hidden_rule_positions`, `minimum_sampling_time_ms_by_odor`,
+`response_time_window_sec` and the rest. `manifest.analysis_parameters` is a different
+thing entirely: the two hardcoded knobs of section 31. Ten readers depend on
+`summary.json`, including `load_results.py`, which loads it for **every** session, so it
+stays.
+
+### Two outputs nothing ever read, and one that must not be deleted
+
+`response_time_analysis.json` and `indices/` were written by code no reader called.
+`index.json` alone is **777 KB against 165 KB for every other file in the session
+combined** -- 84% of the bytes -- and `build_classification_index` ran three times per
+session, `iterrows()`-ing every completed and aborted trial to build it. Removing the
+write made the whole chain dead: `trial_classification/index.py`, `_build_abortion_index`
+and `classification['aborted_index']` went with it.
+
+`analyze_response_times` **stays.** Its `per_trial` frame is merged into
+`completed_sequences_with_response_times` and becomes `trial_data`'s `response_time_ms`,
+`response_time_category` and `completed_window_latency_ms`. That is why the JSON's values
+matched the column -- the column is where the analysis reads them from. Only the file
+write and `merge.py`'s cross-run list aggregation, whose sole consumer was that write,
+were dead.
+
+> **`non_initiated_sequences`, `non_initiated_odor1_attempts` and `non_initiated_FA` are
+> deleted by nothing.** No current code path writes them (section 26's deletion guards
+> assert exactly that), so a re-analysis will never regenerate them -- but `io/loaders.py`
+> still offers all three from `.parquet` or `.csv` for older sessions. Unlike the two
+> artefacts above, they are *not* recoverable from anything that is still written, so they
+> are migrated with their family and left alone.
+
+### Migration was two steps because deletion is not a move
+
+The existing tree was migrated by two one-off scripts, run in that order: a mover that
+took a whitelist of names and deleted nothing, and a cleaner that deleted the two
+obsolete outputs, moved nothing, and dry-ran unless given `--delete`. So the tree could
+be migrated, read and checked before a byte was removed. The mover was idempotent,
+refused to overwrite an occupied destination, and **reported every top-level file it did
+not claim** -- which is the point of a whitelist: a results directory is shared with
+other repos, and a mover that guesses is a mover that moves someone else's file.
+
+They were deliberately **not** merged: they describe a one-time state of the tree, not
+how the pipeline works, and a migration script kept past its migration is a thing people
+re-run by accident. They live on the `analysis-layout` branch.
+
+### The bug the gate caught, and why it was invisible to reasoning
+
+`load_results.py` spelled `Path(results_dir) / "position_data.parquet"` by hand instead of
+asking `table_path`. For a grouped session that path does not exist, so the loader fell
+through to `build_position_data` off the JSON blobs -- **silently**, since deriving is a
+legitimate fallback. `regression` went RED on 36 fingerprints across `metrics`,
+`metrics_by_trial`, `metrics_by_poke` and `unreported_metrics`, every one of them a
+position- or poke-derived quantity, while `position_data` *itself* stayed green because
+the written table was fine. `table_path`'s own docstring names this case: *a caller
+spelling `results_dir / name` for itself is a caller this function cannot reach.* An audit
+of every filename literal found exactly one other, `parquet_peek._manifest_header`.
+
+### Gate
+
+`regression` **GREEN, 90 fingerprints** · `plot_regression` **GREEN, 44/44** ·
+`verify_scripts` GREEN · `check_imports` PASS · `check_layering` PASS.
+
+`find_tracking_file` moved from `utils/helpers.py` to `io/layout.py` on the way:
+`movement_analysis/` has to be searched before the flat directory, and `io/` imports
+`utils/`, so naming `io.layout` from there -- at module level *or* inside the function,
+since `check_layering` reads the AST -- turned `utils` <-> `io` into a directory cycle.
+It decides where inside a results directory to look, which is what `io/layout.py` is for.

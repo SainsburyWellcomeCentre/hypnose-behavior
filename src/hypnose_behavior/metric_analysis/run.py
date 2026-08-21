@@ -435,12 +435,12 @@ def run_all_metrics(results, save_txt=True, save_json=True, save_tables=True):
 
     # --- Save TXT and JSON ---
     if save_txt:
-        txt_path = layout.table_path(out_dir, f"metrics_{subjid}_{date}.txt")
+        txt_path = layout.write_path(out_dir, f"metrics_{subjid}_{date}.txt")
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write(buffer.getvalue())
         print(f"Saved metrics summary to {txt_path}")
     if save_json:
-        json_path = layout.table_path(out_dir, f"metrics_{subjid}_{date}.json")
+        json_path = layout.write_path(out_dir, f"metrics_{subjid}_{date}.json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(metrics, f, indent=2, default=str)
         print(f"Saved metrics values to {json_path}")
@@ -454,7 +454,7 @@ def run_all_metrics(results, save_txt=True, save_json=True, save_tables=True):
                             ("metrics_by_poke", _build_metrics_by_poke(results))):
             if not isinstance(table, pd.DataFrame) or table.empty:
                 continue
-            table_path = layout.table_path(out_dir, f"{name}.parquet")
+            table_path = layout.write_path(out_dir, f"{name}.parquet")
             try:
                 table.to_parquet(table_path, index=False)
                 print(f"Saved {name} ({len(table)} rows) to {table_path}")

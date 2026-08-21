@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from hypnose_behavior.io import layout
+
 __all__ = ["peek", "DEFAULT_ROWS"]
 
 # How many values `--column` lists. `--rows` overrides, and `--rows 0` prints the statistics alone.
@@ -84,13 +86,18 @@ def _truncate(text: str, limit: int) -> str:
 
 
 def _parquet_files(results_dir: Path) -> list[Path]:
-    """Every parquet in a directory, minus the AppleDouble shadows an SMB mount leaves.
+    """Every parquet under a results directory, minus the AppleDouble shadows an SMB
+    mount leaves.
 
     `._trial_data.parquet` is not a parquet; reading one raises, and listing it as a
-    table would be a lie about what the directory holds. `utils/helpers.find_tracking_file`
+    table would be a lie about what the directory holds. `layout.find_tracking_file`
     filters the same prefix for the same reason.
+
+    **`rglob`, because this is a peek at what a session holds.** Tables live in the
+    subfolder their producing stage owns, and a session written before that grouping is
+    flat; recursing reads both, which is also what a half-migrated tree needs.
     """
-    return sorted(p for p in results_dir.glob("*.parquet") if not p.name.startswith("._"))
+    return sorted(p for p in results_dir.rglob("*.parquet") if not p.name.startswith("._"))
 
 
 def _shape_from_footer(path: Path) -> tuple[int, int]:
@@ -137,7 +144,7 @@ def _manifest_header(results_dir: Path) -> list[str]:
     Absent for a stray parquet outside a `saved_analysis_results/`, which is a normal
     thing to peek at -- so its absence is silent rather than an error.
     """
-    path = Path(results_dir) / "manifest.json"
+    path = layout.table_path(results_dir, "manifest.json")
     if not path.exists():
         return []
     try:

@@ -770,7 +770,7 @@ def compute_speed_analysis(
             rec["threshold_beta"] = threshold_beta
             rec["speed_threshold"] = thr_max
 
-        analysis_path = layout.table_path(results_dir, "speed_analysis.parquet")
+        analysis_path = layout.write_path(results_dir, "speed_analysis.parquet")
         try:
             analysis_path.parent.mkdir(parents=True, exist_ok=True)
             pd.DataFrame(epoch_records).to_parquet(analysis_path, index=False)

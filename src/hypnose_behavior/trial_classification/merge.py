@@ -5,13 +5,10 @@ across the session.
 """
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Iterable
 
 import numpy as np
 import pandas as pd
-
-from hypnose_behavior.trial_classification.index import build_classification_index
 
 
 def _concat_align(dfs: Iterable[pd.DataFrame]) -> pd.DataFrame:
@@ -86,7 +83,6 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
     - Concatenates tables directly with run_id
     - **Keeps parameters per-run** (not collapsed to single values)
     - Stores per-run metadata (stage, parameters, timings)
-    - Rebuilds 'index' with build_classification_index on merged dict
     """
 
     if not run_results:
@@ -94,21 +90,16 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
 
     # Normalize inputs to classification dicts
     per_run_cls = []
-    per_run_rta = []
     per_run_metadata = []  # NEW: track all per-run info
-    
     for ridx, r in enumerate(run_results, start=1):
         if r is None:
             continue
         # Either top-level dict with 'classification' or directly a classification dict
         if isinstance(r, dict) and 'classification' in r:
             cls = r['classification'] or {}
-            rta = r.get('response_time_analysis') or cls.get('response_time_analysis') or {}
         else:
             cls = r or {}
-            rta = cls.get('response_time_analysis') or {}
         per_run_cls.append((ridx, cls))
-        per_run_rta.append((ridx, rta))
 
         # Collect per-run parameters and metadata
         per_run_metadata.append({
@@ -187,17 +178,6 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
         df = merged.get(key)
         if isinstance(df, pd.DataFrame) and not df.empty and 'sequence_start' in df.columns:
             merged[key] = df.sort_values(['sequence_start', 'run_id'] if 'run_id' in df.columns else ['sequence_start']).reset_index(drop=True)
-
-    # Merge response_time_analysis lists
-    rta_agg = defaultdict(list)
-    for _, rta in per_run_rta:
-        for k in ['rewarded_response_times', 'unrewarded_response_times',
-                  'timeout_delayed_response_times', 'timeout_response_delay_times',
-                  'all_response_times']:
-            vals = rta.get(k, [])
-            if isinstance(vals, (list, tuple, np.ndarray)):
-                rta_agg[k].extend(list(vals))
-    merged['response_time_analysis'] = dict(rta_agg)
 
     # ============ NEW: Store per-run metadata instead of collapsing ============
     merged['per_run_parameters'] = per_run_metadata
@@ -302,11 +282,6 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
             }
         })
     merged['runs'] = runs_meta
-
-    try:
-        merged['index'] = build_classification_index(merged)
-    except Exception:
-        merged['index'] = {}
 
     if verbose:
         # Warn if parameters differ across runs
