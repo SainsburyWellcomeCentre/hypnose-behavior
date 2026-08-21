@@ -20,7 +20,6 @@ from hypnose_behavior.metric_analysis.metrics.false_alarm import (
 )
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
@@ -37,7 +36,7 @@ from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.visualization.primitives import mean_sem
 from hypnose_behavior.io.loaders import (
     _load_position_data,
-    _load_trial_views,
+    iter_sessions,
 )
 from hypnose_behavior.visualization.prep import _computed_metrics
 
@@ -133,11 +132,11 @@ def plot_abortion_and_fa_rates(
     fa_port_rows = []
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_refs = _filter_sessions(subj_dir, dates, **select)
-        for ref in ses_refs:
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+        ses_recs = iter_sessions(subj_dir, dates, **select)
+        for rec in ses_recs:
+            date_str = rec.date_str
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
             
             # Computed through the registry rather than read from metrics_*.json.
@@ -195,7 +194,7 @@ def plot_abortion_and_fa_rates(
             
             # ============ FA PORT RATIO - from trial_data aborted_fa ============
             try:
-                views = _load_trial_views(results_dir)
+                views = rec.views
                 ab_det = views.get("aborted_fa", pd.DataFrame())
                 if not ab_det.empty and "fa_label" in ab_det.columns:
                     ab_det = ab_det[fa_filter_fn(ab_det["fa_label"])]
@@ -537,15 +536,15 @@ def plot_fa_ratio_a_over_sessions(
     fa_data = {}  # {odor: [(session_num, ratio, n_a, n_b, n_total), ...]}
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_refs = _filter_sessions(subj_dir, dates, **select)
+        ses_recs = iter_sessions(subj_dir, dates, **select)
         
-        for session_num, ref in enumerate(ses_refs, start=1):
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+        for session_num, rec in enumerate(ses_recs, start=1):
+            date_str = rec.date_str
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
             
-            views = _load_trial_views(results_dir)
+            views = rec.views
             ab_det = views["aborted_fa"]
             if not ab_det.empty:
                 needed_cols = ['fa_label', 'last_odor_name', 'fa_port']
@@ -757,12 +756,12 @@ def plot_false_alarm_rate_by_position(
                 print(f"Warning: No subject directory found for {subj_str}")
             continue
 
-        ses_refs = _filter_sessions(subj_dir, subj_dates, **select)
-        for ref in ses_refs:
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+        ses_recs = iter_sessions(subj_dir, subj_dates, **select)
+        for rec in ses_recs:
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
-            views = _load_trial_views(results_dir)
+            views = rec.views
             td = views["trial_data"]
             # Deliberately not guarded on a `presentations` column: the metric takes its
             # denominator from `position_data`, and a guard on a column nothing here reads
@@ -963,13 +962,13 @@ def plot_fa_ratio_by_abort_odor(
     }
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_refs = _filter_sessions(subj_dir, dates, **select)
+        ses_recs = iter_sessions(subj_dir, dates, **select)
         
-        for session_num, ref in enumerate(ses_refs, 1):
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
+        for session_num, rec in enumerate(ses_recs, 1):
+            date_str = rec.date_str
+            results_dir = rec.results_dir
             
-            if not results_dir.exists():
+            if not rec.analysed:
                 continue
             
             summary_path = layout.table_path(results_dir, "summary.json")
@@ -984,7 +983,7 @@ def plot_fa_ratio_by_abort_odor(
                 if not hr_odors:
                     continue
 
-                views = _load_trial_views(results_dir)
+                views = rec.views
                 df_hr = views.get("aborted_hr", pd.DataFrame())
                 df_ab = views.get("aborted", pd.DataFrame())
                 if df_hr.empty or df_ab.empty:

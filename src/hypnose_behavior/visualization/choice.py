@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from hypnose_behavior.io.load_results import load_session_results
 from hypnose_behavior.io import layout
-from hypnose_behavior.io.layout import _filter_sessions, derivatives, session_selectors
+from hypnose_behavior.io.layout import derivatives, session_selectors
 from hypnose_behavior.io.paths import (
     get_rawdata_root,
     get_derivatives_root,
@@ -18,7 +18,7 @@ from hypnose_behavior.io.paths import (
 import re
 import numpy as np
 from hypnose_behavior.io.save import save_figure
-from hypnose_behavior.io.loaders import _load_trial_views
+from hypnose_behavior.io.loaders import iter_sessions
 
 
 
@@ -101,21 +101,21 @@ def plot_choice_history(
     subject_dir = derivatives.subject_dir(subjid)
     
     # Get session directories
-    ses_refs = _filter_sessions(subject_dir, dates, **select)
-    if not ses_refs:
+    ses_recs = iter_sessions(subject_dir, dates, **select)
+    if not ses_recs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
     
     # Collect all trials across sessions
     all_trials = []
     
-    for session_idx, ref in enumerate(ses_refs):
-        date_str = ref.date
-        results_dir = layout.results_dir(ref)
-        if not results_dir.exists():
+    for session_idx, rec in enumerate(ses_recs):
+        date_str = rec.date_str
+        results_dir = rec.results_dir
+        if not rec.analysed:
             continue
 
         # Prefer trial_data views (new schema); fallback to legacy load_session_results tables
-        views = _load_trial_views(results_dir)
+        views = rec.views
 
         def _get_odor(row):
             for cand in ["last_odor_name", "last_odor", "odor", "odor_name"]:

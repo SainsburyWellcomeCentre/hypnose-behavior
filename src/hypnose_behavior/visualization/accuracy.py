@@ -21,7 +21,6 @@ from hypnose_behavior.metric_analysis.metrics.hidden_rule import hidden_rule_mas
 from hypnose_behavior.metric_analysis.resolvers import by_group
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
@@ -37,7 +36,7 @@ from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.visualization.panels import _clean_graph
 from hypnose_behavior.io.loaders import (
     _load_table_with_trial_data,
-    _load_trial_views,
+    iter_sessions,
 )
 from hypnose_behavior.visualization.prep import (
     _computed_metric,
@@ -145,11 +144,11 @@ def plot_decision_accuracy_by_odor(
         return collected
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_refs = _filter_sessions(subj_dir, dates, **select)
-        for ref in ses_refs:
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+        ses_recs = iter_sessions(subj_dir, dates, **select)
+        for rec in ses_recs:
+            date_str = rec.date_str
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
             
             # Computed through the registry, not read from metrics_*.json --
@@ -157,7 +156,7 @@ def plot_decision_accuracy_by_odor(
             # obtained both ways (`docs/DECISIONS.md` section 5). `_computed_metric`
             # returns the saved key's exact shape, so `_collect_odor_acc_rows`
             # below is unchanged.
-            td = _load_trial_views(results_dir).get("trial_data", pd.DataFrame())
+            td = rec.views.get("trial_data", pd.DataFrame())
             if td.empty:
                 continue
 
@@ -357,11 +356,11 @@ def plot_decision_accuracy_rolling_average(
     # Collect per-session trial tables in chronological order.
     session_rows = []
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_refs = _filter_sessions(subj_dir, dates, **select)
-        for ref in ses_refs:
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+        ses_recs = iter_sessions(subj_dir, dates, **select)
+        for rec in ses_recs:
+            date_str = rec.date_str
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
             td = _load_table_with_trial_data(results_dir, "trial_data")
             if td.empty:
@@ -381,7 +380,7 @@ def plot_decision_accuracy_rolling_average(
 
             td = td.reset_index(drop=True)
             td["date"] = int(date_str) if str(date_str).isdigit() else date_str
-            td["_session_uid"] = str(ref.path.name)
+            td["_session_uid"] = str(rec.ref.path.name)
             session_rows.append(td)
 
     if not session_rows:
@@ -679,7 +678,7 @@ def plot_decision_accuracy(
         """Reject malformed date tokens (must be 8-digit YYYYMMDD).
 
         A typo like ``2025118`` (7 digits) or ``202251120`` (9 digits) would
-        otherwise be treated by ``_filter_sessions`` as a numeric range
+        otherwise be treated by ``iter_sessions`` as a numeric range
         endpoint and silently match every real session, so we guard here.
         """
         def _ok(tok):
@@ -731,11 +730,11 @@ def plot_decision_accuracy(
             continue
 
         main_vals, hr_vals = [], []
-        for ref in _filter_sessions(subj_dir, subj_dates, **select):
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+        for rec in iter_sessions(subj_dir, subj_dates, **select):
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
-            td = _load_trial_views(results_dir)["trial_data"]
+            td = rec.views["trial_data"]
             if td.empty or "response_time_category" not in td.columns:
                 continue
             non_hr_acc, hr_acc = _decision_acc_split(td)

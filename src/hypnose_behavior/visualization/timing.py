@@ -18,7 +18,6 @@ from hypnose_behavior.metric_analysis.metrics.false_alarm import FA_avg_response
 from hypnose_behavior.metric_analysis.metrics.timing import avg_response_time
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_sessions,
     _iter_subject_dirs,
     session_selectors,
 )
@@ -34,7 +33,7 @@ from hypnose_behavior.visualization.primitives import (
     mean_sem,
     rolling_windows,
 )
-from hypnose_behavior.io.loaders import _load_trial_views
+from hypnose_behavior.io.loaders import iter_sessions
 
 
 
@@ -90,18 +89,18 @@ def plot_response_times_completed_vs_fa(
     rows = []
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_refs = _filter_sessions(subj_dir, dates, **select)
-        for ref in ses_refs:
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+        ses_recs = iter_sessions(subj_dir, dates, **select)
+        for rec in ses_recs:
+            date_str = rec.date_str
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
 
             # Both means come from the canonical metrics over trial_data. **Never add
             # a fall-back to metrics_*.json**: a saved JSON predates any later metric
             # change, so two figures could show this quantity and disagree.
             # See DECISIONS.md section 5.
-            td = _load_trial_views(results_dir).get("trial_data", pd.DataFrame())
+            td = rec.views.get("trial_data", pd.DataFrame())
 
             completed_rt = avg_response_time(td).get(
                 "Average Response Time (Rewarded + Unrewarded)")

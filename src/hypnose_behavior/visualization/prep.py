@@ -32,14 +32,13 @@ import matplotlib.colors as mcolors
 
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
     session_selectors,
 )
 from hypnose_behavior.io.load_results import load_results_dir, load_session_results
-from hypnose_behavior.io.loaders import _load_trial_views
+from hypnose_behavior.io.loaders import _load_trial_views, iter_sessions
 from hypnose_behavior.metric_analysis.metrics.hidden_rule import hr_odor_associations
 from hypnose_behavior.metric_analysis.run import REGISTRY, metric_value
 from hypnose_behavior.io.paths import (
@@ -142,13 +141,13 @@ def _collect_sessions(subjids, dates, *, ses=None, index=None,
             continue
         date_vals = []
         results_dirs = []
-        for ref in _filter_sessions(subj_dir, dates, **select):
-            date_part = ref.date
+        for rec in iter_sessions(subj_dir, dates, **select):
+            date_part = rec.date_str
             date_val = _normalize_date(date_part)
             if date_val is None:
                 continue
             date_vals.append(date_val)
-            results_dirs.append(layout.results_dir(ref))
+            results_dirs.append(rec.results_dir)
         if results_dirs:
             yield subjid, date_vals, results_dirs
 
@@ -409,10 +408,10 @@ def _load_subject_trial_timeline(subjid, subj_dates, *, ses=None, index=None,
         return None
 
     sessions = []
-    for ref in _filter_sessions(subj_dir, subj_dates, **select):
-        date_str = ref.date
-        results_dir = layout.results_dir(ref)
-        if results_dir.exists():
+    for rec in iter_sessions(subj_dir, subj_dates, **select):
+        date_str = rec.date_str
+        results_dir = rec.results_dir
+        if rec.analysed:
             sessions.append((date_str, results_dir))
     sessions.sort(key=lambda t: t[0])
 

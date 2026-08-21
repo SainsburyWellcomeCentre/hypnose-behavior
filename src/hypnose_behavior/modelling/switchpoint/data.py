@@ -19,9 +19,8 @@ from typing import Optional, Sequence, Union
 import numpy as np
 import pandas as pd
 
-from hypnose_behavior.io.loaders import _load_trial_views, _odor_to_letter
-from hypnose_behavior.io import layout
-from hypnose_behavior.io.layout import _filter_sessions, _iter_subject_dirs
+from hypnose_behavior.io.loaders import _odor_to_letter, iter_sessions
+from hypnose_behavior.io.layout import _iter_subject_dirs
 
 # Truthy spellings of hidden_rule_success: bool in parquet, str via the CSV fallback.
 # Mirrors the coercion the visualization helpers use.
@@ -144,11 +143,11 @@ def prepare_subject(
     subj_dir = subj_dirs[0]
 
     segments, ab_segments, labels, sizes = [], [], [], []
-    for ref in _filter_sessions(subj_dir, date_range):
-        results_dir = layout.results_dir(ref)
-        if not results_dir.exists():
+    for rec in iter_sessions(subj_dir, date_range):
+        results_dir = rec.results_dir
+        if not rec.analysed:
             continue
-        views = _load_trial_views(results_dir)
+        views = rec.views
         td = views["rewarded"] if rewarded_only else views["completed"]
         if td.empty:
             continue
@@ -156,7 +155,7 @@ def prepare_subject(
             td = td.sort_values("global_trial_id")
         segments.append(_short_mask(td).to_numpy(dtype=np.int8))
         ab_segments.append(_ab_label(td).to_numpy(dtype="<U1"))
-        labels.append(ref.date)
+        labels.append(rec.date_str)
         sizes.append(len(td))
 
     s = np.concatenate(segments) if segments else np.zeros(0, dtype=np.int8)

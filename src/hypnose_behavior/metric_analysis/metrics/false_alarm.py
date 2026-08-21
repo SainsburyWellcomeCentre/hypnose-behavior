@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from IPython.display import display
 
-from hypnose_behavior.io.loaders import _load_trial_views
+from hypnose_behavior.io.loaders import iter_sessions
 from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.frames import (
     odor_letter,
@@ -33,8 +33,7 @@ from hypnose_behavior.metric_analysis.metrics.common import (
     _latency_ms,
     _reduce_rate,
 )
-from hypnose_behavior.io import layout
-from hypnose_behavior.io.layout import _filter_sessions, _iter_subject_dirs
+from hypnose_behavior.io.layout import _iter_subject_dirs
 from hypnose_behavior.metric_analysis.registry import (
     as_dict,
     metric,
@@ -542,16 +541,16 @@ Its FA filter is every `FA_*` label, wider than `plot_fa_ratio_a_over_sessions`'
     rows = []
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_refs = _filter_sessions(subj_dir, dates)
+        ses_recs = iter_sessions(subj_dir, dates)
 
-        for session_num, ref in enumerate(ses_refs, start=1):
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
+        for session_num, rec in enumerate(ses_recs, start=1):
+            date_str = rec.date_str
+            results_dir = rec.results_dir
 
-            if not results_dir.exists():
+            if not rec.analysed:
                 continue
 
-            ab_det = _load_trial_views(results_dir)["aborted_fa"]
+            ab_det = rec.views["aborted_fa"]
             if not ab_det.empty:
                 needed_cols = ['fa_label', 'last_odor_name', 'fa_port']
                 ab_det = ab_det[[col for col in needed_cols if col in ab_det.columns]]

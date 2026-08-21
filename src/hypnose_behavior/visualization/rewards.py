@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 from hypnose_behavior.metric_analysis.metrics.accuracy import decision_accuracy
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_sessions,
     derivatives,
     normalize_subjid,
     session_selectors,
@@ -26,7 +25,7 @@ from hypnose_behavior.io.paths import (
 import numpy as np
 import json
 from hypnose_behavior.io.save import save_figure
-from hypnose_behavior.io.loaders import _load_trial_views
+from hypnose_behavior.io.loaders import _load_trial_views, iter_sessions
 
 
 
@@ -64,7 +63,7 @@ def plot_cumulative_rewards(
         Subject ID(s)
     dates : list, tuple, dict, or None
         Dates to include. If a dict, must map subjid → date range (each value
-        is itself a list/tuple/None passed through to ``_filter_sessions``
+        is itself a list/tuple/None passed through to ``iter_sessions``
         for that subject). This allows each subject to be filtered to its own
         date window — useful for comparing animals across matched training
         conditions when they are offset in calendar time. Subjids not present
@@ -157,14 +156,14 @@ def plot_cumulative_rewards(
             print(f"Warning: No subject directory found for {subj_str}")
             continue
 
-        ses_refs = _filter_sessions(subj_dir, subj_dates, **select)
-        for ref in ses_refs:
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+        ses_recs = iter_sessions(subj_dir, subj_dates, **select)
+        for rec in ses_recs:
+            date_str = rec.date_str
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
             
-            views = _load_trial_views(results_dir)
+            views = rec.views
 
             # The threshold gate is the canonical decision_accuracy, not a
             # recompute of it.
@@ -468,10 +467,10 @@ def plot_cumulative_rewards_by_trial(
 
         # Sessions in chronological (date) order.
         sessions = []
-        for ref in _filter_sessions(subj_dir, subj_dates, **select):
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
-            if results_dir.exists():
+        for rec in iter_sessions(subj_dir, subj_dates, **select):
+            date_str = rec.date_str
+            results_dir = rec.results_dir
+            if rec.analysed:
                 sessions.append((date_str, results_dir))
         sessions.sort(key=lambda t: t[0])
 

@@ -20,12 +20,12 @@ from typing import (
 )
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
     session_selectors,
 )
+from hypnose_behavior.io.loaders import iter_sessions
 from hypnose_behavior.io.paths import (
     get_rawdata_root,
     get_derivatives_root,
@@ -168,11 +168,11 @@ def plot_behavior_metrics(
 
     # Gather sessions
     for sid, subj_dir, subj_dates in subject_iter:
-        ses_refs = _filter_sessions(subj_dir, subj_dates, **select)
-        for session_num, ref in enumerate(ses_refs, start=1):
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+        ses_recs = iter_sessions(subj_dir, subj_dates, **select)
+        for session_num, rec in enumerate(ses_recs, start=1):
+            date_str = rec.date_str
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
             # Protocol (for coloring)
             protocol = _load_protocol_from_summary(results_dir)

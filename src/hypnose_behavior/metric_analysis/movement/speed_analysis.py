@@ -28,13 +28,12 @@ import pandas as pd
 from hypnose_behavior.frames import position_entries_by_trial
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
     session_selectors,
 )
-from hypnose_behavior.io.loaders import _load_position_data, _load_trial_views
+from hypnose_behavior.io.loaders import _load_position_data, iter_sessions
 from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
 from hypnose_behavior.utils.helpers import _update_cache
@@ -134,8 +133,8 @@ def run_speed_analysis_batch(
     processed: list[tuple[int, Union[int, str]]] = []
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, subjids):
-        ses_refs = _filter_sessions(subj_dir, dates, **select)
-        if not ses_refs:
+        ses_recs = iter_sessions(subj_dir, dates, **select)
+        if not ses_recs:
             if verbose:
                 print(f"[run_speed_analysis_batch] No sessions found for sub-{sid:03d} with given dates.")
             continue
@@ -143,8 +142,8 @@ def run_speed_analysis_batch(
         # Extract ordered unique dates from session directories
         date_list = []
         seen_dates = set()
-        for ref in ses_refs:
-            date_str = ref.date
+        for rec in ses_recs:
+            date_str = rec.date_str
             try:
                 date_val = int(date_str) if str(date_str).isdigit() else date_str
             except Exception:
@@ -294,8 +293,8 @@ def compute_speed_analysis(
     derivatives_dir = get_derivatives_root()
     subj_dir = derivatives.subject_dir(subjid)
 
-    ses_refs = _filter_sessions(subj_dir, dates)
-    if not ses_refs:
+    ses_recs = iter_sessions(subj_dir, dates)
+    if not ses_recs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
     bin_s = bin_ms / 1000.0
@@ -486,10 +485,10 @@ def compute_speed_analysis(
     per_session = []
     combined_data = {"rewarded": [], "unrewarded": [], "fa": []}
 
-    for ref in ses_refs:
-        date_str = ref.date
-        results_dir = layout.results_dir(ref)
-        if not results_dir.exists():
+    for rec in ses_recs:
+        date_str = rec.date_str
+        results_dir = rec.results_dir
+        if not rec.analysed:
             continue
 
         try:
@@ -525,7 +524,7 @@ def compute_speed_analysis(
             )
         tracking_smooth = tracking_smooth.dropna(subset=["X", "Y"])
 
-        views = _load_trial_views(results_dir)
+        views = rec.views
         trial_data = views.get("trial_data", pd.DataFrame()).copy()
         if trial_data.empty:
             print(f"No trial_data for {date_str}; skipping")

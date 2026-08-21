@@ -11,6 +11,8 @@ import os
 import re
 import json
 import zoneinfo
+from dataclasses import dataclass
+from functools import cached_property
 from glob import glob
 from pathlib import Path
 from datetime import datetime, timezone
@@ -28,7 +30,7 @@ from hypnose_behavior.io.load_results import (  # noqa: F401
 )
 from hypnose_behavior.io.paths import get_rawdata_root, get_derivatives_root, get_server_root
 from hypnose_behavior.io import layout
-from hypnose_behavior.io.layout import rawdata
+from hypnose_behavior.io.layout import SessionRef, rawdata
 from hypnose_behavior.utils.helpers import vprint, _get_from_cache, _update_cache
 from hypnose_behavior.io.readers import (  # noqa: F401
     SessionData, Video, TimestampedCsvReader,
@@ -750,6 +752,56 @@ def _load_trial_views(results_dir: Path) -> dict[str, pd.DataFrame]:
         "aborted_fa": aborted_fa,
         "aborted_hr": aborted_hr,
     }
+
+
+@dataclass(frozen=True)
+class SessionRecord:
+    """One matched session, carrying what a per-session loop reads about it.
+
+    `ref` and `results_dir` and `date_str` are known the moment the session is
+    matched. `analysed` and `views` are **lazy and cached**: the `exists()` stat and
+    the `trial_data` read happen on first access, so a loop that skips a session on
+    some earlier test never touches the filesystem for it.
+    """
+
+    ref: SessionRef
+    results_dir: Path
+    date_str: str
+
+    @cached_property
+    def analysed(self) -> bool:
+        """Whether this session has a `saved_analysis_results` directory."""
+        return self.results_dir.exists()
+
+    @cached_property
+    def views(self) -> dict[str, pd.DataFrame]:
+        """`_load_trial_views(self.results_dir)`, read once per record."""
+        return _load_trial_views(self.results_dir)
+
+
+def iter_sessions(subj_dir, dates=None, **select) -> list[SessionRecord]:
+    """The sessions of `subj_dir` matching `dates` / `select`, as `SessionRecord`s.
+
+    The selection is `layout._filter_sessions`' and is passed through untouched --
+    same sessions, same order, one record each. **A `list`, and one record per
+    *matched* session, not per analysed one**: callers count with
+    `enumerate(..., 1)`, take `len()` and test truthiness on this result, and each
+    of those is a statement about what was matched. Test `record.analysed` inside
+    the loop to skip the ones with no saved analysis:
+
+        for session_num, rec in enumerate(iter_sessions(subj_dir, dates), 1):
+            if not rec.analysed:
+                continue
+            views = rec.views
+
+    A record consumed before that test still has a usable `results_dir` and
+    `date_str`, which is what the callers that gate on something else -- a
+    `summary.json`, or nothing at all -- need from it.
+    """
+    return [
+        SessionRecord(ref=ref, results_dir=layout.results_dir(ref), date_str=ref.date)
+        for ref in layout._filter_sessions(subj_dir, dates, **select)
+    ]
 
 
 def _odor_to_letter(value) -> str:

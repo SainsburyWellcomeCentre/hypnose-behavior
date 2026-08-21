@@ -13,7 +13,6 @@ from hypnose_behavior.metric_analysis.metrics.sampling import (
 )
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
@@ -30,7 +29,7 @@ from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.visualization.primitives import mean_sem
 from hypnose_behavior.io.loaders import (
     _load_position_data,
-    _load_trial_views,
+    iter_sessions,
 )
 from hypnose_behavior.visualization.prep import (
     _ODOR_A_COLOR,
@@ -78,14 +77,14 @@ def plot_sampling_times_analysis(
     session_by_odor = []
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_refs = _filter_sessions(subj_dir, dates, **select)
-        for session_num, ref in enumerate(ses_refs, start=1):
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+        ses_recs = iter_sessions(subj_dir, dates, **select)
+        for session_num, rec in enumerate(ses_recs, start=1):
+            date_str = rec.date_str
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
 
-            td = _load_trial_views(results_dir)["trial_data"]
+            td = rec.views["trial_data"]
             position_data = _load_position_data(results_dir, td)
             if position_data.empty:
                 continue
@@ -488,13 +487,13 @@ def plot_poke_duration_by_position(
             print(f"Warning: No date range provided in dict for subject {sid}, skipping")
             continue
 
-        ses_refs = _filter_sessions(subj_dir, subj_dates, **select)
-        for ref in ses_refs:
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+        ses_recs = iter_sessions(subj_dir, subj_dates, **select)
+        for rec in ses_recs:
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
             position_data = _load_position_data(
-                results_dir, _load_trial_views(results_dir)["trial_data"])
+                results_dir, rec.views["trial_data"])
 
             # Collapse each session to one mean per position per trial type.
             for trial_type, aborted in (("completed", False), ("aborted", True)):
@@ -832,14 +831,14 @@ def plot_poke_duration_by_odor(
         session_series = []  # per session-day: {series_key: [poke_ms, ...]}
         session_ind = []     # per session-day: {odor_letter: [poke_ms, ...]} (for show_lines)
         started = False
-        for ref in _filter_sessions(subj_dir, subj_date, **select):
-            date_str = ref.date
+        for rec in iter_sessions(subj_dir, subj_date, **select):
+            date_str = rec.date_str
             if not (str(date_str).isdigit() and len(str(date_str)) == 8):
                 continue
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
-            td = _load_trial_views(results_dir)["trial_data"]
+            td = rec.views["trial_data"]
             raw = _extract_odor_poke_ms(td, results_dir)
             if not started:
                 if not raw:

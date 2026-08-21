@@ -24,7 +24,6 @@ from hypnose_behavior.metric_analysis.metrics.hidden_rule import (
 )
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_sessions,
     _iter_subject_dirs,
     derivatives,
     normalize_subjid,
@@ -42,8 +41,8 @@ from hypnose_behavior.visualization.primitives import mean_sem
 from hypnose_behavior.io.loaders import (
     _load_position_data,
     _load_table_with_trial_data,
-    _load_trial_views,
     _odor_to_letter,
+    iter_sessions,
 )
 from hypnose_behavior.visualization.prep import (
     _build_odor_colors,
@@ -179,11 +178,11 @@ def hidden_rule_and_false_alarm(
     rows = []
     observed_hr_letters = set()
     for sid, subj_dir, subj_dates in subject_iter:
-        ses_refs = _filter_sessions(subj_dir, subj_dates, **select)
-        for session_num, ref in enumerate(ses_refs, start=1):
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+        ses_recs = iter_sessions(subj_dir, subj_dates, **select)
+        for session_num, rec in enumerate(ses_recs, start=1):
+            date_str = rec.date_str
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
 
             # Hidden rule detection rate, computed through the registry rather
@@ -210,7 +209,7 @@ def hidden_rule_and_false_alarm(
 
             # Per-odor false alarm rate; odors with a zero denominator are omitted
             # by the metric rather than drawn as 0.
-            td = _load_trial_views(results_dir)["trial_data"]
+            td = rec.views["trial_data"]
             rates = fa_rate_by_odor(td, fa_types=fa_label, odors=odors_list)
             for o, rate in rates.items():
                 rows.append({
@@ -511,13 +510,13 @@ def plot_fa_ratio_by_hr_position(
     rows = []  # {date, session_num, odor_num, hr_odor, category, port_a, port_b, total, ratio}
     
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_refs = _filter_sessions(subj_dir, dates, **select)
+        ses_recs = iter_sessions(subj_dir, dates, **select)
         
-        for session_num, ref in enumerate(ses_refs, 1):
-            date_str = ref.date
-            results_dir = layout.results_dir(ref)
+        for session_num, rec in enumerate(ses_recs, 1):
+            date_str = rec.date_str
+            results_dir = rec.results_dir
             
-            if not results_dir.exists():
+            if not rec.analysed:
                 continue
             
             summary_path = layout.table_path(results_dir, "summary.json")
@@ -537,7 +536,7 @@ def plot_fa_ratio_by_hr_position(
                 if not hr_odors:
                     continue
 
-                views = _load_trial_views(results_dir)
+                views = rec.views
                 df_hr = views.get("aborted_hr", pd.DataFrame())
                 df_ab = views.get("aborted", pd.DataFrame())
                 if df_hr.empty or df_ab.empty:
@@ -955,17 +954,17 @@ def plot_hidden_rule_abort_poke_gap(
     rows = []
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_refs = _filter_sessions(subj_dir, dates, **select)
+        ses_recs = iter_sessions(subj_dir, dates, **select)
 
-        for ref in ses_refs:
-            date_str = ref.date
+        for rec in ses_recs:
+            date_str = rec.date_str
             try:
                 date_val = int(date_str)
             except Exception:
                 date_val = date_str
 
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
 
             td = _load_table_with_trial_data(results_dir, "trial_data")
@@ -1159,16 +1158,16 @@ def plot_hr_reward_fraction_over_trials(
 
     frames = []
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
-        ses_refs = _filter_sessions(subj_dir, dates, **select)
-        for ref in ses_refs:
-            date_str = ref.date
+        ses_recs = iter_sessions(subj_dir, dates, **select)
+        for rec in ses_recs:
+            date_str = rec.date_str
             try:
                 date_val = int(date_str)
             except Exception:
                 date_val = date_str
 
-            results_dir = layout.results_dir(ref)
-            if not results_dir.exists():
+            results_dir = rec.results_dir
+            if not rec.analysed:
                 continue
 
             td = _load_table_with_trial_data(results_dir, "trial_data")

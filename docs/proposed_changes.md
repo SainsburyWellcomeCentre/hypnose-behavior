@@ -84,7 +84,7 @@ tolerate.
 | 5 | ~~the `outcome.py` exception — decide and whitelist~~ **done 2026-08-20** | `check_layering` | none |
 | 6 | ~~`results_dir()` / `table_path()` and the 47 sites~~ **done 2026-08-20** | `regression`, `plot_regression` | low |
 | 7 | ~~retire `_filter_session_dirs` → `SessionRef`~~ **done 2026-08-20** | `plot_regression`, `regression` | medium |
-| 8 | `prep.iter_sessions()` and the plotter preambles | `plot_regression` (44) | medium |
+| 8 | ~~`iter_sessions()` and the plotter preambles~~ **done 2026-08-21** | `plot_regression` (44) | medium |
 | 9 | collapse `metric_value` / `run_all_metrics` | `regression` | low |
 
 Item 9 is independent of 1–8 and can be taken at any point as a short session.
@@ -442,8 +442,8 @@ and stops being true the moment the shim goes.
 
 **The 37 `results_dir.exists()` guards belong to item 8, not here.** A `SessionRef` says a
 session is in the derivatives tree; it says nothing about whether that session has been
-*analysed*, which is what the guard tests. `iter_sessions()` yields one record per
-*analysed* session, and that is what retires them.
+*analysed*, which is what the guard tests. `iter_sessions()` puts that question on the
+record as `rec.analysed`, and that is what retires them.
 
 **The date substitution cannot move a value — structural, not sampled.** `SESSION_DIR_RE`
 is `^ses-([^_]+)_date-(\d{8})$`: the `ses` token forbids `_` and the date group is anchored
@@ -475,7 +475,44 @@ plus `regression` and `verify_scripts`.
 
 ---
 
-## Item 8 — `prep.iter_sessions()` and the plotter preambles
+## Item 8 — `iter_sessions()` and the plotter preambles
+
+**Done 2026-08-21.** `io/loaders.py` holds `SessionRecord` and `iter_sessions`, and the
+**32 loops across 18 files** read `rec.date_str`, `rec.results_dir`, `rec.analysed` and
+`rec.views` instead of rebuilding all four. Two premises of the item below did not survive
+measurement, and both are recorded in `DECISIONS.md` section 36.
+
+**1. It yields one record per *matched* session, not per analysed one.** "Yields only
+analysed sessions" is a no-op at 20 of the 32 loops and a behaviour change at 12: the eight
+`enumerate(..., 1)` counters bind the counter *before* the guard, so a skipped session
+consumes a number, and `movement/summary_stats.py` reads the matched count twice more
+(`:187` `len()` decides which figures are drawn, `:589` builds a date→0..N-1 map). Measured
+on the tree: **3 of 1,193 sessions are matched but unanalysed** — sub-040 at matched
+position 41, sub-045 at 54, sub-048 at 50 — so pre-filtering would shift every x after the
+gap. `plot_regression` cannot see it: all 44 cases name explicit date lists and **none spans
+a gap**, so a GREEN would have meant "I did not look". The 29 guards become
+`if not rec.analysed: continue` — one stat, moved onto the record, not re-spelled per site.
+
+**2. It lives in `io/loaders.py`, not `visualization/prep.py`.** Five of the 32 loops are in
+`metric_analysis/` (4) and `modelling/` (1), and `visualization → metric_analysis` (26
+edges) and `visualization → modelling` (4) already exist, so importing it from `prep.py`
+creates two new undeclared directory cycles. `loaders.py` already imports `io.layout` and
+already defines `_load_trial_views`, so the definition needs **no import of its own**, and
+16 of the 18 files already import it.
+
+`analysed` and `views` are lazy `cached_property`s, so the `exists()` stat and the
+`trial_data` read happen exactly where they happen today — which is what keeps
+`sampling.py:837`, whose date check `continue`s *before* the stat, unchanged.
+`_filter_sessions` stays: it goes from 32 call sites to **one**, inside `iter_sessions`.
+
+**Gate.** `plot_regression` 44/44 GREEN, **3,437,588 drawn values** — the identical count
+item 7 recorded · `regression` GREEN 9/9, 90 fingerprints · `verify_scripts` GREEN ·
+`check_imports` PASS · `check_layering` PASS, one `DECLARED` entry, one directory cycle,
+**328 edges unchanged**. `modelling/switchpoint/data.py:147`, the site no gate reaches, was
+verified by hand: `prepare_subject` compared elementwise against the same loop driven by the
+old spelling, over both `rewarded_only` settings of all 8 fixture subjects — **16 pairs, 208
+keys, ~365,000 values, 0 differing** — and the comparison was proved able to fail on a
+flipped value, a dropped session and a shifted boundary.
 
 **Do not split `visualization/` again.** Phase 10 already moved the boundary *between*
 files (`3604 -> 4 modules`, `3efa16c`); doing it again redistributes 16,185 lines without

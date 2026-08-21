@@ -24,14 +24,13 @@ from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.utils.helpers import _get_from_cache, _update_cache
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_sessions,
     derivatives,
     normalize_subjid,
     session_selectors,
 )
 from hypnose_behavior.io.loaders import (
     _load_position_data,
-    _load_trial_views,
+    iter_sessions,
 )
 from hypnose_behavior.visualization.prep import smooth_xy
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
@@ -136,8 +135,8 @@ def plot_epoch_speeds_by_condition(
     derivatives_dir = get_derivatives_root()
     subj_dir = derivatives.subject_dir(subjid)
 
-    ses_refs = _filter_sessions(subj_dir, dates, **select)
-    if not ses_refs:
+    ses_recs = iter_sessions(subj_dir, dates, **select)
+    if not ses_recs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
     bin_s = bin_ms / 1000.0
@@ -146,10 +145,10 @@ def plot_epoch_speeds_by_condition(
     combined_data = {"rewarded": [], "unrewarded": [], "fa": []}
     _warned_missing_threshold = False
 
-    for ref in ses_refs:
-        date_str = ref.date
-        results_dir = layout.results_dir(ref)
-        if not results_dir.exists():
+    for rec in ses_recs:
+        date_str = rec.date_str
+        results_dir = rec.results_dir
+        if not rec.analysed:
             continue
 
         df_speed = _get_from_cache(subjid, date_str, kind="speed_analysis")
@@ -428,8 +427,8 @@ def plot_traces_with_speed_threshold(
     derivatives_dir = get_derivatives_root()
     subj_dir = derivatives.subject_dir(subjid)
 
-    ses_refs = _filter_sessions(subj_dir, dates, **select)
-    if not ses_refs:
+    ses_recs = iter_sessions(subj_dir, dates, **select)
+    if not ses_recs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
 
@@ -530,10 +529,10 @@ def plot_traces_with_speed_threshold(
 
     traces = {"rewarded": [], "unrewarded": [], "fa": []}
     markers = {"rewarded": [], "unrewarded": [], "fa": []}
-    for ref in ses_refs:
-        date_str = ref.date
-        results_dir = layout.results_dir(ref)
-        if not results_dir.exists():
+    for rec in ses_recs:
+        date_str = rec.date_str
+        results_dir = rec.results_dir
+        if not rec.analysed:
             continue
         skipped_no_poke_end = []
         analysis_path = layout.table_path(results_dir, "speed_analysis.parquet")
@@ -557,7 +556,7 @@ def plot_traces_with_speed_threshold(
         else:
             thr_series = None
 
-        views = _load_trial_views(results_dir)
+        views = rec.views
         trial_data = views.get("trial_data", pd.DataFrame()).copy()
         if trial_data.empty:
             print(f"No trial_data for {date_str}; skipping")

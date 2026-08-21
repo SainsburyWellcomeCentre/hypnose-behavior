@@ -16,12 +16,11 @@ from hypnose_behavior.frames import odor_letter
 from hypnose_behavior.utils.helpers import _get_from_cache, _update_cache
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
-    _filter_sessions,
     derivatives,
     normalize_subjid,
     session_selectors,
 )
-from hypnose_behavior.io.loaders import _load_trial_views
+from hypnose_behavior.io.loaders import iter_sessions
 from hypnose_behavior.visualization.panels import _clean_graph
 from hypnose_behavior.visualization.primitives import mean_sem
 from hypnose_behavior.metric_analysis.stats.kw_mwu import kw_mwu_by_group
@@ -112,8 +111,8 @@ def plot_movement_analysis_statistics(
     subj_str = normalize_subjid(subjid)
     subj_dir = derivatives.subject_dir(subjid)
 
-    ses_refs = _filter_sessions(subj_dir, dates, **select)
-    if not ses_refs:
+    ses_recs = iter_sessions(subj_dir, dates, **select)
+    if not ses_recs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
 
@@ -184,7 +183,7 @@ def plot_movement_analysis_statistics(
         return _condition_labels_base(row)
 
 
-    multi_session = len(ses_refs) > 1
+    multi_session = len(ses_recs) > 1
 
     per_session = []
     combined_rows = []  # base conditions (rewarded/unrewarded/fa)
@@ -288,16 +287,16 @@ def plot_movement_analysis_statistics(
         fig_seq.tight_layout()
         return fig_seq
 
-    for ref in ses_refs:
-        date_str = ref.date
+    for rec in ses_recs:
+        date_str = rec.date_str
         date_scope = [int(date_str)] if str(date_str).isdigit() else [date_str]
         date_slug = _slugify(date_str)
-        results_dir = layout.results_dir(ref)
-        if not results_dir.exists():
+        results_dir = rec.results_dir
+        if not rec.analysed:
             continue
 
         # load trial_data
-        views = _load_trial_views(results_dir)
+        views = rec.views
         trial_data = views.get("trial_data", pd.DataFrame()).copy()
         if trial_data.empty:
             continue
@@ -586,7 +585,7 @@ def plot_movement_analysis_statistics(
             per_session.append(entry)
 
     # Build chronological session order for combined plots (index = 0..N-1)
-    raw_dates = [ref.date for ref in ses_refs]
+    raw_dates = [rec.date_str for rec in ses_recs]
     try:
         session_dates_order = sorted(set(raw_dates), key=int)
     except Exception:

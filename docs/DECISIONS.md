@@ -3058,3 +3058,96 @@ the plotter's return value as a **list**, when it returns
 REDs against working code**. Both were probe defects with a plausible-looking failure.
 **A probe is not evidence until you know what it counts**, and the cheapest way to find
 out is to assert that it found something before asserting anything about what it found.
+
+---
+
+## 36. The selection is what was *matched*; `analysed` is a property of a record *(Item 8, 2026-08-21)*
+
+`io/loaders.iter_sessions(subj_dir, dates, **select)` returns a **`list` of
+`SessionRecord`**, one per matched session, carrying `ref`, `results_dir`, `date_str` and
+the lazy `analysed` / `views`. The 32 per-session loops in 18 files read those four instead
+of rebuilding each by hand, and `_filter_sessions` goes from 32 call sites to **one**,
+inside `iter_sessions`.
+
+### The plan said "one record per *analysed* session". That is wrong for 12 of the 32 loops
+
+Filtering the unanalysed sessions out *before* the caller's loop retires the 29
+`exists()` guards, which is the point. It is a no-op only where nothing reads the matched
+selection's **cardinality or position** — and twelve loops do:
+
+| what reads the matched selection | where | what it decides |
+|---|---|---|
+| `enumerate(ses_recs, 1)`, counter bound **before** the guard | 8 loops | the plotted x |
+| `len(...) > 1` | `movement/summary_stats.py:187` | **which figures are drawn** |
+| `[rec.date_str for rec in ...]` | `movement/summary_stats.py:589` | a date→0..N-1 map |
+| no `exists()` guard at all — gated on something else | 3 loops | see below |
+
+The counter is the load-bearing one. Every one of the eight spells
+
+```python
+for session_num, rec in enumerate(ses_recs, start=1):
+    if not rec.analysed:
+        continue          # session_num is already bound -- and never drawn
+```
+
+so **a skipped session consumes a number**. Measured on the derivatives tree, all 33
+subjects: **3 of 1,193 matched sessions have no `saved_analysis_results`** — sub-040 at
+matched position 41, sub-045 at 54, sub-048 at 50. sub-040's x values are today
+`1..40, 42..48`; pre-filtered they become `1..47`, every point after the gap shifted left by
+one. That is section 8's rule arriving from the other side: **the guard selects what to
+draw; it does not renumber.**
+
+> **`plot_regression` could not have caught it.** All 44 cases name explicit date lists, and
+> none of the three gap sessions is in any of them — every case selection has
+> matched == analysed. A GREEN would have meant "I did not look" (section 1). The three
+> loops with no guard were named in the plan; the nine that count were not, and they are
+> the ones the gate is blind to.
+
+So the record carries `analysed` and the guard becomes `if not rec.analysed: continue` — the
+stat moves onto the record instead of being re-spelled at 29 sites, and every count,
+`len()` and truthiness test still describes what was matched. The three loops gated on
+something else simply never read it: `metric_analysis/movement/speed_analysis.py:146`
+collects dates, `metric_analysis/run.py:523` gates on `summary_path.exists()` and *records*
+its skips in `session_stats`, and `visualization/prep.py:145` defers to its caller.
+
+### `analysed` and `views` are lazy, and that is not an optimisation
+
+Both are `cached_property`. The `exists()` stat and the `trial_data` read fire on first
+access, so they happen at exactly the sessions and the moments they happen today — never
+earlier. `visualization/sampling.py:837` is why it has to be that way: it `continue`s on a
+non-8-digit date *before* it ever stats the results dir, and an eager record would stat a
+session the current code never touches. Caching is per record, so it cannot leak across
+sessions; measured, all 22 loops that load views call `_load_trial_views` exactly once.
+
+### It lives in `io/loaders.py` because `visualization/prep.py` cannot hold it
+
+Five of the 32 loops are outside `visualization/` — four in `metric_analysis/`, one in
+`modelling/switchpoint/data.py`. Measured: `visualization → metric_analysis` is 26 edges and
+`visualization → modelling` is 4, with **zero** in either reverse direction, so importing
+`iter_sessions` from `prep.py` at those five sites creates two new undeclared directory
+cycles and turns `check_layering` red. `loaders.py` already imports `io.layout` and already
+defines `_load_trial_views`, so the definition adds **no import of its own**; `io/` is the
+bottom tier all 18 files already depend on, and 16 of them already import `io.loaders`.
+
+**`accessors.sessions()` keeps its warning and the plotters stay silent.** That accessor is
+the same loop reached through `derivatives.find_sessions`, and it names the sessions it
+skipped. Giving the plotters that warning would be a behaviour change the 44 cases cannot
+see, so `iter_sessions` does not warn; a caller that wants to know asks `rec.analysed`.
+
+### Gate
+
+`plot_regression` **44/44 GREEN, 3,437,588 drawn values** — the identical count item 7
+recorded, so nothing that feeds a figure moved. `regression` GREEN, 90 fingerprints ·
+`verify_scripts` GREEN · `check_imports` PASS · `check_layering` PASS, one `DECLARED` entry,
+one directory cycle, **328 edges — unchanged**, the two added `io.loaders` imports offset by
+two `io.layout` imports that became dead.
+
+`modelling/switchpoint/data.py:147` is in neither `MODULES` nor a case, so it was verified by
+hand as in item 7: `prepare_subject` compared elementwise against the same loop driven by
+`_filter_sessions` + `layout.results_dir` + `exists()` + `_load_trial_views`, over both
+`rewarded_only` settings of all 8 fixture subjects — **16 pairs, 208 keys, ~365,000 values,
+0 differing**. sub-040 and sub-048 are both gap subjects, so the guard was genuinely
+exercised. **Proved able to fail (section 17):** a single flipped `s` value reports `['s']`,
+a dropped session reports `['session_labels']`, and a one-trial shift in the boundaries
+reports `['session_ends']` — the middle one being exactly the densification this item
+refused.
