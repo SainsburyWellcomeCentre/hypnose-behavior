@@ -122,7 +122,7 @@ def measure_session(subjid, date) -> pd.DataFrame:
                 str(subjid), str(date), verbose=False, save=True, print_summary=False,
                 save_csv=True)   # reads trial_data.csv below; ask for it explicitly
 
-        matches = list(Path(tmp).glob(f"**/ses-*_date-{date}/{layout.RESULTS_DIRNAME}/trial_data.csv"))
+        matches = list(Path(tmp).glob(f"**/ses-*_date-{date}/{layout.RESULTS_DIRNAME}/**/trial_data.csv"))
         if not matches:
             raise FileNotFoundError(f"trial_data.csv not found for sub-{subjid} {date}")
         trial_data = pd.read_csv(matches[0])

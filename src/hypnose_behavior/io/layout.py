@@ -3,9 +3,9 @@
 The walking itself is layout knowledge, not data knowledge, so it lives in
 `hypnose_helpers.io.layout`. What stays here is the part only this repo knows: that it
 has *two* trees, where each is rooted, that its subject directories always carry the
-`_id-` suffix, and where an analysed session keeps its outputs -- `results_dir()` and
-`table_path()`, the two functions every reader and writer of that directory goes
-through.
+`_id-` suffix, and where an analysed session keeps its outputs -- `results_dir()`,
+`table_path()` and `write_path()`, the functions every reader and writer of that
+directory goes through.
 
     from hypnose_behavior.io.layout import derivatives, rawdata
 
@@ -86,23 +86,137 @@ def results_dir(session) -> Path:
     return Path(getattr(session, "path", session)) / RESULTS_DIRNAME
 
 
+# Which subfolder of a results directory each output belongs to. `manifest.json` and
+# `summary.json` are deliberately absent: they describe the session as a whole and every
+# subfolder's readers depend on them, so they stay at the top level.
+#
+# Matched by exact name first, then by prefix, because three outputs carry the subject and
+# date in their file name (`metrics_57_20260807.json`).
+RESULTS_SUBFOLDERS = {
+    "metrics_by_trial.parquet": "metric_analysis",
+    "metrics_by_poke.parquet": "metric_analysis",
+    "trial_data.parquet": "trial_classification_results",
+    "trial_data.csv": "trial_classification_results",
+    "trial_data.schema.json": "trial_classification_results",
+    "position_data.parquet": "trial_classification_results",
+    "speed_analysis.parquet": "movement_analysis",
+}
+
+RESULTS_SUBFOLDER_PREFIXES = (
+    ("metrics_", "metric_analysis"),
+    ("merged_summary_", "trial_classification_results"),
+    # Covers `non_initiated_attempts`, which is written today, and the three
+    # `io.loaders` still offers from older sessions -- `non_initiated_sequences`,
+    # `non_initiated_odor1_attempts` and `non_initiated_FA`. A prefix rather than four
+    # names because all four are the same table family and must resolve alike; a legacy
+    # file that moved without a mapping entry would read back as an empty frame.
+    ("non_initiated_", "trial_classification_results"),
+)
+
+# Named separately because the tracking files are *discovered* rather than looked up:
+# the SLEAP repo writes them under names this package does not choose, so
+# `find_tracking_file` below matches them by pattern and needs the folder to search,
+# not a mapping entry.
+MOVEMENT_SUBFOLDER = "movement_analysis"
+
+
+def results_subfolder(name: str) -> Optional[str]:
+    """The subfolder `name` belongs in, or None for a top-level file."""
+    if name in RESULTS_SUBFOLDERS:
+        return RESULTS_SUBFOLDERS[name]
+    for prefix, folder in RESULTS_SUBFOLDER_PREFIXES:
+        if name.startswith(prefix):
+            return folder
+    return None
+
+
 def table_path(results_dir, name: str) -> Path:
     """One entry of a results directory, by file name.
 
-    **The single place the layout inside a results directory is decided.** Flat: every
-    table, sidecar, manifest and export sits directly in `results_dir`. It stays a
-    one-liner precisely so that the decision has one site -- a caller spelling
-    `results_dir / name` for itself is a caller this function cannot reach.
+    **The single place the layout inside a results directory is decided.** Outputs are
+    grouped by the stage that produces them -- `metric_analysis/`,
+    `trial_classification_results/`, `movement_analysis/` -- while `manifest.json` and
+    `summary.json` stay at the top level, because they describe the session rather than
+    any one stage and all three groups' readers depend on them.
 
-    Scope is one level: a path built off the results directory comes through here, while
-    a path built off something already inside it (`indices/`) belongs to that
-    subdirectory's own layout.
+    **Both layouts are readable, and the grouped one wins.** A session written before the
+    grouping is flat, and re-analysing the tree is a separate and much more expensive
+    operation, so the lookup prefers the grouped path when it exists, falls back to the
+    flat path when *that* exists, and otherwise returns the grouped path -- which is what
+    a writer needs. A session half-migrated by an interrupted move therefore still reads
+    correctly, file by file.
+
+    Returning the grouped path for a file that does not exist yet means **a writer must
+    create the parent**; `write_path` is that function, and is what every writer calls.
 
     It answers *where a named file lives*, never *what the directory holds*. A caller
     that globs a results directory is discovering rather than looking up, so it does not
-    come through here and has to be found on its own.
+    come through here and has to be found on its own -- `rglob` is the spelling that
+    reads a flat session and a grouped one alike.
     """
-    return Path(results_dir) / name
+    base = Path(results_dir)
+    folder = results_subfolder(name)
+    if folder is None:
+        return base / name
+    grouped = base / folder / name
+    if grouped.exists():
+        return grouped
+    flat = base / name
+    if flat.exists():
+        return flat
+    return grouped
+
+
+def results_dir_of(path) -> Path:
+    """The results directory a file inside one belongs to, whichever layout it sits in.
+
+    A caller that *found* a file -- by glob, rather than by asking `table_path` where it
+    should be -- holds a path that is one level deeper in a grouped session than in a
+    flat one, so `.parent` answers differently for the two. This walks up to the
+    `saved_analysis_results` directory itself, which is the same answer for both.
+    """
+    p = Path(path)
+    for ancestor in (p, *p.parents):
+        if ancestor.name == RESULTS_DIRNAME:
+            return ancestor
+    raise ValueError(f"{path} is not inside a {RESULTS_DIRNAME} directory")
+
+
+def find_tracking_file(results_dir, stem_glob: str) -> Optional[Path]:
+    """A tracking file matching ``stem_glob`` (a filename glob WITHOUT extension),
+    preferring .parquet over .csv. None if nothing matches.
+
+    Example: ``find_tracking_file(results_dir, "*_combined_sleap_tracking_timestamps")``
+
+    **Discovery, not lookup, which is why it is a glob and not `table_path`.** The SLEAP
+    repo writes these files under names this package does not choose, so they are matched
+    by pattern rather than looked up. `movement_analysis/` is searched first and the
+    results directory second, so a session written either way resolves and a grouped file
+    wins over a flat one of the same name.
+
+    Lives here rather than in `utils/` because it decides where inside a results
+    directory to look, and because `io/` imports `utils/` -- the reverse edge would make
+    the two a directory cycle.
+    """
+    for root in (Path(results_dir) / MOVEMENT_SUBFOLDER, Path(results_dir)):
+        for ext in ("parquet", "csv"):
+            matches = [f for f in sorted(root.glob(f"{stem_glob}.{ext}"))
+                       if not f.name.startswith("._")]
+            if matches:
+                return matches[0]
+    return None
+
+
+def write_path(results_dir, name: str) -> Path:
+    """`table_path`, with the parent directory created. What every writer calls.
+
+    Separate from `table_path` because a lookup that creates directories would leave
+    empty `metric_analysis/` folders behind every time a reader asked for a file that is
+    not there.
+    """
+    path = table_path(results_dir, name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _iter_subject_dirs(derivatives_dir: Optional[Path], subjids: Optional[Iterable[int]]):
@@ -169,7 +283,9 @@ def _filter_sessions(subj_dir: Path,
 
 __all__ = [
     "rawdata", "derivatives", "layout_for", "SUBJECT_PATTERN",
-    "RESULTS_DIRNAME", "results_dir", "table_path",
+    "RESULTS_DIRNAME", "results_dir", "table_path", "write_path",
+    "RESULTS_SUBFOLDERS", "RESULTS_SUBFOLDER_PREFIXES", "results_subfolder",
+    "MOVEMENT_SUBFOLDER", "find_tracking_file", "results_dir_of",
     "session_selectors",
     "SessionRef", "SessionLayout", "DuplicateSessionError",
     "list_sessions", "filter_sessions", "normalize_subjid",

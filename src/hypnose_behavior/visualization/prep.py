@@ -45,10 +45,10 @@ from hypnose_behavior.io.paths import (
     get_derivatives_root, get_rawdata_root, get_server_root,
 )
 from hypnose_behavior.metric_analysis.metrics.timing import inter_trial_interval
+from hypnose_behavior.io.layout import find_tracking_file
 from hypnose_behavior.utils.helpers import (
     _get_from_cache,
     _update_cache,
-    find_tracking_file,
     read_tracking_table,
 )
 

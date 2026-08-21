@@ -49,7 +49,7 @@ def load_position_data(results_dir, trials):
     changed metric with no error. See DECISIONS.md section 28.
     """
     trials_empty = trials is None or getattr(trials, "empty", True)
-    path = Path(results_dir) / "position_data.parquet"
+    path = layout.table_path(results_dir, "position_data.parquet")
     if not trials_empty and path.exists() and "global_trial_id" in trials.columns:
         try:
             saved = pd.read_parquet(path)

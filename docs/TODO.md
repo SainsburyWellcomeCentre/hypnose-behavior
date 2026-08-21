@@ -19,23 +19,18 @@ This outlives any one plan.
 
 ---
 
-## Split `saved_analysis_results/` into subfolders
+## `sleap-hypnose` still resolves the flat layout
 
-Carried over from `followup_plan.md`. After item 6 of the restructure this is **one file**
-— `io/layout.table_path()` gains the name→subfolder mapping plus a flat fallback (section
-2's rule, since every existing session is flat). **Do it before the server re-analysis**,
-or the tree is analysed twice. `movement/` cannot be done unilaterally: this repo writes no
-tracking file, so that folder needs the SLEAP repo to write into it.
+**The one piece of this change that lives in another repo.** `sleap_utils.py` spells
+`session_dir / "saved_analysis_results"` in five places and searches it non-recursively:
+`_find_tracking_files` globs `sleap_tracking_video*.{parquet,csv}` and `_find_combined_file`
+globs `*_combined_sleap_tracking_timestamps.{parquet,csv}`, both directly in the results
+directory, and `results_dir.glob("*.slp")` finds the raw predictions the same way.
 
-**Four sites the mapping cannot reach, because they discover rather than look up.** A
-name→path mapping answers "where does `trial_data.parquet` live"; it cannot answer "what is
-in this directory", so each of these needs its own line at flip time:
-`io/parquet_peek._parquet_files` (`parquet_peek.py:86`) lists a session's tables with a
-non-recursive `glob("*.parquet")` at `:93` and needs `rglob` to see a nested one, and the
-three `qc/` globs (`_common.py:285`, `outcome_agreement.py:125`, `verify_scripts.py:80`)
-spell `{RESULTS_DIRNAME}/trial_data.csv` and break the moment `trial_data` moves down a
-level. `rglob` is the right spelling for all four: it reads a flat session and a nested one
-alike, which is also what a half-re-analysed tree needs.
+After a session is migrated, all three of those are in `movement_analysis/` and none of
+those globs sees them. `rglob` reads a flat session and a grouped one alike, which is the
+same fix this repo applied to `io/parquet_peek._parquet_files`. Until it lands, run the
+SLEAP steps for a session **before** migrating it, or migrate that repo first.
 
 ---
 

@@ -275,9 +275,9 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
             return False
         if name in saved_names:
             return True
-        f_csv = layout.table_path(out_dir, f"{name}.csv")
-        f_schema = layout.table_path(out_dir, f"{name}.schema.json")
-        f_parquet = layout.table_path(out_dir, f"{name}.parquet")
+        f_csv = layout.write_path(out_dir, f"{name}.csv")
+        f_schema = layout.write_path(out_dir, f"{name}.schema.json")
+        f_parquet = layout.write_path(out_dir, f"{name}.parquet")
         try:
             df_norm, json_cols = _normalize_df_for_io(df)
             try:
@@ -362,33 +362,9 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
 
     manifest["session"]["runs"] = runs
     
-    # 5) Indices
-    indices_dir = layout.table_path(out_dir, "indices")
-    indices_dir.mkdir(parents=True, exist_ok=True)
-    idx_payloads = {
-        "index": classification.get("index", {}),
-        "aborted_index": classification.get("aborted_index", classification.get("index", {}).get("aborted", {})),
-    }
-    for name, payload in idx_payloads.items():
-        with open(indices_dir / f"{name}.json", "w", encoding="utf-8") as f:
-            json.dump(_json_safe(payload), f, indent=2)
-
-    # 6) Response-time analysis artifacts
-    rta = classification.get("response_time_analysis")
-    if isinstance(rta, dict):
-        try:
-            with open(layout.table_path(out_dir, "response_time_analysis.json"), "w", encoding="utf-8") as f:
-                json.dump(_json_safe(rta), f, indent=2)
-        except Exception as e:
-            vprint(verbose, f"[save] WARNING: failed writing response_time_analysis.json: {e}")
-        per_trial = rta.get("per_trial")
-        if isinstance(per_trial, pd.DataFrame) and not per_trial.empty:
-            if _save_df("response_time_per_trial", per_trial):
-                saved_any = True
-
-    # 7) Manifest + summary
+    # 5) Manifest + summary
     try:
-        with open(layout.table_path(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
+        with open(layout.write_path(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(_json_safe(manifest), f, indent=2)
     except Exception as e:
         vprint(verbose, f"[save] WARNING: failed writing manifest.json: {e}")
@@ -413,7 +389,7 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
                 run_info['parameters'] = matching_params
 
     # Save manifest
-    with open(layout.table_path(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
+    with open(layout.write_path(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(_json_safe(manifest), f, indent=2)
         
     # Add combined non-initiated total (baseline + pos1 attempts)
@@ -440,7 +416,7 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
         "counts": counts,
         "params": params,
     }
-    with open(layout.table_path(out_dir, "summary.json"), "w", encoding="utf-8") as f:
+    with open(layout.write_path(out_dir, "summary.json"), "w", encoding="utf-8") as f:
         json.dump(_json_safe(summary), f, indent=2)
 
     vprint(verbose, f"Saved analysis to: {out_dir} ({'some tables' if saved_any else 'no tables'})")

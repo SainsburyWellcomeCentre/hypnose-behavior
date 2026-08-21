@@ -282,13 +282,13 @@ def fingerprint_session(subjid, date) -> dict:
                 subjid, date, verbose=False, save=True, print_summary=False, save_csv=True
             )
 
-        matches = list(tmp.glob(f"**/ses-*_date-{date}/{layout.RESULTS_DIRNAME}/trial_data.csv"))
+        matches = list(tmp.glob(f"**/ses-*_date-{date}/{layout.RESULTS_DIRNAME}/**/trial_data.csv"))
         if not matches:
             raise FileNotFoundError(
                 f"trial_data.csv not found for subj={subjid} date={date} under {tmp}"
             )
         trial_data_md5, trial_data_columns = _trial_data_fingerprint(matches[0])
-        results_dir = matches[0].parent
+        results_dir = layout.results_dir_of(matches[0])
 
         with contextlib.redirect_stdout(sink):
             results = load_session_results(subjid, date)

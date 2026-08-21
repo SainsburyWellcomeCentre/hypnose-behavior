@@ -174,34 +174,6 @@ def _false_alarm(abortion_time, t_end, *, init_times, cue_rises, reward_rises, d
             fa_port, movement_ms)
 
 
-def _build_abortion_index(df: pd.DataFrame):
-    """Lookup tables over the aborted-trial table: by trial, position, odor, type and FA label."""
-    if df is None or df.empty:
-        return {'by_trial': {}, 'by_position': {}, 'by_odor': {}, 'by_type': {}, 'by_fa_label': {}}
-
-    df2 = df.copy().dropna(subset=['trial_id'])
-    try:
-        by_trial = df2.set_index('trial_id', drop=False).apply(lambda r: r.to_dict(), axis=1).to_dict()
-    except Exception:
-        by_trial = {row['trial_id']: row.to_dict() for _, row in df2.iterrows()}
-
-    def group_ids(col):
-        m = {}
-        if col in df2.columns:
-            for k, g in df2.groupby(col):
-                trials = list(g.sort_values('sequence_start')['trial_id']) if 'sequence_start' in g else list(g['trial_id'])
-                m[k] = trials
-        return m
-
-    return {
-        'by_trial': by_trial,
-        'by_position': group_ids('last_odor_position'),
-        'by_odor': group_ids('last_odor_name'),
-        'by_type': group_ids('abortion_type'),
-        'by_fa_label': group_ids('fa_label'),
-    }
-
-
 def _print_abortion_summary(aborted_detailed, classification, response_time, response_time_ms):
     """The aborted-trials summary: abortion types, false alarms, and poke-time breakdowns."""
     def pct(n, d):
@@ -528,11 +500,8 @@ def abortion_classification(data, events, classification, odor_map, root, verbos
     if verbose and not aborted_detailed.empty:
         _print_abortion_summary(aborted_detailed, classification, response_time, response_time_ms)
 
-    aborted_index = _build_abortion_index(aborted_detailed)
-
     try:
         classification['aborted_sequences_detailed'] = aborted_detailed
-        classification['aborted_index'] = aborted_index
     except Exception:
         pass
 

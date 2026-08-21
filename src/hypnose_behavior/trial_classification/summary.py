@@ -627,7 +627,7 @@ def print_merged_session_summary(merged_classification: dict, subjid=None, date=
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         fname = f"merged_summary_{subjid}_{date}.txt"
-        with open(layout.table_path(out_dir, fname), "w", encoding="utf-8") as f:
+        with open(layout.write_path(out_dir, fname), "w", encoding="utf-8") as f:
             f.write(buffer.getvalue())
         print(f"Saved merged session summary to {layout.table_path(out_dir, fname)}")
     

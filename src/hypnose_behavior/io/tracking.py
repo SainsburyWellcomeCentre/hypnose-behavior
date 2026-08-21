@@ -22,10 +22,10 @@ from hypnose_behavior.io.paths import (
     get_server_root,
 )
 from hypnose_behavior.io.load_results import load_session_results
+from hypnose_behavior.io.layout import find_tracking_file
 from hypnose_behavior.utils.helpers import (
     _get_from_cache,
     _update_cache,
-    find_tracking_file,
     read_tracking_table,
 )
 
