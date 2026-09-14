@@ -188,6 +188,15 @@ y_k ~ Bernoulli( logistic(x_k + μ) )
 
 Data: the binary correct/incorrect sequence over trial index, per animal.
 
+Could be done with: 
+with pm.Model() as m:
+    sigma = pm.HalfNormal('sigma', 0.5)
+    z = pm.Normal('z', 0, 1, shape=K)              # non-centered
+    x = pm.Deterministic('x', pt.cumsum(sigma * z))
+    pm.Bernoulli('y', logit_p=x, observed=y)       # mu = 0 for 2AFC
+and 
+cert = (idata.posterior['x'].stack(s=('chain','draw')).values > 0).mean(axis=1)
+
 ## 2. Changepoint fitting
 
 ### 2.1 Model
@@ -226,14 +235,6 @@ ln L = Σ_k [ y_k · ln p(k) + (1 − y_k) · ln(1 − p(k)) ]
 - Consider fixing p_i = 0.5 (3 free parameters) and comparing against the free-p_i fit.
 - w below the spacing of the data is unresolvable and the likelihood goes flat. `ŵ ≈ 0` means "faster than the data can see," not "instantaneous."
 
-Could be done with: 
-with pm.Model() as m:
-    sigma = pm.HalfNormal('sigma', 0.5)
-    z = pm.Normal('z', 0, 1, shape=K)              # non-centered
-    x = pm.Deterministic('x', pt.cumsum(sigma * z))
-    pm.Bernoulli('y', logit_p=x, observed=y)       # mu = 0 for 2AFC
-and 
-cert = (idata.posterior['x'].stack(s=('chain','draw')).values > 0).mean(axis=1)
 
 **What this model cannot do:** exactly one bend, monotone, symmetric transition, flat at both ends. Two real changes are silently fit as one compromise — often with inflated w, which would be misread as evidence against sudden learning.
 
