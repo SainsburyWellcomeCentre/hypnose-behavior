@@ -2,6 +2,31 @@
 
 **Analysis plan.** Adapted from Rosenberg et al. (2021), *eLife* 10:e66175, "Mice in a labyrinth exhibit rapid learning, sudden insight, and efficient exploration."
 
+# Layout: 
+
+New notebook ab_learning.ipynb to hold visualization code execution. 
+Modelling functions (maths etc.) belong into src/hypnose_behavior/modelling/ab_learning/ in designated files per model. 
+Visualization functions belong into src/hypnose_behavior/visualization/modelling/ab_learning/ with designated files (not just one plot file). 
+       Note: the functions plot_cumulative_rewards and plot_cumulative_rewards_by_trial are currently in visualization/rewards.py. Consider moving them into ab_learning for consistency. 
+
+# Order of execution
+
+| Block | Content | Section | Answers | Blocking? |
+|---|---|---|---|---|
+| 1 | Cumulative rewards over time | 0.2 | is there any bend at all? | no |
+| 2 | D1 initiation rate, D2 non-initiated accuracy, D3 lose-shift count | 0.5 | is completed-trials-only defensible? | **yes** — determines whether the primary DV needs restricting |
+| 3 | Logistic regression M_a / M_b / M_c + W_s/O_s decomposition | 0.6 | overnight vs within-session; % of gain overnight | no, but this is the main hypothesis test |
+| 4 | Within- and across-session gain, N trials | 0.7 | descriptive companion to block 3 | no |
+| 5 | Three-panel figure per animal | 1.1 | engagement vs knowledge, visually; shape check | **yes** — if panel B shows two bends, block 7 is invalid |
+| 6 | Smith et al. state-space | 1.2 | trial-by-trial accuracy with CIs; shape check | no — optional, but run before block 7 |
+| 7 | Bernoulli sigmoid fit | 2.1–2.3 | **how sudden** — ŵ | core |
+| 8 | Step model + posterior over k_s | 2.4–2.5 | **when, ± how much** | core; run only if ŵ small |
+| 9 | Constant-model ΔlnL | 2.6 | did anything change at all? | one number, quote with block 8 |
+| 10 | GLM-HMM: strategy model + knowledge model | 3 | occupancy of a good state vs arrival at a better one | later |
+| 11 | Attempt-level re-run | 4 | initiation learning, false alarms, exposure axis | later |
+
+Blocks 1–9 are the figure. 10–11 are the deeper account.
+
 ---
 
 ## 0. Framing
@@ -26,6 +51,9 @@ r(t) = λ(t) × p(t)
 ```
 
 Any bend in the raw cumulative reward curve could be due to increased engagement or increased accuracy. Everything below exists to differentiate them.
+
+*This is done with the function plot_cumulative_rewards() in src/hypnose_behavior/visualization/rewards.py. Consider moving to ab_learning. 
+
 
 ### 0.3 Hypothesis
 
@@ -391,20 +419,3 @@ Attempt-level analyses:
 3. **Extinction test.** If correct-choice-without-reward acts as a negative signal, animals with higher non-initiation rates should learn more slowly. One correlation across 8–10 animals — underpowered but free.
 4. **Exposure axis.** Odor *exposures* per completed trial falls over training. If exposure drives learning, exposure count may be a better experience axis than completed-trial count. Compute both; check whether k̂_s moves.
 
-## Order of execution
-
-| Block | Content | Section | Answers | Blocking? |
-|---|---|---|---|---|
-| 1 | Cumulative rewards over time | 0.2 | is there any bend at all? | no |
-| 2 | D1 initiation rate, D2 non-initiated accuracy, D3 lose-shift count | 0.5 | is completed-trials-only defensible? | **yes** — determines whether the primary DV needs restricting |
-| 3 | Logistic regression M_a / M_b / M_c + W_s/O_s decomposition | 0.6 | overnight vs within-session; % of gain overnight | no, but this is the main hypothesis test |
-| 4 | Within- and across-session gain, N trials | 0.7 | descriptive companion to block 3 | no |
-| 5 | Three-panel figure per animal | 1.1 | engagement vs knowledge, visually; shape check | **yes** — if panel B shows two bends, block 7 is invalid |
-| 6 | Smith et al. state-space | 1.2 | trial-by-trial accuracy with CIs; shape check | no — optional, but run before block 7 |
-| 7 | Bernoulli sigmoid fit | 2.1–2.3 | **how sudden** — ŵ | core |
-| 8 | Step model + posterior over k_s | 2.4–2.5 | **when, ± how much** | core; run only if ŵ small |
-| 9 | Constant-model ΔlnL | 2.6 | did anything change at all? | one number, quote with block 8 |
-| 10 | GLM-HMM: strategy model + knowledge model | 3 | occupancy of a good state vs arrival at a better one | later |
-| 11 | Attempt-level re-run | 4 | initiation learning, false alarms, exposure axis | later |
-
-Blocks 1–9 are the figure. 10–11 are the deeper account.
