@@ -172,7 +172,9 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
     protocol_name = (sequence_name or str(stage) or "").lower()
     is_odour_discrimination = "odourdiscrimination" in protocol_name
 
-    init_series_raw = initiated_trials.get('initiation_sequence_time')
+    # A run without trials has a column-less `initiated_sequences`.
+    init_series_raw = initiated_trials.get('initiation_sequence_time',
+                                           pd.Series(dtype='datetime64[ns]'))
     initiation_starts_sorted = pd.to_datetime(init_series_raw, errors='coerce').dropna().sort_values().reset_index(drop=True)
 
     poke_series_full = data['digital_input_data'].get('DIPort0', pd.Series(dtype=bool)).astype(bool)

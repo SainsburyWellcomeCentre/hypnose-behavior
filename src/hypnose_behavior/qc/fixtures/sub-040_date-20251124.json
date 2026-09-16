@@ -135,7 +135,7 @@
     "poke_time_ms": "cf10d2f91d99d2bdd0483b26ee1ea093",
     "position": "e7991073bfa7d777c670ae4b00b52d64"
   },
-  "non_initiated_attempts": "f92c4ac39b2e0ef2b50bf7be6fb02faf",
+  "non_initiated_attempts": "5589d2ead995a50361930013cb78f5d1",
   "non_initiated_attempts_columns": {
     "attempt_end": "de24668bd8a21051da010bfc564f3f5b",
     "attempt_first_poke_in": "b4c5535944459c30f2a4248411781c5a",
@@ -152,6 +152,7 @@
     "global_trial_id": "ac9bd39cab895415218ae9af6cb004b9",
     "initiation_sequence_time": "43aef8bb87cb061e3d6e1fb615b1d305",
     "is_hr": "5aabb5943540d038a356f61d0d5f36ae",
+    "met_min_sampling": "5e0eada3202706532bc0b7a3efd2c53d",
     "next_attempt_start": "8081d22442f4b2ce4eea3e290098a6a0",
     "odor_name": "17514a5d58729a7065692d06771bec77",
     "pos1_poke_time_ms": "4d5a818e6b24460153effb9762778077",
