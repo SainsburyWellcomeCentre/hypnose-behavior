@@ -738,7 +738,9 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
 
     initiated_trials = trial_counts['initiated_sequences'].copy()
     non_initiated_trials = trial_counts['non_initiated_sequences'].copy()
-    init_series_raw = initiated_trials.get('initiation_sequence_time')
+    # A run without trials has a column-less `initiated_sequences`.
+    init_series_raw = initiated_trials.get('initiation_sequence_time',
+                                           pd.Series(dtype='datetime64[ns]'))
     initiation_starts_sorted = pd.to_datetime(init_series_raw, errors='coerce').dropna().sort_values().reset_index(drop=True)
 
     await_reward_times = events['combined_await_reward_df']['Time'].tolist() if 'combined_await_reward_df' in events else []

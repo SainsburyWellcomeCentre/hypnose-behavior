@@ -135,7 +135,7 @@
     "poke_time_ms": "4f875ec3b10079624b59963ef621a826",
     "position": "9c7639c600e86cd5290c7e60e9aff227"
   },
-  "non_initiated_attempts": "c7c26d492541896a55c6db3dfc7892fe",
+  "non_initiated_attempts": "c2b750fe56e9c0db11f3ac924c2daa20",
   "non_initiated_attempts_columns": {
     "attempt_end": "8060e25171ea8f7f0560be3d56dbea91",
     "attempt_number": "b026324c6904b2a9cb4b88d6d61c81d1",
@@ -149,6 +149,7 @@
     "failure_reason": "c1d822517832a6be06f610a48b3a9714",
     "initiation_sequence_time": "0772f08ed23d6bd31a13a3f2a2e56e90",
     "is_hr": "79f5c9aec1851d24424de38ad3de6f98",
+    "met_min_sampling": "79f5c9aec1851d24424de38ad3de6f98",
     "next_attempt_start": "0f1aec95614df1b1555fc3992805b89d",
     "odor_name": "0ace7e7ee165dcfce0ccd77cfb1ca14d",
     "pos1_poke_time_ms": "6808ca805661622ad65ae014a4b2a094",

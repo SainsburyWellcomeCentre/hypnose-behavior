@@ -1,14 +1,15 @@
 """Trial detection -- find each initiation and the sampling attempts that follow it.
 
 ``detect_trials`` walks the initiation events and resolves the valve activations after each
-one into sampling attempts, including the failed-attempt bookkeeping and the AwaitReward
-promotion that rescues an attempt the valve record alone would have dropped.
+one into sampling attempts and the failed-attempt bookkeeping. On odour-discrimination runs the
+rig's AwaitReward decides which attempt is the trial; elsewhere the sampling threshold does.
 
 It runs before classification and produces the ``trial_counts`` dict that
 ``classify_trials`` and ``analyze_response_times`` both consume.
 """
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 
 import pandas as pd
@@ -65,6 +66,34 @@ def _valve_attempt_windows(valve_events, initiation_time, next_initiation_time, 
     return attempt_events
 
 
+# More initiation windows than this losing openings to `_drop_pre_poke_openings` is not the
+# start-of-run valve cleaning, which falls before or inside the first one.
+MAX_PRE_POKE_WINDOWS = 2
+
+
+def _drop_pre_poke_openings(valve_events, cue_pokes, initiation_times):
+    """Valve openings from the run's first cue-port poke onwards.
+
+    An odor valve cannot open for an attempt before the animal has poked the cue port at all,
+    so every earlier opening is the rig's own valve cleaning at the start of the run. A run
+    with no cue poke keeps none.
+
+    Returns ``(kept_events, n_windows)``: ``n_windows`` counts the initiation windows that lost
+    at least one opening.
+    """
+    rises = windows.rising_edges(cue_pokes)
+    first_poke = rises[0] if rises else None
+    dropped = [ev for ev in valve_events if first_poke is None or ev['start_time'] < first_poke]
+    if not dropped:
+        return valve_events, 0
+    kept = [ev for ev in valve_events if first_poke is not None and ev['start_time'] >= first_poke]
+
+    starts = pd.Series(sorted(pd.to_datetime(initiation_times)), dtype='datetime64[ns]')
+    windows_hit = {int(starts.searchsorted(ev['start_time'], side='right')) - 1 for ev in dropped}
+    windows_hit.discard(-1)
+    return kept, len(windows_hit)
+
+
 def _record_detected_trial(trials, initiated_sequences, *, initiation_time, start, end,
                            duration_ms, attempt_number, required_min_ms, odor_name,
                            fallback_reason=None):
@@ -105,6 +134,77 @@ def _record_detected_trial(trials, initiated_sequences, *, initiation_time, star
     initiated_sequences.append(initiated_sequence_entry)
 
 
+def _measure_attempt(attempt_event, attempt_num, poke_periods, cue_pokes, next_initiation_time,
+                     *, required_minimum_ms, sample_offset_time_ms, verbose):
+    """Sampling time of one attempt against its odor's minimum.
+
+    Returns ``(attempt_start, continuous_time_ms, last_segment_end, success)``.
+    ``attempt_start`` is the first poke inside the valve window, or the valve opening when
+    no poke overlaps it.
+    """
+    event_start = attempt_event['start_time']
+    event_end = attempt_event['end_time']
+    attempt_odor = attempt_event['odor_name']
+    if verbose:
+        odor_msg = f", odor={attempt_odor}" if attempt_odor else ""
+        print(f"    Attempt {attempt_num}: valve opens at {event_start} (min={required_minimum_ms:.1f}ms{odor_msg})")
+
+    segments = windows.poke_segments_in_valve_window(
+        poke_periods, cue_pokes, event_start, event_end, next_initiation_time
+    )
+    attempt_start = segments[0][0] if segments else event_start
+
+    def _report(seg_idx, gap_ms, seg_duration_ms, running_total_ms):
+        if not verbose:
+            return
+        if gap_ms is None:
+            print(f"      Segment {seg_idx}: {seg_duration_ms:.1f}ms (total {running_total_ms:.1f}ms)")
+        elif seg_duration_ms is None:
+            print(f"      Gap {gap_ms:.1f}ms ≥ {sample_offset_time_ms}ms — sequence ends")
+        else:
+            print(f"      Segment {seg_idx}: gap {gap_ms:.1f}ms + {seg_duration_ms:.1f}ms (total {running_total_ms:.1f}ms)")
+
+    continuous_time, last_seg_end, success = windows.accumulate_sampling_time(
+        segments, sample_offset_time_ms, required_minimum_ms, on_segment=_report
+    )
+    if success:
+        vprint(verbose, f"      SUCCESS: {continuous_time:.1f}ms ≥ {required_minimum_ms:.1f}ms")
+    else:
+        vprint(verbose, f"      FAILED: {continuous_time:.1f}ms < {required_minimum_ms:.1f}ms")
+    return attempt_start, continuous_time, last_seg_end, success
+
+
+def _failed_attempt_entry(initiation_time, attempt_event, attempt_num, measured, required_minimum_ms,
+                          next_attempt_start, *, failure_reason='insufficient_continuous_poke_time'):
+    """One ``non_initiated_sequences`` row. ``measured`` is `_measure_attempt`'s return value.
+
+    ``met_min_sampling`` records whether the sampling time reached the odor's minimum, so an
+    attempt the rig did not initiate despite enough sampling stays identifiable.
+    """
+    attempt_start, continuous_time, last_seg_end, success = measured
+    return {
+        'initiation_sequence_time': initiation_time,
+        'attempt_start': attempt_start,
+        'attempt_end': last_seg_end if last_seg_end is not None else attempt_event['start_time'],
+        'continuous_poke_time_ms': continuous_time,
+        'attempt_number': attempt_num,
+        'timestamp': attempt_start,
+        'failure_reason': failure_reason,
+        'required_min_sampling_time_ms': required_minimum_ms,
+        'odor_name': attempt_event['odor_name'],
+        'next_attempt_start': next_attempt_start,
+        'met_min_sampling': bool(success),
+    }
+
+
+def _next_attempt_starts(attempt_events) -> dict:
+    """``{attempt_number: start of the next attempt}``, numbering from 1."""
+    return {
+        idx + 1: (attempt_events[idx + 1]['start_time'] if idx + 1 < len(attempt_events) else None)
+        for idx in range(len(attempt_events))
+    }
+
+
 def _run_sampling_attempts(attempt_events, poke_periods, cue_pokes, initiation_time,
                            next_initiation_time, *, required_min_ms_for, sample_offset_time_ms,
                            verbose):
@@ -121,10 +221,7 @@ def _run_sampling_attempts(attempt_events, poke_periods, cue_pokes, initiation_t
     attempt_num = 0
     failed_attempts: list[dict] = []
     pending_failed_attempt: dict | None = None
-    attempt_next_start = {
-        idx + 1: (attempt_events[idx + 1]['start_time'] if idx + 1 < len(attempt_events) else None)
-        for idx in range(len(attempt_events))
-    }
+    attempt_next_start = _next_attempt_starts(attempt_events)
 
     for attempt_event in attempt_events:
         attempt_num += 1
@@ -151,31 +248,13 @@ def _run_sampling_attempts(attempt_events, poke_periods, cue_pokes, initiation_t
                 }
                 return winner, failed_attempts, None, attempt_num
 
-        if verbose:
-            odor_msg = f", odor={attempt_odor}" if attempt_odor else ""
-            print(f"    Attempt {attempt_num}: valve opens at {event_start} (min={required_minimum_ms:.1f}ms{odor_msg})")
-
-        segments = windows.poke_segments_in_valve_window(
-            poke_periods, cue_pokes, event_start, event_end, next_initiation_time
-        )
-        attempt_start = segments[0][0] if segments else event_start
-
-        def _report(seg_idx, gap_ms, seg_duration_ms, running_total_ms):
-            if not verbose:
-                return
-            if gap_ms is None:
-                print(f"      Segment {seg_idx}: {seg_duration_ms:.1f}ms (total {running_total_ms:.1f}ms)")
-            elif seg_duration_ms is None:
-                print(f"      Gap {gap_ms:.1f}ms ≥ {sample_offset_time_ms}ms — sequence ends")
-            else:
-                print(f"      Segment {seg_idx}: gap {gap_ms:.1f}ms + {seg_duration_ms:.1f}ms (total {running_total_ms:.1f}ms)")
-
-        continuous_time, last_seg_end, success = windows.accumulate_sampling_time(
-            segments, sample_offset_time_ms, required_minimum_ms, on_segment=_report
-        )
+        measured = _measure_attempt(
+            attempt_event, attempt_num, poke_periods, cue_pokes, next_initiation_time,
+            required_minimum_ms=required_minimum_ms, sample_offset_time_ms=sample_offset_time_ms,
+            verbose=verbose)
+        attempt_start, continuous_time, _last_seg_end, success = measured
 
         if success:
-            vprint(verbose, f"      SUCCESS: {continuous_time:.1f}ms ≥ {required_minimum_ms:.1f}ms")
             winner = {
                 'start': attempt_start,
                 'duration_ms': continuous_time,
@@ -185,82 +264,89 @@ def _run_sampling_attempts(attempt_events, poke_periods, cue_pokes, initiation_t
             }
             return winner, failed_attempts, None, attempt_num
 
-        vprint(verbose, f"      FAILED: {continuous_time:.1f}ms < {required_minimum_ms:.1f}ms")
-        failed_entry = {
-            'initiation_sequence_time': initiation_time,
-            'attempt_start': attempt_start,
-            'attempt_end': last_seg_end if last_seg_end is not None else event_start,
-            'continuous_poke_time_ms': continuous_time,
-            'attempt_number': attempt_num,
-            'timestamp': attempt_start,
-            'failure_reason': 'insufficient_continuous_poke_time',
-            'required_min_sampling_time_ms': required_minimum_ms,
-            'odor_name': attempt_odor,
-            'next_attempt_start': attempt_next_start.get(attempt_num),
-        }
+        failed_entry = _failed_attempt_entry(
+            initiation_time, attempt_event, attempt_num, measured, required_minimum_ms,
+            attempt_next_start.get(attempt_num))
         failed_attempts.append(failed_entry)
         pending_failed_attempt = failed_entry
 
     return None, failed_attempts, pending_failed_attempt, attempt_num
 
 
-def _await_reward_promotes_attempt(failed_attempts, pending_failed_attempt, await_reward_times,
-                                   next_initiation_time, default_minimum_sampling_time_ms):
-    """Promote a failed attempt to a trial when an AwaitReward event followed it.
+def _run_await_reward_attempts(attempt_events, poke_periods, cue_pokes, initiation_time,
+                               next_initiation_time, await_reward_times, *, required_min_ms_for,
+                               sample_offset_time_ms, verbose):
+    """Odour discrimination: the rig's AwaitReward decides which attempt is the trial.
 
-    Only reached on odour-discrimination protocols, where a single short odor presentation can
-    still be a real trial: the animal committed and the task emitted AwaitReward, so the
-    sampling-time threshold is the wrong evidence. Prefers the pending (most recent) failure.
+    The trial is the last valve opening that starts before the first AwaitReward between this
+    initiation and the next. The sampling threshold only annotates it: a trial that did not
+    reach it carries ``fallback_reason = 'await_reward_event'``. Every earlier opening is a
+    failed attempt, including one that reached the threshold without the rig initiating
+    (``met_min_sampling``, ``failure_reason = 'no_await_reward'``). Openings after the
+    AwaitReward fall in the response period and are not attempts.
 
-    Returns ``(winner, candidate)``, both ``None`` when no AwaitReward falls in the window.
+    Without an AwaitReward in the window, or with none preceded by an opening, there is no
+    trial and every opening is a failed attempt.
+
+    Returns ``(winner, failed_attempts)``.
     """
-    candidate = None
-    if pending_failed_attempt is not None:
-        for fa in reversed(failed_attempts):
-            if fa is pending_failed_attempt:
-                candidate = fa
-                break
-    if candidate is None:
-        candidate = failed_attempts[-1]
+    attempt_next_start = _next_attempt_starts(attempt_events)
+    numbered = [(num, ev) for num, ev in enumerate(attempt_events, start=1)
+                if ev['end_time'] > ev['start_time']]
 
-    attempt_start = candidate.get('attempt_start') or candidate.get('timestamp')
-    if attempt_start is None:
-        return None, None
-    try:
-        start_ts = pd.Timestamp(attempt_start)
-    except Exception:
-        return None, None
+    in_window = await_reward_times[(await_reward_times >= initiation_time)
+                                   & (await_reward_times <= next_initiation_time)]
+    first_await = in_window.min() if not in_window.empty else None
+    before_await = ([(num, ev) for num, ev in numbered if ev['start_time'] <= first_await]
+                    if first_await is not None else [])
+    winner_num = before_await[-1][0] if before_await else None
+    considered = before_await if before_await else numbered
+    if first_await is not None and winner_num is None:
+        vprint(verbose, f"    AwaitReward at {first_await} precedes every valve opening — no trial")
 
-    window_mask = await_reward_times >= start_ts
-    if next_initiation_time is not None and not pd.isna(next_initiation_time):
-        window_mask &= await_reward_times <= next_initiation_time
-    if await_reward_times[window_mask].empty:
-        return None, None
-
-    winner = {
-        'start': start_ts,
-        'duration_ms': candidate.get('continuous_poke_time_ms', 0.0),
-        'attempt_number': candidate.get('attempt_number', 1),
-        'required_min_ms': candidate.get('required_min_sampling_time_ms', default_minimum_sampling_time_ms),
-        'odor_name': candidate.get('odor_name'),
-    }
-    return winner, candidate
+    winner = None
+    failed_attempts: list[dict] = []
+    for num, ev in considered:
+        required_minimum_ms = required_min_ms_for(ev['odor_name'])
+        measured = _measure_attempt(
+            ev, num, poke_periods, cue_pokes, next_initiation_time,
+            required_minimum_ms=required_minimum_ms, sample_offset_time_ms=sample_offset_time_ms,
+            verbose=verbose)
+        attempt_start, continuous_time, _last_seg_end, success = measured
+        if num == winner_num:
+            vprint(verbose, f"    AwaitReward at {first_await} — attempt {num} is the trial")
+            winner = {
+                'start': attempt_start,
+                'duration_ms': continuous_time,
+                'attempt_number': num,
+                'required_min_ms': required_minimum_ms,
+                'odor_name': ev['odor_name'],
+            }
+            if not success:
+                winner['fallback_reason'] = 'await_reward_event'
+            continue
+        failed_attempts.append(_failed_attempt_entry(
+            initiation_time, ev, num, measured, required_minimum_ms, attempt_next_start.get(num),
+            failure_reason='no_await_reward' if success else 'insufficient_continuous_poke_time'))
+    return winner, failed_attempts
 
 
 def detect_trials(data, events, root, odor_map, verbose=True, stage=None):
     """Detect initiated trials from cue-poke and valve streams.
 
-    One *attempt* is one valve opening between consecutive InitiationSequence events. An
-    attempt initiates a trial when the animal's cue-port poke reaches the minimum sampling
-    time for that attempt's odor, where pokes separated by gaps shorter than
-    ``sampleOffsetTime`` count as one continuous sample. The first attempt to reach the
-    threshold ends the search, and the remaining failures for that initiation are recorded as
-    non-initiated sequences.
+    One *attempt* is one valve opening between consecutive InitiationSequence events, from the
+    run's first cue-port poke onwards (`_drop_pre_poke_openings`). Its
+    sampling time is the animal's cue-port poke inside the valve window, where pokes
+    separated by gaps shorter than ``sampleOffsetTime`` count as one continuous sample.
 
-    Two fallbacks add a trial that the sampling threshold alone would reject: a following
-    attempt with a *different* odor promotes the previous short attempt (the sequence moved
-    on, so the sample was real), and on odour-discrimination protocols an AwaitReward event
-    after the attempt does the same (the task itself decided a trial had happened).
+    On odour-discrimination runs with an AwaitReward record, the rig decides: the trial is the
+    last opening before the initiation's first AwaitReward, and every earlier opening is a
+    non-initiated sequence (`_run_await_reward_attempts`).
+
+    Otherwise an attempt initiates a trial when its sampling time reaches the minimum for its
+    odor. The first attempt to reach it ends the search, and the failures before it are
+    recorded as non-initiated sequences. A following attempt with a *different* odor promotes
+    the previous short attempt to a trial (the sequence moved on, so the sample was real).
 
     Returns a dict of ``trials`` / ``initiated_sequences`` / ``non_initiated_sequences``
     DataFrames.
@@ -291,8 +377,24 @@ def detect_trials(data, events, root, odor_map, verbose=True, stage=None):
     initiation_events = events['combined_initiation_sequence_df'].copy()
     cue_pokes = data['digital_input_data']['DIPort0'].copy().astype(bool)
 
+    n_valve_events = len(valve_events)
+    valve_events, pre_poke_windows = _drop_pre_poke_openings(
+        valve_events, cue_pokes, initiation_events['Time'])
+    vprint(verbose, f"Valve openings before the first cue poke (not attempts): "
+                    f"{n_valve_events - len(valve_events)}")
+    if pre_poke_windows > MAX_PRE_POKE_WINDOWS:
+        warnings.warn(
+            f"{root}: valve openings before the first cue-port poke fall in {pre_poke_windows} "
+            f"initiation windows (more than the start-of-run valve cleaning explains). They are "
+            f"not counted as attempts; check this run's cue-port and valve records.",
+            RuntimeWarning, stacklevel=2)
+
     await_reward_df = events.get('combined_await_reward_df') if isinstance(events, Mapping) else None
-    if isinstance(await_reward_df, pd.DataFrame) and not await_reward_df.empty and 'Time' in await_reward_df.columns:
+    # The loader gives a run without an ExperimentEvents folder a frame with no columns, and a
+    # run whose events hold no AwaitReward an empty frame that still has `Time`. Only the first
+    # lacks the rig's record; the second is a run in which the rig initiated nothing.
+    await_reward_recorded = isinstance(await_reward_df, pd.DataFrame) and 'Time' in await_reward_df.columns
+    if await_reward_recorded and not await_reward_df.empty:
         await_reward_times = pd.to_datetime(await_reward_df['Time'], errors='coerce').dropna()
     else:
         await_reward_times = pd.Series(dtype='datetime64[ns]')
@@ -326,28 +428,21 @@ def detect_trials(data, events, root, odor_map, verbose=True, stage=None):
             valve_events, initiation_time, next_initiation_time, poke_periods
         )
 
-        winner, failed_attempts, pending_failed_attempt, _attempt_num = _run_sampling_attempts(
-            attempt_events, poke_periods, cue_pokes, initiation_time, next_initiation_time,
-            required_min_ms_for=required_min_ms_for,
-            sample_offset_time_ms=sample_offset_time_ms,
-            verbose=verbose,
-        )
-
-        if (
-            winner is None
-            and is_odour_discrimination
-            and isinstance(failed_attempts, list)
-            and failed_attempts
-            and not await_reward_times.empty
-        ):
-            winner, candidate = _await_reward_promotes_attempt(
-                failed_attempts, pending_failed_attempt, await_reward_times,
-                next_initiation_time, default_minimum_sampling_time_ms,
+        if is_odour_discrimination and await_reward_recorded:
+            winner, failed_attempts = _run_await_reward_attempts(
+                attempt_events, poke_periods, cue_pokes, initiation_time, next_initiation_time,
+                await_reward_times,
+                required_min_ms_for=required_min_ms_for,
+                sample_offset_time_ms=sample_offset_time_ms,
+                verbose=verbose,
             )
-            if winner is not None:
-                winner['fallback_reason'] = 'await_reward_event'
-                vprint(verbose, "    Fallback: AwaitReward detected — counting trial despite short sampling")
-                failed_attempts = [fa for fa in failed_attempts if fa is not candidate]
+        else:
+            winner, failed_attempts, _pending, _attempt_num = _run_sampling_attempts(
+                attempt_events, poke_periods, cue_pokes, initiation_time, next_initiation_time,
+                required_min_ms_for=required_min_ms_for,
+                sample_offset_time_ms=sample_offset_time_ms,
+                verbose=verbose,
+            )
 
         if winner is not None:
             _record_detected_trial(
