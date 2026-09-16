@@ -30,10 +30,35 @@ from hypnose_behavior.io.protocol_schema import (
 )
 from hypnose_behavior.frames import build_position_data
 
-__all__ = ["SessionResults", "load_position_data", "load_results_dir",
-           "load_session_results"]
+__all__ = ["SessionResults", "load_non_initiated_attempts", "load_position_data",
+           "load_results_dir", "load_session_results"]
 
 _UNBUILT = object()
+
+# `non_initiated_attempts` first; `non_initiated_FA` is the same table under the name it
+# was saved with before DECISIONS.md section 30.
+_NON_INITIATED_NAMES = ("non_initiated_attempts", "non_initiated_FA")
+
+
+def load_non_initiated_attempts(results_dir) -> pd.DataFrame:
+    """Every failed initiation attempt of a session, one row per attempt.
+
+    Trial classification writes this beside `trial_data`: each row is a valve opening whose
+    cue-port sampling stayed below the odor's minimum, annotated with the reward-port visit
+    that followed it (`fa_label` / `fa_time` / `fa_port`). A row joins the trial its
+    initiation went on to produce on `(run_id, initiation_sequence_time)`.
+
+    **An empty frame with no columns means the session had no failed attempt**: the
+    writer skips empty tables, so there is no file to read. Parquet is read first, CSV
+    second (section 23).
+    """
+    results_dir = Path(results_dir)
+    for name in _NON_INITIATED_NAMES:
+        for suffix, reader in ((".parquet", pd.read_parquet), (".csv", pd.read_csv)):
+            path = layout.table_path(results_dir, f"{name}{suffix}")
+            if path.exists():
+                return reader(path)
+    return pd.DataFrame()
 
 
 def load_position_data(results_dir, trials):
@@ -225,10 +250,8 @@ def load_results_dir(results_dir):
     # that metrics never parse a JSON blob -- see `SessionResults` for why it is deferred.
     dict.__setitem__(results, "position_data", _UNBUILT)
 
-    # The `non_initiated_*` tables are deliberately not loaded: no metric is defined over
-    # them, and nothing in `visualization/` or `modelling/` reads them either. Trial
-    # classification still writes them, and `loaders._load_table_with_trial_data` still
-    # reads them on request.
+    # `non_initiated_attempts` is not part of this mapping: no metric is defined over it.
+    # It is read on request by `load_non_initiated_attempts`.
 
     # Attach manifest and summary
     results["manifest"] = manifest
