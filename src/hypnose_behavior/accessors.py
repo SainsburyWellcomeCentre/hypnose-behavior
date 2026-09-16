@@ -6,6 +6,7 @@ from __future__ import annotations
     s = hypnose_behavior.session(57, 20260709)   # resolves ONCE
     s.trial_data(columns=None)                   # None = every column
     s.position_data()
+    s.non_initiated_attempts()
     s.metrics(["decision_accuracy", "poke_durations"])
 
 and the same over a cohort, one tree walk per subject:
@@ -47,7 +48,7 @@ from hypnose_behavior.io.layout import (
     parse_subject_dirname,
     session_selectors,
 )
-from hypnose_behavior.io.load_results import load_results_dir
+from hypnose_behavior.io.load_results import load_non_initiated_attempts, load_results_dir
 from hypnose_behavior.io.parquet_peek import DEFAULT_ROWS, peek
 from hypnose_behavior.io.protocol_schema import (
     mode_independent_columns, trial_data_columns,
@@ -67,8 +68,10 @@ _IDENTITY = ("subjid", "date", "ses")
 
 # What `pooled` will read. The per-grain metric tables are deliberately absent: they are
 # an export and a record of an analysis run, never an input (section 25).
-_POOLABLE = ("trial_data", "position_data")
-_EXPORT_ONLY = ("metrics_by_trial", "metrics_by_poke", "non_initiated_attempts")
+# `non_initiated_attempts` is a trial-classification output like `trial_data`, not one of
+# them.
+_POOLABLE = ("trial_data", "position_data", "non_initiated_attempts")
+_EXPORT_ONLY = ("metrics_by_trial", "metrics_by_poke")
 
 
 # --------------------------------------------------------------------------------------
@@ -199,6 +202,7 @@ class Session:
         self.results_dir = Path(results_dir)
         self.ref = ref
         self._loaded = None
+        self._non_initiated = None
 
         if ref is not None:
             self.subjid, self.date = ref.subjid, str(ref.date)
@@ -313,6 +317,33 @@ class Session:
         if missing:
             raise KeyError(
                 f"{self}: position_data has no column(s) "
+                f"{', '.join(repr(c) for c in missing)}."
+                + _closest(missing[0], frame.columns, "column"))
+        return frame.loc[:, names].copy()
+
+    def non_initiated_attempts(self, columns: Optional[Sequence[str]] = None) -> pd.DataFrame:
+        """One row per failed initiation attempt, with the reward-port visit after it.
+
+        Read on first call by `io/load_results.load_non_initiated_attempts` and cached;
+        returns a copy. A row belongs to the trial with the same
+        `(run_id, initiation_sequence_time)`, when that initiation produced one.
+
+        **No failed attempt means a frame with no rows**, and a requested column is then
+        returned empty rather than refused: the writer skips empty tables, so there is no
+        file whose columns could be checked.
+        """
+        if self._non_initiated is None:
+            self._non_initiated = load_non_initiated_attempts(self.results_dir)
+        frame = self._non_initiated
+        if columns is None:
+            return frame.copy()
+        names = _as_names(columns, "columns")
+        if frame.empty and len(frame.columns) == 0:
+            return pd.DataFrame(columns=names)
+        missing = [c for c in names if c not in frame.columns]
+        if missing:
+            raise KeyError(
+                f"{self}: non_initiated_attempts has no column(s) "
                 f"{', '.join(repr(c) for c in missing)}."
                 + _closest(missing[0], frame.columns, "column"))
         return frame.loc[:, names].copy()
@@ -580,8 +611,9 @@ def pooled(handles: Iterable[Session], table: str = "trial_data",
     > contributions with `metrics.common.reduce_rate`. That is the defect two rolling
     > accuracies disagreed over for years.
 
-    `table` is `trial_data` or `position_data`. The per-grain metric tables are refused
-    on purpose: they are an export and a record, never an input (section 25).
+    `table` is `trial_data`, `position_data` or `non_initiated_attempts`. A session with
+    no failed attempt contributes no rows to the last. The per-grain metric tables are
+    refused on purpose: they are an export and a record, never an input (section 25).
 
     Raises on an empty selection rather than returning an empty frame -- a cohort call
     that silently pools zero sessions looks exactly like one that succeeded.
@@ -597,9 +629,14 @@ def pooled(handles: Iterable[Session], table: str = "trial_data",
             f"(docs/DECISIONS.md section 25). Compute it: pooled_metrics(handles, [...]) "
             f"or s.metrics([...]). Poolable tables: {', '.join(_POOLABLE)}.")
     if table not in _POOLABLE:
-        raise ValueError(f"pooled() reads {' or '.join(_POOLABLE)}, not {table!r}.")
+        raise ValueError(f"pooled() reads {', '.join(_POOLABLE)}, not {table!r}.")
 
-    frames = [_stamped(getattr(h, table)(columns=columns), h) for h in handles]
+    # A column-less frame is a session without the table (no failed attempt): it has no
+    # rows to pool, and letting it into the concat would report every column as ragged.
+    frames = [_stamped(frame, h) for h in handles
+              for frame in [getattr(h, table)(columns=columns)] if len(frame.columns)]
+    if not frames:
+        return pd.DataFrame(columns=list(_IDENTITY))
     _warn_ragged(frames, table)
     pool = pd.concat(frames, ignore_index=True)
     _warn_widened(frames, pool, table)

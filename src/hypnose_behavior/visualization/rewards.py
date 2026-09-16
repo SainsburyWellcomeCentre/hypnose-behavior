@@ -15,7 +15,7 @@ from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     derivatives,
     normalize_subjid,
-    session_selectors,
+    subject_selections,
 )
 from hypnose_behavior.io.paths import (
     get_rawdata_root,
@@ -27,6 +27,19 @@ import json
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.io.loaders import _load_trial_views, iter_sessions
 
+
+
+def _save_dates(entries, dates):
+    """The dates a saved figure is filed under: the shared `dates`, or every subject's own."""
+    if not isinstance(dates, dict) and all(d is dates for _, d, _ in entries):
+        return dates
+    out = []
+    for _, subj_dates, _ in entries:
+        if isinstance(subj_dates, (list, tuple)):
+            out.extend(subj_dates)
+        elif subj_dates is not None:
+            out.append(subj_dates)
+    return out
 
 
 def plot_cumulative_rewards(
@@ -59,8 +72,11 @@ def plot_cumulative_rewards(
 
     Parameters:
     -----------
-    subjids : int or list
-        Subject ID(s)
+    subjids : int, list, or dict
+        Subject ID(s). A dict gives each subject its own selection: the value is
+        either that subject's dates (a range tuple or a list) or a dict of
+        selectors, e.g. ``{63: {"ses_range": (1, 10)}, 64: {"ses_range": (3, 11)}}``
+        (see ``io.layout.subject_selections``).
     dates : list, tuple, dict, or None
         Dates to include. If a dict, must map subjid → date range (each value
         is itself a list/tuple/None passed through to ``iter_sessions``
@@ -99,37 +115,15 @@ def plot_cumulative_rewards(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`). A
+    per-subject selector in a ``subjids`` dict replaces the keyword of the same name for
+    that subject.
     """
-    select = session_selectors(
-        ses=ses, index=index, date_range=date_range,
+    entries = subject_selections(
+        subjids, dates, ses=ses, index=index, date_range=date_range,
         ses_range=ses_range, index_range=index_range,
     )
-    # Ensure subjids is a list
-    if isinstance(subjids, dict):
-        # Convenience: allow passing one dict for both ({subjid: date_range}).
-        dates = subjids if not isinstance(dates, dict) or dates is None else dates
-        subjids = list(subjids.keys())
-    elif isinstance(subjids, set):
-        subjids = sorted(subjids)
-    elif not isinstance(subjids, (list, tuple)):
-        subjids = [subjids]
-
-    def _dates_for(subjid):
-        if not isinstance(dates, dict):
-            return dates
-        if subjid in dates:
-            return dates[subjid]
-        try:
-            int_key = int(subjid)
-            if int_key in dates:
-                return dates[int_key]
-        except (TypeError, ValueError):
-            pass
-        str_key = str(subjid)
-        if str_key in dates:
-            return dates[str_key]
-        return None
+    subjids = [subjid for subjid, _, _ in entries]
 
     fig, ax = plt.subplots(figsize=figsize)
     colors = plt.cm.tab20(range(len(subjids)))
@@ -137,11 +131,7 @@ def plot_cumulative_rewards(
     data_xmax_val = 0.0  # data extents (tracked here so axvline markers don't skew limits)
     data_ymax_val = 0.0
 
-    for subj_idx, subjid in enumerate(subjids):
-        subj_dates = _dates_for(subjid)
-        if isinstance(dates, dict) and subj_dates is None:
-            print(f"Warning: No date range provided in dict for subject {subjid}, skipping")
-            continue
+    for subj_idx, (subjid, subj_dates, select) in enumerate(entries):
         all_rewarded = []
         session_info = []
         session_da = {}  # date_str -> decision accuracy (for show_da_thresh)
@@ -351,20 +341,11 @@ def plot_cumulative_rewards(
     if save:
         try:
             suffix = "split_days" if split_days else "continuous"
-            if isinstance(dates, dict):
-                save_dates = []
-                for v in dates.values():
-                    if isinstance(v, (list, tuple)):
-                        save_dates.extend(v)
-                    elif v is not None:
-                        save_dates.append(v)
-            else:
-                save_dates = dates
             out_path = save_figure(
                 fig,
                 f"cumulative_rewards_{suffix}",
-                subjids=list(subjids) if isinstance(subjids, (list, tuple)) else [subjids],
-                dates=save_dates,
+                subjids=subjids,
+                dates=_save_dates(entries, dates),
             )
             if verbose:
                 print(f"[plot_cumulative_rewards] Saved figure to {out_path}")
@@ -407,7 +388,7 @@ def plot_cumulative_rewards_by_trial(
     honoured for a single subject; with more than one subject they are forced
     off (the trial axis is not shared session-for-session across subjects).
     Accepts the same subjids/dates forms, including a ``{subjid: date_range}``
-    dict (pass it as ``subjids`` with ``dates=None``).
+    or ``{subjid: {selector: value}}`` dict passed as ``subjids``.
 
     Returns
     -------
@@ -415,35 +396,15 @@ def plot_cumulative_rewards_by_trial(
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
-    is the subject's gap-free chronological rank (`io.layout.session_selectors`).
+    is the subject's gap-free chronological rank (`io.layout.session_selectors`). A
+    per-subject selector in a ``subjids`` dict replaces the keyword of the same name for
+    that subject.
     """
-    select = session_selectors(
-        ses=ses, index=index, date_range=date_range,
+    entries = subject_selections(
+        subjids, dates, ses=ses, index=index, date_range=date_range,
         ses_range=ses_range, index_range=index_range,
     )
-    if isinstance(subjids, dict):
-        dates = subjids if (dates is None or not isinstance(dates, dict)) else dates
-        subjids = list(subjids.keys())
-    elif isinstance(subjids, set):
-        subjids = sorted(subjids)
-    elif not isinstance(subjids, (list, tuple)):
-        subjids = [subjids]
-
-    def _dates_for(subjid):
-        if not isinstance(dates, dict):
-            return dates
-        if subjid in dates:
-            return dates[subjid]
-        try:
-            int_key = int(subjid)
-            if int_key in dates:
-                return dates[int_key]
-        except (TypeError, ValueError):
-            pass
-        str_key = str(subjid)
-        if str_key in dates:
-            return dates[str_key]
-        return None
+    subjids = [subjid for subjid, _, _ in entries]
 
     single_subject = len(subjids) == 1
     gap_on = show_gap_shading and single_subject
@@ -452,12 +413,7 @@ def plot_cumulative_rewards_by_trial(
     fig, ax = plt.subplots(figsize=figsize)
     colors = plt.cm.tab20(range(len(subjids)))
 
-    for subj_idx, subjid in enumerate(subjids):
-        subj_dates = _dates_for(subjid)
-        if isinstance(dates, dict) and subj_dates is None:
-            print(f"Warning: No date range provided in dict for subject {subjid}, skipping")
-            continue
-
+    for subj_idx, (subjid, subj_dates, select) in enumerate(entries):
         derivatives_dir = get_derivatives_root()
         subj_str = normalize_subjid(subjid)
         subj_dir = derivatives.subject_dir(subjid, missing_ok=True)
@@ -541,20 +497,11 @@ def plot_cumulative_rewards_by_trial(
 
     if save:
         try:
-            if isinstance(dates, dict):
-                save_dates = []
-                for v in dates.values():
-                    if isinstance(v, (list, tuple)):
-                        save_dates.extend(v)
-                    elif v is not None:
-                        save_dates.append(v)
-            else:
-                save_dates = dates
             out_path = save_figure(
                 fig,
                 "cumulative_rewards_by_trial",
-                subjids=list(subjids) if isinstance(subjids, (list, tuple)) else [subjids],
-                dates=save_dates,
+                subjids=subjids,
+                dates=_save_dates(entries, dates),
             )
             if verbose:
                 print(f"[plot_cumulative_rewards_by_trial] Saved figure to {out_path}")

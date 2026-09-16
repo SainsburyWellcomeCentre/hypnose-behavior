@@ -247,6 +247,88 @@ def session_selectors(*, ses=None, index=None, date_range=None,
             "ses_range": ses_range, "index_range": index_range}
 
 
+_SELECTOR_KEYS = ("dates", "ses", "index", "date_range", "ses_range", "index_range")
+
+
+def _lookup_subject(mapping: dict, subjid):
+    """`mapping[subjid]`, accepting the key as an int or a string; `KeyError` if absent."""
+    for key in (subjid, str(subjid)):
+        if key in mapping:
+            return mapping[key]
+    try:
+        return mapping[int(subjid)]
+    except (TypeError, ValueError):
+        raise KeyError(subjid) from None
+
+
+def subject_selections(subjids, dates=None, **selectors) -> list[tuple]:
+    """`(subjid, dates, selectors)` per subject, from any of the cohort forms plotters take.
+
+        subject_selections([63, 66], ses_range=(1, 10))              # one selection for all
+        subject_selections({63: (20260720, 20260731), 64: None})     # per-subject dates
+        subject_selections({63: {"ses_range": (1, 10)},
+                            64: {"ses_range": (3, 11)}})             # per-subject selectors
+        subject_selections([63, 64], dates={63: [...], 64: [...]})   # per-subject dates
+
+    `subjids` is one id, a list/tuple/set of them, or a dict keyed by subject. A dict
+    value is either that subject's `dates` (a 2-tuple range, a list, or None) or a dict of
+    selectors drawn from `dates` / `ses` / `index` / `date_range` / `ses_range` /
+    `index_range`. `dates` may itself be a `{subjid: dates}` dict, and then it supplies
+    the dates even when `subjids` is a dict of dates too.
+
+    **Per-subject selectors replace the shared keyword of the same name, and intersect
+    with the rest** -- `subject_selections({63: {"ses_range": (1, 10)}}, date_range=r)`
+    is ses 1-10 within `r`. The returned `selectors` dict is `session_selectors`' shape,
+    ready to forward to `iter_sessions` / `find_sessions` with `dates`.
+
+    A subject missing from a `dates` dict, or whose dict value is None under the
+    per-subject-dates form, is skipped with a printed warning, never given its whole
+    history.
+    """
+    unknown = set(selectors) - set(_SELECTOR_KEYS[1:])
+    if unknown:
+        raise TypeError(f"unknown session selector(s): {', '.join(sorted(unknown))}")
+    shared = session_selectors(**selectors)
+
+    per_subject = subjids if isinstance(subjids, dict) else None
+    if per_subject is not None:
+        ids = list(per_subject)
+    elif isinstance(subjids, set):
+        ids = sorted(subjids)
+    elif isinstance(subjids, (list, tuple)):
+        ids = list(subjids)
+    else:
+        ids = [subjids]
+
+    out = []
+    for subjid in ids:
+        subj_dates, subj_select = dates, dict(shared)
+        if per_subject is not None:
+            value = per_subject[subjid]
+            if isinstance(value, dict):
+                bad = set(value) - set(_SELECTOR_KEYS)
+                if bad:
+                    raise TypeError(f"subject {subjid}: unknown session selector(s): "
+                                    f"{', '.join(sorted(bad))}")
+                subj_dates = value.get("dates", dates)
+                subj_select.update({k: v for k, v in value.items() if k != "dates"})
+            elif not isinstance(dates, dict):
+                subj_dates = value
+                if subj_dates is None:
+                    print(f"Warning: No date range provided in dict for subject {subjid}, skipping")
+                    continue
+        if isinstance(subj_dates, dict):
+            try:
+                subj_dates = _lookup_subject(subj_dates, subjid)
+            except KeyError:
+                subj_dates = None
+            if subj_dates is None:
+                print(f"Warning: No date range provided in dict for subject {subjid}, skipping")
+                continue
+        out.append((subjid, subj_dates, subj_select))
+    return out
+
+
 def _filter_sessions(subj_dir: Path,
                      dates: Optional[Union[Iterable[Union[int, str]], tuple]] = None,
                      *, ses=None, index=None,
@@ -286,7 +368,7 @@ __all__ = [
     "RESULTS_DIRNAME", "results_dir", "table_path", "write_path",
     "RESULTS_SUBFOLDERS", "RESULTS_SUBFOLDER_PREFIXES", "results_subfolder",
     "MOVEMENT_SUBFOLDER", "find_tracking_file", "results_dir_of",
-    "session_selectors",
+    "session_selectors", "subject_selections",
     "SessionRef", "SessionLayout", "DuplicateSessionError",
     "list_sessions", "filter_sessions", "normalize_subjid",
     "parse_subject", "parse_subject_dirname", "parse_session_dirname",

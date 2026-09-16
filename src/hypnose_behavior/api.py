@@ -49,14 +49,15 @@ __all__ = [
     # -- a session, resolved once -----------------------------------------------------
     "session",                  # session(subjid, date) -> Session
     "sessions",                 # every analysed session of one or more subjects
-    "Session",                  # .trial_data / .position_data / .metrics / .peek
+    "Session",                  # .trial_data / .position_data / .non_initiated_attempts
+                                # / .metrics / .peek
     "metric_names",             # what you may ask `Session.metrics` for
 
     # -- a cohort, in one frame --------------------------------------------------------
     # `subjid`/`date`/`ses` are stamped on and nothing else is rewritten, so a pooled row
     # is byte-identical to the session's own. `global_trial_id` therefore stays
     # non-unique across sessions -- key on (subjid, date, global_trial_id), section 28.
-    "pooled",                   # trial_data / position_data over many sessions
+    "pooled",                   # trial_data / position_data / non_initiated_attempts
     "pooled_metrics",           # one row per session, one column per metric
 
     # -- reading a directory you already hold ------------------------------------------

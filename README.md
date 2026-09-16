@@ -123,6 +123,7 @@ Everything below is a file read against the path it found — nothing re-resolve
 s.trial_data()                                        # one row per trial, every column
 s.trial_data(columns=["response_time_ms", "is_aborted"])
 s.position_data()                                     # one row per trial x position
+s.non_initiated_attempts()                            # one row per failed initiation attempt
 s.metrics(["decision_accuracy", "poke_durations"])    # {name: value}, computed
 s.metric("decision_accuracy")                         # just the one
 
@@ -156,6 +157,7 @@ df = pooled(hs, "trial_data", columns=["response_time_ms"])
 #   40      20251124  21   640.1
 
 pooled(hs, "position_data")                     # same, per trial x position
+pooled(hs, "non_initiated_attempts")            # same, per failed initiation attempt
 pooled_metrics(hs, ["decision_accuracy"])       # one ROW per session, one COLUMN per metric
 ```
 
@@ -173,6 +175,7 @@ not that something failed.)
 | one session's trials | `session(57, 20260709).trial_data()` |
 | two columns of it | `.trial_data(columns=["a", "b"])` |
 | its per-position record | `.position_data()` |
+| its failed initiation attempts | `.non_initiated_attempts()` |
 | a metric, or several | `.metrics(["decision_accuracy", ...])` |
 | what metrics exist | `metric_names()` — or `metric_names(reported=True)` for the 25 saved ones |
 | every session of a subject | `sessions(57)` |
@@ -351,6 +354,23 @@ Single-Reward Protocol / False Response Information
     response_time_category remain meaningful (rewarded/unrewarded/timeout) for rewarded-type
     sequences only. Completed non-rewarded sequences are also collected in the
     `completed_sequence_false_response` table.
+
+1.2. Failed initiation attempts
+
+Trial classification also writes `non_initiated_attempts` (read with `s.non_initiated_attempts()`): one row per valve opening whose cue-port sampling stayed below the odor's minimum sampling time. A row belongs to the trial with the same `(run_id, initiation_sequence_time)`, when that initiation produced one. The file is not written for a session with no failed attempt.
+
+    - initiation_sequence_time (timestamp): The InitiationSequence event the attempt belongs to
+    - attempt_start / attempt_end (timestamp): First poke in the valve window (valve opening if none) / end of the last counted poke segment
+    - attempt_number (int): Position of the attempt within its initiation, starting at 1; the trial that follows is the next number
+    - continuous_poke_time_ms (float): Sampling time accumulated during the valve window (0 = no poke overlapped the valve opening)
+    - required_min_sampling_time_ms (float): The odor's minimum sampling time
+    - odor_name (string): Odor the valve delivered
+    - next_attempt_start (timestamp): Start of the next valve opening in the same initiation
+    - failure_reason (string): Why the attempt did not initiate
+    - fa_label (string): Reward-port visit between attempt_end and the next cue-port poke: "FA_time_in", "FA_time_out", "FA_late", or "nFA" (no visit)
+    - fa_time / fa_window_latency_ms / fa_port (timestamp / float / int): When, how long after attempt_end, and which port (1 for A, 2 for B)
+    - is_hr (boolean): Whether the odor is a hidden-rule odor
+    - run_id (int): Run the attempt is from
 
 
 2. Behavioral Metric Calculation
