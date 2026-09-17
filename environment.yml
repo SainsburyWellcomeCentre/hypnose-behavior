@@ -9,6 +9,7 @@ dependencies:
   - pyarrow
   - matplotlib
   - scipy
+  - statsmodels
   - tqdm
   - pillow
   - ipython

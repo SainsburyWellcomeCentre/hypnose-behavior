@@ -14,6 +14,7 @@ dependencies = [
     "pyarrow",
     "matplotlib",
     "scipy",
+    "statsmodels",
     "tqdm",
     "dotmap",
     "Pillow",
