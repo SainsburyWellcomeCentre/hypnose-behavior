@@ -173,6 +173,65 @@ At N = 20, SE on a proportion ≈ 0.10, so individual boundary comparisons are n
 Additional Plot: pool all sessions per animal, and plot the accuracy binned by within-session position (1 plot non normalized, binning trials 0-10, 11-20 or similar, depending on window size, and one normalized, binning first 10% etc.)
 This plot shows if there is a within session gain effect per animal, e.g., quick ramp-up in gain early in session etc. This can change interpretation of β values in 0.6 (non-zero beta might be just ramp-up early in session). 
 
+### 0.8 Analysis modes
+
+A **choice attempt** is any attempt followed by a port visit: completed trials with a
+rewarded/unrewarded outcome, plus non-initiated attempts with a port visit (zero-poke
+included — the visit is a choice regardless of poke duration). Attempts without a port
+visit, timeouts and aborted trials carry no choice and are excluded.
+
+Two modes. Everything from 0.6 onward runs unchanged on whichever is primary; only the
+row set and the index change.
+
+| Mode | Rows | Independence | Trades |
+|---|---|---|---|
+| completed | completed trials | one row per trial | discards 34% of expressed choices (19–39% per animal) |
+| all choice attempts | every choice attempt | multiple rows per trial | +23–65% rows depending on animal |
+
+Run primary on **completed**, then re-run on all choice attempts as a robustness check.
+If k̂_s barely moves, the exclusion is earned by evidence rather than argument.
+
+Justification for completed as primary: D2 showed accuracy on failed attempts largely
+tracks completed-trial accuracy from session 2 onward (exception: sub-066 sessions 8–10,
+completed ≈0.91 vs failed 0.75–0.84), so completed trials are not strongly selected for
+knowledge. D3 was null, so elimination contributes nothing. What exclusion does cost is
+the experience axis: odor is delivered on every attempt, so learning opportunities track
+choice attempts, not completed trials, and the mapping between them shifts as initiation
+rate changes.
+
+Within-trial dependence (correctness minus its animal × session × odor accuracy):
+alternating — lag-1 r = −0.16, lag-2 r = +0.16, lag-3 r = −0.03. Measured ICC −0.08,
+design effect 0.96 pooled; per animal 0.89–1.10 (sub-065 the only one > 1, ≈5% on the
+SE). No cluster correction in attempt mode.
+
+Columns needed: `is_choice_attempt`, `choice_attempt_idx` (cumulative across sessions),
+`attempt_in_trial`.
+
+#### What changes per section
+
+| Section | Under attempt mode |
+|---|---|
+| 0.2 | unchanged — non-initiated yield no reward |
+| 0.5 D1 | promoted from diagnostic to variable: Bernoulli sigmoid on `initiated`/`not` over the index of all attempts with a poke (§4.1) — not `choice_attempt_idx`, which counts only attempts with a port visit |
+| 0.6 | y = correct on choice attempts; x normalized over choice attempts within session |
+| 0.7 | N defined in choice attempts. Must match 0.6 — never pool trial-based and attempt-based windows |
+| 1.1 A | add cumulative attempts as a second line; the gap to cumulative initiations is the initiation failure |
+| 1.1 B | excess correct over choice attempts, same timestamps on x |
+| 1.1 C | unchanged — rewards only on completed trials |
+| 1.2 | y over choice attempts. A random walk cannot represent the alternation, so σ may shift relative to completed mode; compare σ between modes |
+| 2.1–2.6 | k becomes `choice_attempt_idx`. Model, likelihood, step model and posterior are index-agnostic |
+| 3 | rows become choice attempts; the previous-attempt requirement for regressors then falls out naturally. Optionally add `initiated` as a fifth regressor and check its weight is ~0, consistent with D2 |
+
+**Note for later — a third mode.** *First choice attempt per trial*: one row per trial
+(same n as completed), but scoring the earliest expressed choice rather than the
+completed-trial choice. These differ on 6–15% of completed trials (24–43% of trials with
+≥1 choice attempt), depending on animal. It does not remove the initiation-success
+conditioning — a trial only exists once an initiation succeeded — so its only use is to
+separate two explanations if completed and attempt mode disagree: clustering within
+trials, versus which choice gets scored. Not worth running unless that disagreement
+appears.
+
+
 ---
 
 ## 1. Visualization
