@@ -9,12 +9,13 @@ description = "Analysis tools for hypnose experiments"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "numpy<2",
+    "numpy",
     "pandas",
     "pyarrow",
     "matplotlib",
     "scipy",
     "statsmodels",
+    "pymc",
     "tqdm",
     "dotmap",
     "Pillow",
@@ -25,7 +26,7 @@ dependencies = [
     "pyyaml",
 
     # Behavioural-data and video stack.
-    "swc-aeon==0.1.0",
+    "swc-aeon>=0.2.0",
     "harp-python",
     "moviepy",
     "opencv-python",

@@ -16,8 +16,14 @@ from dotmap import DotMap
 import pandas as pd
 from pathlib import Path
 from glob import glob
-from aeon.io.reader import Reader, Csv
-import aeon.io.api as api
+# `swc-aeon` ships as `aeon` up to 0.1.0 and as the namespace package `swc.aeon` from
+# 0.2.0; both layouts expose the same readers.
+try:
+    from aeon.io.reader import Reader, Csv
+    import aeon.io.api as api
+except ModuleNotFoundError:  # pragma: no cover - depends on the installed swc-aeon
+    from swc.aeon.io.reader import Reader, Csv
+    import swc.aeon.io.api as api
 
 
 class SessionData(Reader):
