@@ -35,6 +35,7 @@ __all__ = [
     "build_choices",
     "is_ab_stage",
     "load_ab_data",
+    "within_session_position",
 ]
 
 # `odourdiscrimination-stageN`, also inside a schema path. Stage 1 presents no odor (light
@@ -273,12 +274,17 @@ def load_ab_data(subjids, dates=None, *, ses=None, index=None, date_range=None,
     }
 
 
-def _within_session(frame: pd.DataFrame) -> pd.Series:
+def within_session_position(frame: pd.DataFrame) -> pd.Series:
     """``(k - 1) / (K_s - 1)`` over the rows given: 0 at a session's first row, 1 at its
-    last, 0.0 when a session holds one row."""
-    key = ["subjid", "session_idx"]
-    position = frame.groupby(key).cumcount()
-    size = frame.groupby(key)["time"].transform("size")
+    last, 0.0 when a session holds one row.
+
+    Position is the row's rank within its ``(subjid, session_idx)`` group, so the frame
+    must already be in the order the rows happened, and the axis it normalizes over is
+    whichever rows are passed in.
+    """
+    grouped = frame.groupby(["subjid", "session_idx"])
+    position = grouped.cumcount()
+    size = position + grouped.cumcount(ascending=False) + 1
     span = (size - 1).where(size > 1, 1)
     return pd.Series(np.where(size > 1, position / span, 0.0), index=frame.index)
 
@@ -344,7 +350,8 @@ def build_choices(data: dict) -> pd.DataFrame:
     completed = choices["is_completed"].to_numpy()
     choices["trial_idx"] = (choices[completed].groupby("subjid").cumcount()
                             .reindex(choices.index))
-    choices["x_session"] = np.where(completed,
-                                    _within_session(choices[completed]).reindex(choices.index),
-                                    _within_session(choices))
+    choices["x_session"] = np.where(
+        completed,
+        within_session_position(choices[completed]).reindex(choices.index),
+        within_session_position(choices))
     return choices[_CHOICE_COLUMNS]
