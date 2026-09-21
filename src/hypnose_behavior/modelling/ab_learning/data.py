@@ -32,6 +32,7 @@ from hypnose_behavior.io.loaders import _odor_to_letter, iter_sessions
 __all__ = [
     "PORT_LETTERS",
     "PORT_VISIT_LABELS",
+    "build_choices",
     "is_ab_stage",
     "load_ab_data",
 ]
@@ -62,6 +63,11 @@ _ATTEMPT_COLUMNS = _IDENTITY + [
     "port", "correct_port", "global_trial_id", "trailing",
 ]
 _SESSION_COLUMNS = _IDENTITY + ["n_runs", "n_trials", "n_attempts"]
+_CHOICE_COLUMNS = _IDENTITY + [
+    "run_id", "global_trial_id", "initiation_sequence_time", "time", "odor", "choice",
+    "correct", "is_completed", "zero_poke", "attempt_in_trial", "choice_attempt_idx",
+    "trial_idx", "x_session",
+]
 
 
 def is_ab_stage(stage_name) -> bool:
@@ -265,3 +271,80 @@ def load_ab_data(subjids, dates=None, *, ses=None, index=None, date_range=None,
         "attempts": attempts[_ATTEMPT_COLUMNS],
         "sessions": pd.DataFrame(session_rows, columns=_SESSION_COLUMNS),
     }
+
+
+def _within_session(frame: pd.DataFrame) -> pd.Series:
+    """``(k - 1) / (K_s - 1)`` over the rows given: 0 at a session's first row, 1 at its
+    last, 0.0 when a session holds one row."""
+    key = ["subjid", "session_idx"]
+    position = frame.groupby(key).cumcount()
+    size = frame.groupby(key)["time"].transform("size")
+    span = (size - 1).where(size > 1, 1)
+    return pd.Series(np.where(size > 1, position / span, 0.0), index=frame.index)
+
+
+def build_choices(data: dict) -> pd.DataFrame:
+    """One row per **choice**: a completed trial, or a failed attempt with a port visit.
+
+        choices = build_choices(load_ab_data(...))
+        completed = choices[choices["is_completed"]]      # completed-trial mode
+        every_choice = choices                            # all-choice-attempt mode
+
+    A choice is an expressed A/B decision. A completed trial counts when it was scored
+    (rewarded or unrewarded); a timeout or an aborted trial expresses none. A failed
+    attempt counts when a reward port was visited, zero-poke attempts included: the visit
+    is a choice whether or not the odor was sampled long enough.
+
+    Rows are ordered by time within an animal and carry both indices, so either mode is a
+    filter rather than a rebuild:
+
+    - ``choice_attempt_idx`` -- 0-based over every choice of the animal, across sessions.
+    - ``trial_idx`` -- 0-based over its completed choices only; NaN on attempt rows.
+    - ``attempt_in_trial`` -- order of the choices within one initiation, the completed
+      trial last.
+    - ``x_session`` -- position within the session on the axis of the row's own mode, 0 at
+      the first choice and 1 at the last (``(k - 1) / (K_s - 1)``, 0.0 for a single
+      choice), so a within-session slope never mixes the two axes.
+
+    Also carries ``odor``, ``choice`` (``"A"`` / ``"B"``), ``correct``, ``is_completed``,
+    ``zero_poke`` (False on completed rows) and the
+    ``(run_id, initiation_sequence_time)`` key the two source frames join on.
+    """
+    trials, attempts = data["trials"], data["attempts"]
+    keys = _IDENTITY + ["run_id", "global_trial_id", "initiation_sequence_time"]
+
+    scored = trials[trials["correct"].notna()]
+    trial_rows = pd.DataFrame({
+        **{c: scored[c] for c in keys},
+        "time": scored["sequence_start"],
+        "odor": scored["odor"],
+        "choice": scored["choice"],
+        "correct": scored["correct"].astype(bool),
+        "is_completed": True,
+        "zero_poke": False,
+    })
+
+    visited = attempts[attempts["port_visit"].astype(bool) & attempts["correct_port"].notna()]
+    attempt_rows = pd.DataFrame({
+        **{c: visited[c] for c in keys},
+        "time": visited["attempt_start"],
+        "odor": visited["odor"],
+        "choice": visited["port"],
+        "correct": visited["correct_port"].astype(bool),
+        "is_completed": False,
+        "zero_poke": visited["zero_poke"].astype(bool),
+    })
+
+    choices = pd.concat([trial_rows, attempt_rows], ignore_index=True)
+    choices = choices.sort_values(["subjid", "time"]).reset_index(drop=True)
+    choices["attempt_in_trial"] = choices.groupby(
+        ["subjid", "run_id", "initiation_sequence_time"]).cumcount()
+    choices["choice_attempt_idx"] = choices.groupby("subjid").cumcount()
+
+    completed = choices["is_completed"].to_numpy()
+    choices["trial_idx"] = (choices[completed].groupby("subjid").cumcount()
+                            .reindex(choices.index))
+    choices["x_session"] = np.where(completed,
+                                    _within_session(choices[completed]).reindex(choices.index),
+                                    _within_session(choices))
+    return choices[_CHOICE_COLUMNS]
