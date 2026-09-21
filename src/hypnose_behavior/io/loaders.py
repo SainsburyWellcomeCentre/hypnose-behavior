@@ -22,8 +22,14 @@ from importlib.resources import files
 import harp
 import pandas as pd
 from dotmap import DotMap
-from aeon.io.reader import Reader, Csv
-import aeon.io.api as api
+# `swc-aeon` ships as `aeon` up to 0.1.0 and as the namespace package `swc.aeon` from
+# 0.2.0; both layouts expose the same readers.
+try:
+    from aeon.io.reader import Reader, Csv
+    import aeon.io.api as api
+except ModuleNotFoundError:  # pragma: no cover - depends on the installed swc-aeon
+    from swc.aeon.io.reader import Reader, Csv
+    import swc.aeon.io.api as api
 
 import hypnose_behavior.io.detect_settings as detect_settings
 from hypnose_behavior.io.load_results import (  # noqa: F401
