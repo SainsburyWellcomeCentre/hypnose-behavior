@@ -39,8 +39,15 @@ __all__ = ["plot_gain_decomposition"]
 # Slot 1 for the gain inside a session, slot 2 for the gain across the night after it.
 _WITHIN = SERIES
 _OVERNIGHT = "#eb6834"
-_COMPONENT_STYLE = {"within": (_WITHIN, "within session"),
-                    "overnight": (_OVERNIGHT, "overnight")}
+# Each group of gains: which rows, the colour, whether the marker is hollow, the label.
+# Hollow marks a gain outside the paired within/overnight total -- the last session's
+# W_s, which has no boundary after it, and a boundary holding a dropped session.
+_GAIN_GROUPS = (
+    ("within", True, _WITHIN, False, "within session"),
+    ("within", False, _WITHIN, True, "within, unpaired"),
+    ("overnight", True, _OVERNIGHT, False, "overnight"),
+    ("across_gap", True, _OVERNIGHT, True, "spans a dropped session"),
+)
 
 # A session occupies this much of its slot on the x axis; the rest is the boundary that
 # follows it, so a within-session segment and an overnight step never overlap.
@@ -87,30 +94,41 @@ def _plot_levels(ax, levels):
 
 
 def _plot_gains(ax, gains):
-    """W_s and O_s with their 95% intervals, each above the session it belongs to."""
-    for component, (color, label) in _COMPONENT_STYLE.items():
-        part = gains[gains["component"] == component]
+    """W_s and O_s with their 95% intervals, each above the session it belongs to.
+
+    A gain outside the paired total -- the last session's W_s, and a boundary with a
+    dropped session inside it -- is drawn hollow.
+    """
+    for component, paired, color, hollow, label in _GAIN_GROUPS:
+        part = gains[(gains["component"] == component) & (gains["in_total"] == paired)]
         if part.empty:
             continue
-        offset = 0.0 if component == "within" else _SESSION_SPAN
-        x = part["session_idx"].to_numpy() + offset
+        x = part["session_idx"].to_numpy() + (0.0 if component == "within" else _SESSION_SPAN)
         err = np.vstack([part["value"] - part["lo"], part["hi"] - part["value"]])
         ax.errorbar(x, part["value"], yerr=err, fmt="o", color=color, markersize=6,
-                    markeredgecolor="white", markeredgewidth=1, elinewidth=2, capsize=0,
-                    label=label)
+                    markerfacecolor="white" if hollow else color,
+                    markeredgecolor=color if hollow else "white", markeredgewidth=1.4,
+                    elinewidth=2, capsize=0, label=label)
     ax.axhline(0, color=REFERENCE, linestyle="--", linewidth=1)
 
 
 def _headline(share) -> str:
-    """The animal's one-line summary of where its total change happened."""
-    if share["mixed_signs"]:
-        direction = "gained within sessions, given back overnight" if \
-            share["within_total"] > 0 else "gained overnight, given back within sessions"
-        return (f"total {share['total']:+.2f} logit ({direction}); "
-                f"{share['share_of_movement']:.0%} of all movement overnight")
-    return (f"total {share['total']:+.2f} logit, "
-            f"{share['overnight_share']:.0%} of it overnight "
-            f"[{share['overnight_share_lo']:.0%}, {share['overnight_share_hi']:.0%}]")
+    """Where the animal's total change happened, in the terms that survive its signs.
+
+    The two sums in log-odds always; the share of the total only when both point the
+    same way, since a ratio of components with opposite signs is not a percentage.
+    """
+    line = (f"$\\Sigma$W {share['within_total']:+.2f}, "
+            f"$\\Sigma$O {share['overnight_total']:+.2f} "
+            f"$\\rightarrow$ total {share['total']:+.2f} logit")
+    if not share["mixed_signs"]:
+        line += (f", {share['overnight_share']:.0%} overnight "
+                 f"[{share['overnight_share_lo']:.0%}, {share['overnight_share_hi']:.0%}]")
+    extra = []
+    if share["gap_total"]:
+        extra.append(f"{share['gap_total']:+.2f} across a dropped session")
+    extra.append(f"last session {share['final_within']:+.2f}, unpaired")
+    return f"{line}\n{'; '.join(extra)}"
 
 
 def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,

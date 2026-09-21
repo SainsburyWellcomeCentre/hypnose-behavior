@@ -71,7 +71,7 @@ r(t) = r_i + ((r_f − r_i)/2) · [1 + erf((t − t_s)/w)]
 erf(x) = (2/√π) ∫₀ˣ e^(−u²) du
 ```
 
-Fit an S-shaped curve to the rate of rewards over time and determine a changepoint where the animal changed its behaviour to obtain more rewards. This change must be shown to be due to a change in **knowledge** (odor–port association) and not **engagement** (more trials per time, or initiating more trials).
+Fit an S-shaped curve to the rate of rewards over time (raw binary sequence over trial index, time as display) and determine a changepoint where the animal changed its behaviour to obtain more rewards. This change must be shown to be due to a change in **knowledge** (odor–port association) and not **engagement** (more trials per time, or initiating more trials).
 
 ### 0.5 Diagnostics
 
@@ -83,6 +83,8 @@ Answers whether the animal first learns to initiate trials and then the A/B rule
 
 **D3 — Lose-shift check.** Because odors repeat until successful initiation, a mouse could in principle solve a trial by elimination: fail to initiate on odor A, visit port B, get nothing, then initiate on the repeated A and go to A — correct, without knowing the rule.
 
+**D4 repeated-choice agreement vs accuracy-implied chance** - implemented. 
+
 This requires a failed initiation with a port visit followed immediately by a successful initiation on the same odor, which should be rare and not systematic. **Count how often it actually occurs first.** If non-negligible, split completed trials and compare:
 
 | Subset | Condition |
@@ -90,6 +92,7 @@ This requires a failed initiation with a port visit followed immediately by a su
 | A | no prior failed attempt on this odor |
 | B | prior failure, no port visited |
 | C | prior failure, incorrect port visited |
+| D | prior failure, correct port visited | 
 
 If accuracy in C exceeds A and B, elimination is doing real work.
 
@@ -127,7 +130,7 @@ Hypothesis predicts **M_a is sufficient** — adding within-session slopes shoul
 
 **The hypothesis test is M_c vs M_a (df = N), not M_b vs M_a.** M_b can hide a real effect through cancellation: positive within-session learning early and negative satiation late average toward β ≈ 0, so M_b vs M_a comes back non-significant while genuine within-session dynamics exist. M_b remains useful as a descriptive average, not as the test.
 
-**The hypothesis is the null, so do not rest on p > 0.05.** Failing to reject may just mean low power with short sessions. Report W_s with confidence intervals and show they are small in absolute terms; the rigorous version is equivalence testing against a pre-specified smallest gain of interest. Lead instead with the positive quantitative claim from the decomposition below — *"overnight accounted for X% of total improvement"*.
+**The hypothesis is the null, so do not rest on p > 0.05.** Failing to reject may just mean low power with short sessions. Report W_s with confidence intervals and show they are small in absolute terms; the rigorous version is equivalence testing against a pre-specified smallest gain of interest. Lead instead with the positive quantitative claim from the decomposition below — *"overnight accounted for X% of total improvement"* (conditions below).
 
 #### Decomposition from M_c
 
@@ -138,19 +141,24 @@ W_s         = L_end,s − L_start,s          = β_s              (within-session
 O_s         = L_start,s+1 − L_end,s        = α_{s+1} − α_s − β_s   (overnight gain)
 ```
 
-The decomposition is **exact and additive** — the β terms telescope:
+The decomposition is **exact and additive** — paired over s = 1..N−1, the β terms telescope:
 
 ```
-total gain = (α_N + β_N) − α_1 = Σ W_s + Σ O_s
+ΣW    = Σ_{s=1..N−1} β_s
+ΣO    = Σ_{s=1..N−1} (α_{s+1} − α_s − β_s)
+total = ΣW + ΣO = α_N − α_1        (start of session 1 → start of session N)
 ```
 
-So report a single headline number: *X% of total improvement occurred overnight*. Plot W_s and O_s across sessions.
+β_N has no following overnight and is reported separately (excluding it biases toward the hypothesis if large).
+
+So report a single headline number, *X% of total improvement occurred overnight* — only if total > 0, ΣO ≥ 0 and ΣW ≥ 0; otherwise report ΣW and ΣO in log-odds with SEs. Plot W_s and O_s across sessions.
 
 #### Cautions
 
 - **β_s is a gain, not a rate.** Normalization means a 20-trial and a 120-trial session both sweep x from 0 to 1. Comparable as total gains, not as learning speed.
 - **O_s has a larger SE than it looks.** It contrasts two edge predictions — the fitted end of session s and fitted start of s+1 — the least-constrained points of the regression. Get its SE from the full covariance matrix (`m.t_test()`), not by adding component SEs.
-- **Short sessions give unstable β_s.** At ~20 trials that slope is nearly unidentified. Consider a minimum-trial cutoff or partial pooling.
+- **Short sessions give unstable β_s.** At ~20 trials that slope is nearly unidentified. Sessions with < 20 trials are dropped (`MIN_TRIALS = 20`); all-correct sessions separate the fit (statsmodels silently returns a level of ~+21). α_1 = first kept session.
+- **Dropped mid-series sessions.** An O_s spanning a dropped session is not an overnight gain — it absorbs that session's within-session change. Exclude it from ΣO and report it separately (total = ΣW + ΣO + ΣO_skipped). Edge truncations are fine.
 
 
 ```python
@@ -200,9 +208,10 @@ choice attempts, not completed trials, and the mapping between them shifts as in
 rate changes.
 
 Within-trial dependence (correctness minus its animal × session × odor accuracy):
-alternating — lag-1 r = −0.16, lag-2 r = +0.16, lag-3 r = −0.03. Measured ICC −0.08,
-design effect 0.96 pooled; per animal 0.89–1.10 (sub-065 the only one > 1, ≈5% on the
-SE). No cluster correction in attempt mode.
+alternating — lag-1 r = −0.16, lag-2 r = +0.16, lag-3 r = −0.03. D4: agreement between
+repeated choices is below accuracy-implied chance p1·p2 + (1−p1)(1−p2) in 7/8
+animal × comparison cases (excess −0.16 to +0.03) — lose-shift after the unrewarded visit.
+Negative dependence → design effect < 1. No cluster correction in attempt mode.
 
 Columns needed: `is_choice_attempt`, `choice_attempt_idx` (cumulative across sessions),
 `attempt_in_trial`.
@@ -215,7 +224,7 @@ Columns needed: `is_choice_attempt`, `choice_attempt_idx` (cumulative across ses
 | 0.5 D1 | promoted from diagnostic to variable: Bernoulli sigmoid on `initiated`/`not` over the index of all attempts with a poke (§4.1) — not `choice_attempt_idx`, which counts only attempts with a port visit |
 | 0.6 | y = correct on choice attempts; x normalized over choice attempts within session |
 | 0.7 | N defined in choice attempts. Must match 0.6 — never pool trial-based and attempt-based windows |
-| 1.1 A | add cumulative attempts as a second line; the gap to cumulative initiations is the initiation failure |
+| 1.1 A | add cumulative attempts as a second line (includes trials, so an upper envelope of cumulative initiations); the gap counts only failed attempts with a port visit |
 | 1.1 B | excess correct over choice attempts, same timestamps on x |
 | 1.1 C | unchanged — rewards only on completed trials |
 | 1.2 | y over choice attempts. A random walk cannot represent the alternation, so σ may shift relative to completed mode; compare σ between modes |
@@ -262,7 +271,7 @@ Plotting excess(k) at timestamp t_k is a coordinate lookup — no model, no post
 
 ### 1.2 Smith et al. (2004) state-space model
 
-Optional replacement for moving average figure. trial-by-trial accuracy with credible intervals, without choosing window width. Adds citeable learning-trial criterion (what trial "learning" first appears --> first trial where lower credible bound on p_k exceeds 0.5). Assumption-free about chape, so run before sigmoid. Similar shape-check as excess correct figure in 1.1 B. 
+Optional replacement for moving average figure. trial-by-trial accuracy with credible intervals, without choosing window width. Adds citeable learning-trial criterion (what trial "learning" first appears --> first trial k where P(x_k > 0) > 0.95 and stays above). Assumption-free about chape, so run before sigmoid. Similar shape-check as excess correct figure in 1.1 B. 
 
 *Smith, Frank, Wirth, Yanike, Hu, Kubota, Graybiel, Suzuki & Brown, J Neurosci 24:447.*
 
@@ -284,6 +293,8 @@ with pm.Model() as m:
 and 
 cert = (idata.posterior['x'].stack(s=('chain','draw')).values > 0).mean(axis=1)
 
+Check sensitivity to the σ prior.
+
 ## 2. Changepoint fitting
 
 ### 2.1 Model
@@ -296,7 +307,7 @@ p(k) = p_i + ((p_f − p_i)/2) · [1 + erf((k − k_s)/w)]
 
 | Term | Meaning |
 |---|---|
-| p_i | initial accuracy (0.5, chance) |
+| p_i | initial accuracy (fitted; chance = 0.5) |
 | p_f | asymptotic accuracy |
 | k | current trial |
 | k_s | trial at which learning happens — midpoint of the rate change |
@@ -333,7 +344,7 @@ The sigmoid gives k_s, a single trial describing where the rate of change is max
 
 The posterior SD (calculated below) describes how well localized the switch is given how much data there is.
 
-A step model assumes an instantaneous transition, so it is only run on animals with sufficiently small w (Rosenberg et al.: w < 300 s; here: set an analogous threshold in trials).
+A step model assumes an instantaneous transition, so it is only run on animals with sufficiently small w (Rosenberg et al.: w < 300 s; here: an analogous threshold in trials, set in advance).
 
 #### Model
 
@@ -406,7 +417,7 @@ SD        = sqrt( sum_k P(k)*k^2 - <k_s>^2 )
 
 Deliverable: *k_s = trial X +/- Y trials*.
 
-Note: check for multimodal posteriors --> multimodality means more than 1 switchpoint. Flag it and report. 
+Note: check for multimodal posteriors --> multimodality may mean more than 1 switchpoint. Flag it and report; do not summarize it with mean ± SD. 
 
 ### 2.6 Sanity check
 
@@ -465,7 +476,7 @@ This handles heterogeneity directly — an animal that never disengages simply h
 
 ## 4. Full-data extension
 
-Everything above uses completed trials. Once established, redo at **attempt level**.
+Everything above uses completed trials as the primary mode (§0.8). Once established, redo at **attempt level**.
 
 **Justification for starting with completed trials:** the association can only be learned from a completed trial, so completed-trial index is arguably the correct *experience axis* for association learning, not merely a convenient approximation. Total attempts would be the wrong denominator.
 
@@ -473,8 +484,7 @@ Everything above uses completed trials. Once established, redo at **attempt leve
 
 Attempt-level analyses:
 
-1. **Initiation learning.** Bernoulli sigmoid on `initiated / not initiated` over attempt index. Identical machinery, different binary column, near-zero marginal cost. This is the third variable in §0.1 and converts your complication into evidence.
+1. **Initiation learning.** Bernoulli sigmoid on `initiated / not initiated` over attempt index. Identical machinery, different binary column, near-zero marginal cost. This is the third variable in §0.1 and converts your complication into evidence. Required hold time was raised in the last 2 sessions — the initiation drop there is non-behavioural.
 2. **False alarms.** Failing to initiate but still running to a port = knows reward is available, doesn't yet know how to earn it. A fourth, mechanistically interesting measure.
-3. **Extinction test.** If correct-choice-without-reward acts as a negative signal, animals with higher non-initiation rates should learn more slowly. One correlation across 8–10 animals — underpowered but free.
+3. **Extinction test.** If correct-choice-without-reward acts as a negative signal, animals with higher non-initiation rates should learn more slowly. One correlation across 4 animals — underpowered but free.
 4. **Exposure axis.** Odor *exposures* per completed trial falls over training. If exposure drives learning, exposure count may be a better experience axis than completed-trial count. Compute both; check whether k̂_s moves.
-

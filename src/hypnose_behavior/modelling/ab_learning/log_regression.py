@@ -23,9 +23,14 @@ From M_c the change in log-odds splits into a within-session and an overnight pa
     W_s = b_s                        within session s
     O_s = a_{s+1} - a_s - b_s        across the boundary that follows it
 
-which telescope to the total, ``(a_N + b_N) - a_1 = sum(W) + sum(O)``. Every reported
-quantity is a linear contrast of M_c's coefficients, so its standard error comes from
-the full covariance matrix rather than from adding component errors -- O_s in
+which telescope to ``a_N - a_1 = sum(W) + sum(O)``, one W paired with one O at every
+boundary. The last session's W has no boundary after it, so it stays out of that sum and
+is reported on its own as ``final_within``: counting it would put an extra within-session
+term in a total that has no matching night, which is the one asymmetry a share of the
+total cannot survive.
+
+Every reported quantity is a linear contrast of M_c's coefficients, so its standard error
+comes from the full covariance matrix rather than from adding component errors -- O_s in
 particular contrasts the two least-constrained points of the fit, the extrapolated end
 of one session and start of the next.
 
@@ -38,10 +43,14 @@ whether a straight line describes the profile at all.
 A session whose choices are all correct or all incorrect separates the fit perfectly and
 sends its level to +/-inf, so `fit_session_models` refuses to fit one. `MIN_TRIALS` is
 the default floor on session length: it keeps those sessions out, and keeps out the
-short sessions whose b_s a handful of trials cannot identify. Sessions below it are
-dropped whole, which leaves the telescoping identity intact but lets one boundary span
-more than one night -- ``gap_days`` in `gain_decomposition` reports how far each
-boundary actually reaches.
+short sessions whose b_s a handful of trials cannot identify.
+
+Sessions below the floor are dropped whole, so two fitted sessions can have a dropped one
+between them. The boundary contrast then covers that session's own within-session gain
+and two nights rather than one, which is not an overnight gain at all; such a boundary is
+kept apart as ``across_gap`` and reported beside sum(O) rather than inside it. The
+telescoping identity stays exact -- ``a_N - a_1 = sum(W) + sum(O) + sum(gap)`` -- so what
+a gap makes unattributable is visible as its own term instead of inflating the other two.
 """
 from __future__ import annotations
 
@@ -335,16 +344,23 @@ def session_levels(fits: dict) -> pd.DataFrame:
 def gain_decomposition(fits: dict) -> pd.DataFrame:
     """W_s and O_s: the change in log-odds within each session and across each boundary.
 
-    One row per animal and component. ``component`` is ``"within"`` (W_s, over session
-    ``ses``) or ``"overnight"`` (O_s, from the end of ``ses`` to the start of
-    ``ses_next``); ``value`` carries its standard error, z, p and 95% interval, all from
-    M_c's full covariance matrix.
+    One row per animal and component:
 
-    Sessions too short to be fitted are dropped whole, so an overnight row can span more
-    than one night: ``gap_days`` is the distance between the two dates and
-    ``sessions_skipped`` how many recorded sessions fall between them. The
-    decomposition stays exact over the sessions fitted -- W and O sum to the total change
-    in `overnight_share` whatever was dropped.
+    - ``within``     -- W_s, over session ``ses``.
+    - ``overnight``  -- O_s, from the end of ``ses`` to the start of ``ses_next``, the
+      two recorded back to back.
+    - ``across_gap`` -- the same contrast where a session between the two was dropped for
+      length, so it also holds that session's own gain and a second night. Not an
+      overnight gain, and kept out of sum(O).
+
+    ``value`` carries its standard error, z, p and 95% interval, all from M_c's full
+    covariance matrix. ``gap_days`` is the distance between the two dates -- a weekend
+    makes an ``overnight`` boundary three days long without anything unrecorded falling
+    inside it -- and ``sessions_skipped`` how many dropped sessions do.
+
+    ``in_total`` marks the rows that make up the total change in `overnight_share`: every
+    boundary, and every within row but the last session's, which has no boundary to pair
+    with.
     """
     parts = []
     for subjid in sorted(fits):
@@ -356,76 +372,98 @@ def gain_decomposition(fits: dict) -> pd.DataFrame:
 
         within = sessions[_SESSION].copy()
         within["component"] = "within"
+        within["in_total"] = within["session_idx"] != index[-1]
         within = pd.concat(
             [within, _estimate(model, np.array([row(s, 1.0) - row(s, 0.0) for s in index]))],
             axis=1)
 
-        overnight = sessions.iloc[:-1][_SESSION].reset_index(drop=True)
-        overnight["component"] = "overnight"
-        overnight["session_idx_next"] = index[1:]
-        overnight["ses_next"] = sessions["ses"].to_numpy()[1:]
-        overnight["date_next"] = sessions["date"].to_numpy()[1:]
-        overnight["gap_days"] = (dates.to_numpy()[1:] - dates.to_numpy()[:-1]) / np.timedelta64(1, "D")
-        overnight["sessions_skipped"] = np.diff(index) - 1
-        overnight = pd.concat(
-            [overnight,
+        skipped = np.diff(index) - 1
+        boundary = sessions.iloc[:-1][_SESSION].reset_index(drop=True)
+        boundary["component"] = np.where(skipped > 0, "across_gap", "overnight")
+        boundary["in_total"] = True
+        boundary["session_idx_next"] = index[1:]
+        boundary["ses_next"] = sessions["ses"].to_numpy()[1:]
+        boundary["date_next"] = sessions["date"].to_numpy()[1:]
+        boundary["gap_days"] = ((dates.to_numpy()[1:] - dates.to_numpy()[:-1])
+                                / np.timedelta64(1, "D"))
+        boundary["sessions_skipped"] = skipped
+        boundary = pd.concat(
+            [boundary,
              _estimate(model, np.array([row(b, 0.0) - row(a, 1.0)
                                         for a, b in zip(index, index[1:])]))],
             axis=1)
 
-        parts.append(pd.concat([within, overnight], ignore_index=True).assign(
+        parts.append(pd.concat([within, boundary], ignore_index=True).assign(
             **_identity(fit, ("mode",))))
-    columns = (_SESSION + ["mode", "component", "session_idx_next", "ses_next", "date_next",
-                           "gap_days", "sessions_skipped"] + _CONTRAST_COLUMNS)
+    columns = (_SESSION + ["mode", "component", "in_total", "session_idx_next", "ses_next",
+                           "date_next", "gap_days", "sessions_skipped"] + _CONTRAST_COLUMNS)
     return pd.concat(parts, ignore_index=True)[columns]
+
+
+def _sum_estimate(model, contrast_rows) -> dict:
+    """The estimate of a sum of contrast rows; an exact zero when there are none."""
+    if len(contrast_rows) == 0:
+        return {"value": 0.0, "se": 0.0, "z": np.nan, "p": np.nan, "lo": 0.0, "hi": 0.0}
+    return _estimate(model, np.sum(contrast_rows, axis=0)).iloc[0].to_dict()
 
 
 def overnight_share(fits: dict) -> pd.DataFrame:
     """How much of each animal's total change in log-odds happened between sessions.
 
-    One row per animal. ``within_total`` is ``sum(W_s)``, ``overnight_total`` is
-    ``sum(O_s)`` and ``total`` their sum, the change from the start of the first fitted
-    session to the end of the last; each is one contrast of M_c, so each carries an exact
-    standard error. ``overnight_share`` is ``overnight_total / total`` with a
-    delta-method interval.
+    One row per animal, every figure a contrast of M_c and so carrying an exact standard
+    error. ``total`` is the change from the first fitted session's start to the last
+    one's start, and splits exactly:
 
-    **The share only reads as a percentage while the two components point the same way.**
-    An animal that gains within sessions and gives part of it back overnight has a
-    negative ``overnight_total`` against a positive ``total``, and a share below 0 or
-    above 1; ``mixed_signs`` marks that row. ``share_of_movement`` is the fallback that
-    stays interpretable there -- ``sum|O| / (sum|W| + sum|O|)``, the share of all logit
-    movement that happened between sessions rather than the share of the net gain. It is
-    descriptive and carries no interval.
+        total = within_total + overnight_total + gap_total
 
-    ``total_z`` is ``total / total_se``. The delta-method interval on the share widens
-    without bound as it approaches zero, so treat the share as undefined for an animal
-    whose total change is not itself distinguishable from zero.
+    ``within_total`` is ``sum(W_s)`` over every fitted session but the last,
+    ``overnight_total`` is ``sum(O_s)`` over the boundaries between sessions recorded
+    back to back, and ``gap_total`` the boundaries with a dropped session inside them,
+    which hold that session's own gain as well as two nights and are therefore
+    attributable to neither (0 when there are none).
+
+    ``final_within`` is the last session's W_s, which has no boundary to pair with;
+    ``total_full`` is the whole change over training, ``total + final_within``.
+
+    ``overnight_share`` is ``overnight_total / total`` with a delta-method interval.
+    **It only reads as a percentage while the two components point the same way.** An
+    animal that gains within sessions and gives part of it back overnight has a negative
+    ``overnight_total`` against a positive ``total``, and a share below 0 or above 1;
+    ``mixed_signs`` marks that row, and the two totals in log-odds are what to report
+    there. ``total_z`` is ``total / total_se``: the delta-method interval widens without
+    bound as the denominator approaches zero, so treat the share as undefined for an
+    animal whose total change is not itself distinguishable from zero.
     """
     rows = []
     for subjid in sorted(fits):
         fit = fits[subjid]
         model, row = _contrasts(fit)
         index = _kept_sessions(fit)["session_idx"].tolist()
+        boundaries = list(zip(index, index[1:]))
 
-        within_rows = np.array([row(s, 1.0) - row(s, 0.0) for s in index])
-        overnight_rows = np.array([row(b, 0.0) - row(a, 1.0) for a, b in zip(index, index[1:])])
-        within, overnight = within_rows.sum(0), overnight_rows.sum(0)
-        total = row(index[-1], 1.0) - row(index[0], 0.0)
+        within_rows = [row(s, 1.0) - row(s, 0.0) for s in index[:-1]]
+        overnight_rows = [row(b, 0.0) - row(a, 1.0) for a, b in boundaries if b == a + 1]
+        gap_rows = [row(b, 0.0) - row(a, 1.0) for a, b in boundaries if b != a + 1]
+        total = row(index[-1], 0.0) - row(index[0], 0.0)
 
-        estimates = _estimate(model, np.vstack([within, overnight, total]))
-        w, o, t = (estimates.iloc[i] for i in range(3))
-        share = _ratio(model, overnight, total)
-        absolute = np.abs(_estimate(model, within_rows)["value"]).sum(), \
-            np.abs(_estimate(model, overnight_rows)["value"]).sum()
+        w = _sum_estimate(model, within_rows)
+        o = _sum_estimate(model, overnight_rows)
+        g = _sum_estimate(model, gap_rows)
+        t = _estimate(model, total).iloc[0]
+        final = _estimate(model, row(index[-1], 1.0) - row(index[-1], 0.0)).iloc[0]
+        full = _estimate(model, row(index[-1], 1.0) - row(index[0], 0.0)).iloc[0]
+        share = _ratio(model, np.sum(overnight_rows, axis=0), total)
 
         rows.append({
             **_identity(fit), "n": len(fit["frame"]), "n_sessions": len(index),
             "within_total": w["value"], "within_total_se": w["se"],
             "overnight_total": o["value"], "overnight_total_se": o["se"],
+            "gap_total": g["value"], "gap_total_se": g["se"],
             "total": t["value"], "total_se": t["se"], "total_z": t["z"],
+            "final_within": final["value"], "final_within_se": final["se"],
+            "total_full": full["value"], "total_full_se": full["se"],
             "overnight_share": share["value"], "overnight_share_lo": share["lo"],
             "overnight_share_hi": share["hi"],
             "mixed_signs": bool(np.sign(w["value"]) != np.sign(o["value"])),
-            "share_of_movement": absolute[1] / sum(absolute),
         })
     return pd.DataFrame(rows)
