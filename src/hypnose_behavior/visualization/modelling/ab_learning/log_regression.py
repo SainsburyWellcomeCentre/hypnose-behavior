@@ -18,6 +18,7 @@ from hypnose_behavior.modelling.ab_learning.log_regression import (
     MIN_TRIALS,
     fit_session_models,
     gain_decomposition,
+    model_comparison,
     overnight_share,
     session_levels,
 )
@@ -56,6 +57,23 @@ _SESSION_SPAN = 0.72
 # Accuracies labelled on the right of the top panel.
 _PROBABILITY_TICKS = (0.1, 0.25, 0.5, 0.75, 0.9, 0.97)
 
+# Two stacked panels of per-session detail need the width; a presentation style puts 24pt
+# on the axis labels, which a 6.4in figure cannot hold beside this many sessions.
+_WIDTH = 10.0
+_PANEL_HEIGHT = 3.4
+
+# Annotations subordinate to the axis labels: the headline and the legend. Taken as a
+# fraction of the tick size so they follow the active style, with a floor, since the
+# headline carries the animal's result and a style with small ticks would shrink it out
+# of reading size.
+_SMALL = 0.55
+_MIN_ANNOTATION = 8.0
+
+
+def _annotation_size() -> float:
+    """Point size for the headline and the legend."""
+    return max(text_size() * _SMALL, _MIN_ANNOTATION)
+
 
 def _save(fig, name, sessions, save, subjid=None):
     if not save:
@@ -71,8 +89,8 @@ def _probability_axis(ax):
     right.set_yticks(logit(ticks))
     right.set_yticklabels([f"{p:g}" for p in ticks])
     right.spines[["top", "left"]].set_visible(False)
-    right.set_ylabel("accuracy")
-    right.tick_params(length=2)
+    right.set_ylabel("accuracy", fontsize=text_size())
+    right.tick_params(length=2, labelsize=text_size() * 0.8)
 
 
 def _plot_levels(ax, levels):
@@ -89,8 +107,27 @@ def _plot_levels(ax, levels):
     for x0, x1, y0, y1 in zip(end_x[:-1], start_x[1:], end[:-1], start[1:]):
         ax.plot([x0, x1], [y0, y1], color=_OVERNIGHT, linewidth=1.6, linestyle=(0, (2, 1.5)))
     ax.plot(np.r_[start_x, end_x], np.r_[start, end], linestyle="none", marker="o",
-            markersize=4, color=_WITHIN, markeredgecolor="white", markeredgewidth=0.8)
+            markersize=5.5, color=_WITHIN, markeredgecolor="white", markeredgewidth=1)
     ax.axhline(0, color=REFERENCE, linestyle="--", linewidth=1)
+
+
+def _plot_running_totals(ax, gains):
+    """The running sum of each component, drawn through the points it sums.
+
+    Sums only the rows the totals are built from, so the within line stops one session
+    short of the last W_s, which has no boundary to pair with, and neither line takes up
+    a boundary that spans a dropped session. Where one exists the two lines therefore end
+    short of the total by that boundary's gain.
+    """
+    for component, offset, color in (("within", 0.0, _WITHIN),
+                                     ("overnight", _SESSION_SPAN, _OVERNIGHT)):
+        part = gains[(gains["component"] == component) & gains["in_total"]]
+        part = part.sort_values("session_idx")
+        if part.empty:
+            continue
+        ax.plot(part["session_idx"].to_numpy() + offset, part["value"].cumsum(),
+                color=color, linewidth=1.3, alpha=0.8, zorder=1,
+                label=f"{component}, running total")
 
 
 def _plot_gains(ax, gains):
@@ -105,30 +142,32 @@ def _plot_gains(ax, gains):
             continue
         x = part["session_idx"].to_numpy() + (0.0 if component == "within" else _SESSION_SPAN)
         err = np.vstack([part["value"] - part["lo"], part["hi"] - part["value"]])
-        ax.errorbar(x, part["value"], yerr=err, fmt="o", color=color, markersize=6,
+        ax.errorbar(x, part["value"], yerr=err, fmt="o", color=color, markersize=8,
                     markerfacecolor="white" if hollow else color,
-                    markeredgecolor=color if hollow else "white", markeredgewidth=1.4,
-                    elinewidth=2, capsize=0, label=label)
+                    markeredgecolor=color if hollow else "white", markeredgewidth=1.6,
+                    elinewidth=2.5, capsize=0, label=label)
     ax.axhline(0, color=REFERENCE, linestyle="--", linewidth=1)
 
 
-def _headline(share) -> str:
-    """Where the animal's total change happened, in the terms that survive its signs.
+def _headline(share, test) -> str:
+    """The animal's result in two lines: the decomposition, then what qualifies it.
 
-    The two sums in log-odds always; the share of the total only when both point the
-    same way, since a ratio of components with opposite signs is not a percentage.
+    The two sums in log-odds always; the share of the total only when both point the same
+    way, since a ratio of components with opposite signs is not a percentage. Plain text
+    throughout -- mathtext would fall back to a font family with no bold cut under a
+    style that asks for bold, and warn once per fallback font.
     """
-    line = (f"$\\Sigma$W {share['within_total']:+.2f}, "
-            f"$\\Sigma$O {share['overnight_total']:+.2f} "
-            f"$\\rightarrow$ total {share['total']:+.2f} logit")
+    line = (f"within {share['within_total']:+.2f}, "
+            f"overnight {share['overnight_total']:+.2f}, "
+            f"total {share['total']:+.2f} logit")
     if not share["mixed_signs"]:
-        line += (f", {share['overnight_share']:.0%} overnight "
-                 f"[{share['overnight_share_lo']:.0%}, {share['overnight_share_hi']:.0%}]")
-    extra = []
+        line += (f" ({share['overnight_share']:.0%} overnight, "
+                 f"{share['overnight_share_lo']:.0%} to {share['overnight_share_hi']:.0%})")
+    qualifiers = [f"M_a vs M_c p = {test['p']:.3g}",
+                  f"last session {share['final_within']:+.2f}, unpaired"]
     if share["gap_total"]:
-        extra.append(f"{share['gap_total']:+.2f} across a dropped session")
-    extra.append(f"last session {share['final_within']:+.2f}, unpaired")
-    return f"{line}\n{'; '.join(extra)}"
+        qualifiers.append(f"{share['gap_total']:+.2f} across a dropped session")
+    return f"{line}\n{'  |  '.join(qualifiers)}"
 
 
 def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
@@ -145,8 +184,10 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
     chance.
 
     Bottom: the same change read as gains -- W_s over each session, O_s across each
-    boundary that follows one, with 95% intervals. The line above them is the animal's
-    total change and the share of it that happened between sessions.
+    boundary that follows one, with 95% intervals, and a thin running total through each
+    component, which says whether its sum built up steadily or came from a session or
+    two. The text above the panels is the animal's total change, the share of it that
+    happened between sessions, and the M_a against M_c test.
 
     A session too short to fit (under ``min_trials``) leaves a gap on the x axis, and
     the overnight step drawn across that gap spans more than one night.
@@ -156,26 +197,31 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
         fits = fit_session_models(data, mode=mode, min_trials=min_trials)
     levels, gains = session_levels(fits), gain_decomposition(fits)
     shares = overnight_share(fits).set_index("subjid")
+    tests = model_comparison(fits)
+    tests = tests[tests["comparison"] == "M_a vs M_c"].set_index("subjid")
 
     figures = {}
     for subjid in sorted(fits):
         animal = levels[levels["subjid"] == subjid].sort_values("session_idx")
-        fig, (top, bottom) = figure(n_rows=2, height=3.0)
+        fig, (top, bottom) = figure(n_rows=2, width=_WIDTH, height=_PANEL_HEIGHT)
         top.sharex(bottom)
         _plot_levels(top, animal)
+        _plot_running_totals(bottom, gains[gains["subjid"] == subjid])
         _plot_gains(bottom, gains[gains["subjid"] == subjid])
 
-        style_axis(top, ylabel="fitted log-odds correct", ylim=None)
-        style_axis(bottom, ylabel="gain (log-odds)", ylim=None)
+        style_axis(top, ylabel="log-odds", ylim=None)
+        style_axis(bottom, ylabel="gain", ylim=None)
         top.tick_params(labelbottom=False)
         _probability_axis(top)
         session_ticks(bottom, animal)
         bottom.set_xlim(animal["session_idx"].min() - 0.4,
                         animal["session_idx"].max() + _SESSION_SPAN + 0.4)
-        bottom.set_title(_headline(shares.loc[subjid]), fontsize=text_size() * 0.75,
-                         loc="left", color=REFERENCE)
-        fig.legend(*bottom.get_legend_handles_labels(), loc="outside lower center", ncols=2,
-                   frameon=False, fontsize=text_size() * 0.7)
+        # The headline titles the top axes, where constrained_layout reserves room for it
+        # under the figure title; on the lower axes it would wedge between the two panels.
+        top.set_title(_headline(shares.loc[subjid], tests.loc[subjid]), loc="left",
+                      fontsize=_annotation_size(), color=REFERENCE)
+        fig.legend(*bottom.get_legend_handles_labels(), loc="outside lower center", ncols=3,
+                   frameon=False, fontsize=_annotation_size())
         title(fig, f"within-session and overnight gain | {fits[subjid]['mode']}", subjid)
         _save(fig, f"ab_learning_gain_decomposition_sub-{subjid:03d}",
               fits[subjid]["sessions"], save, subjid)

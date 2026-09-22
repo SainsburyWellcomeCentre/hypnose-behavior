@@ -215,13 +215,15 @@ def choice_persistence(data: dict, min_choices: int = 2) -> dict:
     """D4: do repeated port choices within one initiation agree beyond their accuracy?
 
     A *choice attempt* is a failed attempt followed by a port visit (zero-poke attempts
-    included: the visit is a choice either way). For every trial with at least
-    ``min_choices`` choice attempts before it:
+    included: the visit is a choice either way). Two comparisons, each over the trials it
+    needs:
 
     - ``attempt_to_attempt``: consecutive choice attempts (in attempt order, attempts
-      without a visit skipped) choose the same port.
-    - ``last_attempt_to_trial``: the last choice attempt and the trial's choice agree;
-      completed trials with a scored choice only.
+      without a visit skipped) choose the same port. A trial needs ``min_choices`` of
+      them, since the comparison is between two attempts.
+    - ``last_attempt_to_trial``: the last choice attempt and the trial's choice agree.
+      One choice attempt is enough, the trial's own choice being the other half of the
+      pair; completed trials with a scored choice only.
 
     Chance is the agreement two independent choices would reach given their accuracies,
     ``p1*p2 + (1-p1)*(1-p2)`` -- ``p**2 + (1-p)**2`` when both come from the same kind of
@@ -232,11 +234,13 @@ def choice_persistence(data: dict, min_choices: int = 2) -> dict:
 
     **Descriptive only: no interval is reported.** Consecutive pairs of one trial share an
     attempt and are not independent, so a pair-level binomial interval would be
-    anticonservative.
+    anticonservative. ``last_attempt_to_trial`` takes one pair per trial, but its pairs
+    still share an animal and a session, which a binomial interval would ignore just the
+    same.
 
     Returns ``{"summary", "distribution"}``: ``summary`` has one row per animal and
-    comparison with ``n_trials`` (qualifying trials), ``n_pairs``, ``k`` agreeing,
-    ``chance``, ``agreement`` and ``excess`` (agreement - chance);
+    comparison with ``n_trials`` (the trials that comparison could use), ``n_pairs``,
+    ``k`` agreeing, ``chance``, ``agreement`` and ``excess`` (agreement - chance);
     ``distribution`` counts all trials by their number of choice attempts, one row per
     animal.
     """
@@ -252,24 +256,25 @@ def choice_persistence(data: dict, min_choices: int = 2) -> dict:
     distribution = (trials.groupby(["subjid", "n_choices"]).size()
                     .unstack(fill_value=0).rename_axis(columns="choice attempts"))
 
-    qualifying = trials[trials["n_choices"] >= min_choices]
-    choices = choices.join(qualifying.set_index(_TRIAL_KEY)["n_choices"], on=_TRIAL_KEY,
-                           how="inner")
     p_attempt = _accuracy_by_odor(attempts[attempts["port_visit"].astype(bool)],
                                   "correct_port").rename("p_attempt")
     p_trial = _accuracy_by_odor(trials, "correct").rename("p_trial")
 
-    # (a) consecutive choice attempts of one trial.
-    previous = choices.groupby(_TRIAL_KEY)["port"].shift()
-    consecutive = choices[previous.notna()].assign(
+    # (a) consecutive choice attempts of one trial, so the trial needs `min_choices`.
+    repeated = trials[trials["n_choices"] >= min_choices]
+    paired = choices.join(repeated.set_index(_TRIAL_KEY)["n_choices"], on=_TRIAL_KEY,
+                          how="inner")
+    previous = paired.groupby(_TRIAL_KEY)["port"].shift()
+    consecutive = paired[previous.notna()].assign(
         agree=lambda f: f["port"] == previous[f.index])
     consecutive = consecutive.join(p_attempt, on=_ODOR_KEY)
     p = consecutive["p_attempt"]
     consecutive["chance"] = p**2 + (1 - p)**2
 
-    # (b) last choice attempt against the trial's own choice.
+    # (b) last choice attempt against the trial's own choice, so one attempt is enough.
     last = choices.groupby(_TRIAL_KEY).tail(1).set_index(_TRIAL_KEY)["port"].rename("last_port")
-    scored = qualifying[qualifying["choice"].isin(("A", "B"))].join(last, on=_TRIAL_KEY)
+    scored = trials[(trials["n_choices"] > 0) & trials["choice"].isin(("A", "B"))]
+    scored = scored.join(last, on=_TRIAL_KEY)
     scored = scored.join(p_attempt, on=_ODOR_KEY).join(p_trial, on=_ODOR_KEY)
     scored["agree"] = scored["last_port"] == scored["choice"]
     pa, pt = scored["p_attempt"], scored["p_trial"]
@@ -277,7 +282,7 @@ def choice_persistence(data: dict, min_choices: int = 2) -> dict:
 
     summary = pd.concat([
         _agreement_summary(consecutive, "attempt_to_attempt",
-                           qualifying.groupby("subjid").size()),
+                           repeated.groupby("subjid").size()),
         _agreement_summary(scored, "last_attempt_to_trial",
                            scored.groupby("subjid").size()),
     ], ignore_index=True)

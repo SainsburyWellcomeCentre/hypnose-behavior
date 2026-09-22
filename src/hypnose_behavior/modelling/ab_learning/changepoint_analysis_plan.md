@@ -84,6 +84,9 @@ Answers whether the animal first learns to initiate trials and then the A/B rule
 **D3 — Lose-shift check.** Because odors repeat until successful initiation, a mouse could in principle solve a trial by elimination: fail to initiate on odor A, visit port B, get nothing, then initiate on the repeated A and go to A — correct, without knowing the rule.
 
 **D4 repeated-choice agreement vs accuracy-implied chance** - implemented. 
+In trials with port-visit failed attempts before, do the animals repeatidely poke the same ports? Agreement calculated between a. all failed attempts before a trial (but not the trial), and b. the last failed attempt vs the trial's choice. Calculated against chance agreement p1​p2​+(1−p1​)(1−p2​), based on the current accuracy (p1p2 = both correct, (1-p1)(1-p2)=both incorrect)
+a. p1​p2​+(1−p1​)(1−p2​) --> as p1=p2=p --> p2+(1−p)2
+b. p1​p2​+(1−p1​)(1−p2​)
 
 This requires a failed initiation with a port visit followed immediately by a successful initiation on the same odor, which should be rare and not systematic. **Count how often it actually occurs first.** If non-negligible, split completed trials and compare:
 
