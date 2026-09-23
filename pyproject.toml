@@ -30,6 +30,9 @@ dependencies = [
     "opencv-python",
 ]
 
+[project.scripts]
+hypnose-batch-process = "hypnose_behavior.cli.batch_process:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

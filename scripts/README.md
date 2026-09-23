@@ -21,15 +21,27 @@ the other three already wrote. See [its own section](#parquet_peekpy) below.
 
 ## Arguments (shared)
 
+All four scripts take the same selector flags (`hypnose_helpers.cli.selector_args`).
+Each has several spellings, and every long flag also works with a single dash
+(`-sub`, `-ses-range`):
+
 | Argument | Meaning |
 | --- | --- |
-| `--subjids ID [ID ...]` | One or more subject ids. Omit to run **all** subjects found in rawdata. |
-| `--dates D [D ...]` | One or more specific dates `YYYYMMDD`. |
-| `--date-range START END` | Inclusive date range `YYYYMMDD YYYYMMDD` (alternative to `--dates`). |
+| `-s`, `--sub`, `--subs`, `--subj`, `--subject(s)`, `--subjid(s)` | Subject id(s). Omit to run **all** subjects found in rawdata. |
+| `-d`, `--date`, `--dates` | Specific date(s) `YYYYMMDD`. |
+| `--date-range`, `--dates-range` | Inclusive date range. |
+| `--ses`, `--session`, `--sessions` | Session number(s) as written in `ses-NNN`. |
+| `--ses-range`, `--session-range` | Inclusive ses range. |
+| `--index`, `--index-range` | Session index (run_trial_classification, run_metrics_analysis only). |
 
-`--dates` and `--date-range` are mutually exclusive; omit both to run **all dates**
-for the selected subjects. Subjects/dates with no data are validated and skipped
-with a clear message (`hypnose_behavior.qc.validate.validate_subject`).
+- Values can be space- or comma-separated and zero-padded: `60 61`, `60,61`, `060 061`, `sub-060`.
+- Ranges take `START END`, `START-END` or `START,END`.
+- Selectors intersect; omit them all to run **all dates** for the selected subjects.
+- Subjects/dates with no data are validated and skipped with a clear message
+  (`hypnose_behavior.qc.validate.validate_subject`).
+
+`batch_process.py` is also installed as the `hypnose-batch-process` command
+(`pip install -e .`), which runs from any directory.
 
 Script-specific:
 
@@ -60,7 +72,10 @@ python scripts/run_trial_classification.py
 python scripts/run_metrics_analysis.py --subjids 53 --date-range 20260501 20260531 --protocol singrew
 
 # classification + metrics in one go
-python scripts/batch_process.py --subjids 53 58 --dates 20260528
+hypnose-batch-process -s 53 58 -d 20260528
+
+# same thing, any spelling
+python scripts/batch_process.py -sub 053,058 -date 20260528
 ```
 
 ## `parquet_peek.py`
