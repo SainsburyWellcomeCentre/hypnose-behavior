@@ -62,7 +62,8 @@ import statsmodels.formula.api as smf
 from scipy import stats
 
 from hypnose_behavior.modelling.ab_learning.data import (
-    build_choices,
+    MODES,
+    choice_rows,
     within_session_position,
 )
 
@@ -80,9 +81,6 @@ __all__ = [
     "shared_slope",
 ]
 
-# Which choices are rows: completed trials only, or every choice attempt (plan 0.8).
-MODES = ("completed", "attempts")
-
 MODEL_FORMULAS = {
     "M_a": "y ~ C(session_idx)",
     "M_b": "y ~ C(session_idx) + x",
@@ -99,16 +97,6 @@ _COMPARISONS = (("M_a", "M_b"), ("M_a", "M_c"), ("M_b", "M_c"))
 
 _SESSION = ["subjid", "ses", "date", "session_idx"]
 _CONTRAST_COLUMNS = ["value", "se", "z", "p", "lo", "hi"]
-
-
-def _rows(data: dict, mode: str) -> pd.DataFrame:
-    """The choice rows of one mode, in time order within an animal."""
-    if mode not in MODES:
-        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
-    choices = build_choices(data)
-    if mode == "completed":
-        choices = choices[choices["is_completed"]]
-    return choices.sort_values(["subjid", "time"])
 
 
 def _counts(rows: pd.DataFrame) -> pd.DataFrame:
@@ -139,7 +127,7 @@ def regression_frame(data: dict, *, mode: str = "completed",
     ``x`` is recomputed over the rows kept here, so it always runs over the axis being
     fitted and never mixes the completed-trial axis with the choice-attempt one.
     """
-    return _frame(_rows(data, mode), min_trials)
+    return _frame(choice_rows(data, mode), min_trials)
 
 
 def _degenerate(frame: pd.DataFrame) -> pd.DataFrame:
@@ -167,7 +155,7 @@ def fit_session_models(data: dict, *, mode: str = "completed",
     its level is then unidentified and the fit would report a level of +/-20 or so with
     an enormous standard error rather than failing. Raising ``min_trials`` removes it.
     """
-    rows = _rows(data, mode)
+    rows = choice_rows(data, mode)
     sessions = _counts(rows)
     sessions["kept"] = sessions["n"] >= min_trials
     frame = _frame(rows, min_trials)

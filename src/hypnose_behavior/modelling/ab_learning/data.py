@@ -12,6 +12,9 @@ Two frames, keyed alike (``subjid`` / ``ses`` / ``date`` / ``session_idx`` / ``r
 - ``attempts`` -- one row per failed initiation attempt, joined to the trial its
   initiation went on to produce.
 
+A ``runs`` frame holds each kept run's start and end, which `task_time` lays end to end
+into one clock per animal.
+
 Within an initiation the odor does not change, and every attempt carries its initiation;
 a row breaking either is kept and reported with a warning.
 """
@@ -30,13 +33,20 @@ from hypnose_behavior.io.load_results import load_non_initiated_attempts
 from hypnose_behavior.io.loaders import _odor_to_letter, iter_sessions
 
 __all__ = [
+    "MODES",
     "PORT_LETTERS",
     "PORT_VISIT_LABELS",
     "build_choices",
+    "choice_rows",
     "is_ab_stage",
     "load_ab_data",
+    "session_bounds",
+    "task_time",
     "within_session_position",
 ]
+
+# Which choices are rows: completed trials only, or every choice attempt.
+MODES = ("completed", "attempts")
 
 # `odourdiscrimination-stageN`, also inside a schema path. Stage 1 presents no odor (light
 # and reward-port pokes only) and is not part of the analysis.
@@ -64,6 +74,7 @@ _ATTEMPT_COLUMNS = _IDENTITY + [
     "port", "correct_port", "global_trial_id", "trailing",
 ]
 _SESSION_COLUMNS = _IDENTITY + ["n_runs", "n_trials", "n_attempts"]
+_RUN_COLUMNS = _IDENTITY + ["run_id", "start", "end"]
 _CHOICE_COLUMNS = _IDENTITY + [
     "run_id", "global_trial_id", "initiation_sequence_time", "time", "odor", "choice",
     "correct", "is_completed", "zero_poke", "attempt_in_trial", "choice_attempt_idx",
@@ -87,20 +98,30 @@ def _as_ns(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, errors="coerce").astype("datetime64[ns]")
 
 
-def _ab_runs(results_dir) -> set:
-    """The run ids whose stage (from ``summary.json``) passes `is_ab_stage`."""
+def _wall_clock(value):
+    """A ``summary.json`` time as naive local time, the clock the trial tables use."""
+    stamp = pd.to_datetime(value, errors="coerce")
+    if pd.isna(stamp):
+        return pd.NaT
+    return stamp.tz_localize(None) if stamp.tzinfo else stamp
+
+
+def _ab_runs(results_dir) -> dict:
+    """``{run_id: (start, end)}`` of the runs whose stage (from ``summary.json``) passes
+    `is_ab_stage`."""
     path = layout.table_path(results_dir, "summary.json")
     try:
         with open(path, encoding="utf-8") as f:
             runs = json.load(f).get("session", {}).get("runs", [])
     except (OSError, ValueError):
-        return set()
-    kept = set()
+        return {}
+    kept = {}
     for run in runs:
         stage = run.get("stage")
         name = stage.get("stage_name") if isinstance(stage, dict) else stage
         if is_ab_stage(name):
-            kept.add(run.get("run_id"))
+            kept[run.get("run_id")] = (_wall_clock(run.get("start_time")),
+                                       _wall_clock(run.get("end_time")))
     return kept
 
 
@@ -220,13 +241,15 @@ def load_ab_data(subjids, dates=None, *, ses=None, index=None, date_range=None,
       when visited), ``correct_port`` (NaN without a visit), ``global_trial_id`` of the
       trial the initiation produced and ``trailing`` (it produced none).
     - ``sessions``: one row per kept session, with the kept ``n_runs`` and the row counts.
+    - ``runs``: one row per kept run of a kept session, ``start`` / ``end`` from
+      ``summary.json`` on the trial tables' clock (NaT where it records none).
 
     ``session_idx`` is the 0-based rank of a session among the subject's kept ones.
     """
     entries = subject_selections(subjids, dates, ses=ses, index=index,
                                  date_range=date_range, ses_range=ses_range,
                                  index_range=index_range)
-    trial_parts, attempt_parts, session_rows = [], [], []
+    trial_parts, attempt_parts, session_rows, run_rows = [], [], [], []
     for subjid, subj_dates, select in entries:
         subj_dir = derivatives.subject_dir(subjid, missing_ok=True)
         if subj_dir is None:
@@ -261,6 +284,8 @@ def load_ab_data(subjids, dates=None, *, ses=None, index=None, date_range=None,
                 trial_parts.append(trials.assign(**identity))
             session_rows.append({**identity, "n_runs": len(runs), "n_trials": len(trials),
                                  "n_attempts": len(ni)})
+            run_rows.extend({**identity, "run_id": run_id, "start": start, "end": end}
+                            for run_id, (start, end) in sorted(runs.items()))
             session_idx += 1
 
     trials = (pd.concat(trial_parts, ignore_index=True) if trial_parts
@@ -271,6 +296,7 @@ def load_ab_data(subjids, dates=None, *, ses=None, index=None, date_range=None,
         "trials": trials[_TRIAL_COLUMNS],
         "attempts": attempts[_ATTEMPT_COLUMNS],
         "sessions": pd.DataFrame(session_rows, columns=_SESSION_COLUMNS),
+        "runs": pd.DataFrame(run_rows, columns=_RUN_COLUMNS),
     }
 
 
@@ -355,3 +381,57 @@ def build_choices(data: dict) -> pd.DataFrame:
         within_session_position(choices[completed]).reindex(choices.index),
         within_session_position(choices))
     return choices[_CHOICE_COLUMNS]
+
+
+def choice_rows(data: dict, mode: str) -> pd.DataFrame:
+    """The `build_choices` rows of one mode, in time order within an animal.
+
+    ``mode`` is one of `MODES`: ``"completed"`` keeps the completed trials, ``"attempts"``
+    every choice attempt.
+    """
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+    choices = build_choices(data)
+    if mode == "completed":
+        choices = choices[choices["is_completed"]]
+    return choices.sort_values(["subjid", "time"])
+
+
+def _run_clock(data: dict) -> pd.DataFrame:
+    """Each run with ``offset``: task hours before it, over the animal's earlier runs."""
+    runs = data["runs"].dropna(subset=["start", "end"])
+    runs = runs.sort_values(["subjid", "session_idx", "start"]).reset_index(drop=True)
+    hours = (runs["end"] - runs["start"]).dt.total_seconds().clip(lower=0) / 3600
+    runs["hours"] = hours
+    runs["offset"] = hours.groupby(runs["subjid"]).cumsum() - hours
+    return runs
+
+
+def task_time(data: dict, frame: pd.DataFrame, column: str) -> pd.Series:
+    """Hours of task time at each row's ``column`` timestamp.
+
+    Task time runs only while an odour-discrimination run of the animal is recording: its
+    runs are laid end to end in order, so the nights, the gaps between runs and the runs
+    of other stages take no time. A row counts from its run's start, clipped to the run,
+    so a timestamp just past a run's recorded end cannot reach into the next one. NaN for
+    a row whose run has no recorded start or end.
+
+    ``frame`` needs ``subjid``, ``session_idx`` and ``run_id``, as every frame of
+    `load_ab_data` and `build_choices` has.
+    """
+    clock = _run_clock(data).set_index(["subjid", "session_idx", "run_id"])
+    joined = frame[["subjid", "session_idx", "run_id"]].join(
+        clock[["start", "hours", "offset"]], on=["subjid", "session_idx", "run_id"])
+    elapsed = (pd.to_datetime(frame[column]) - joined["start"]).dt.total_seconds() / 3600
+    return joined["offset"] + elapsed.clip(lower=0, upper=joined["hours"])
+
+
+def session_bounds(data: dict) -> pd.DataFrame:
+    """Each session's first and last hour on the `task_time` clock.
+
+    One row per session with a timed run: ``start`` and ``end`` in task hours.
+    """
+    clock = _run_clock(data)
+    clock["stop"] = clock["offset"] + clock["hours"]
+    return (clock.groupby(_IDENTITY, as_index=False)
+            .agg(start=("offset", "min"), end=("stop", "max")))
