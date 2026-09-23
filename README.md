@@ -219,10 +219,12 @@ The analysis consists of two parts: **trial classification** and **behavioral me
 ```
 python scripts/run_trial_classification.py --subjids 53 --dates 20260528
 python scripts/run_metrics_analysis.py     --subjids 53 --dates 20260528
-python scripts/batch_process.py            --subjids 53 --date-range 20260501 20260531
+hypnose-batch-process                       -s 53 --date-range 20260501 20260531
 ```
 
-`--subjids` and `--dates` are optional (omit to run all); use `--date-range START END` for an inclusive range. Run trial classification before metric analysis (metrics read the saved classification results). The scripts validate that data exists first (`hypnose_behavior.io.validate.validate_subject`) and are thin wrappers over `hypnose_behavior.trial_classification.run.batch_analyze_sessions` and `hypnose_behavior.metric_analysis.run.batch_run_all_metrics_with_merge`.
+`hypnose-batch-process` is installed by `pip install -e .` and runs from anywhere; `python scripts/batch_process.py` does the same without an install.
+
+Selectors are optional (omit to run all) and intersect. Every script accepts the same spellings: subjects `-s` / `--sub` / `--subs` / `--subj` / `--subject(s)` / `--subjid(s)`; dates `-d` / `--date(s)` and `--date-range`; sessions `--ses` / `--session(s)` and `--ses-range` / `--session-range`. Long flags also work with one dash (`-sub`, `-ses-range`). Values can be space- or comma-separated and zero-padded (`60 61`, `60,61`, `060`); ranges take `START END` or `START-END`. Run trial classification before metric analysis (metrics read the saved classification results). The scripts validate that data exists first (`hypnose_behavior.io.validate.validate_subject`) and are thin wrappers over `hypnose_behavior.trial_classification.run.batch_analyze_sessions` and `hypnose_behavior.metric_analysis.run.batch_run_all_metrics_with_merge`.
 
 1. Trial Classification
 
