@@ -19,7 +19,10 @@ __all__ = [
     "BAND_ALPHA",
     "MAX_SESSION_TICKS",
     "REFERENCE",
+    "SECOND",
     "SERIES",
+    "SESSION_SPAN",
+    "annotation_size",
     "figure",
     "line_with_band",
     "require_data",
@@ -31,17 +34,36 @@ __all__ = [
 ]
 
 # Categorical slots: slot 1 blue, slot 2 orange, slot 3 aqua. `SERIES` is slot 1, the
-# colour of a figure that draws a single series.
+# colour of a figure that draws a single series; `SECOND` is slot 2.
 SERIES = "#2a78d6"
+SECOND = "#eb6834"
 REFERENCE = "#8a8984"
 BAND_ALPHA = 0.18
 MAX_SESSION_TICKS = 6
+
+# In a figure laid out along sessions, a session occupies this much of its slot on the x
+# axis; the rest is the boundary that follows it, so a within-session segment and the
+# step across the night after it never overlap.
+SESSION_SPAN = 0.72
+
+_SMALL = 0.55
+_MIN_ANNOTATION = 8.0
 
 
 def text_size() -> float:
     """Titles and legends follow the active style's tick-label size."""
     return plt.rcParams["xtick.labelsize"] if isinstance(
         plt.rcParams["xtick.labelsize"], (int, float)) else 10
+
+
+def annotation_size() -> float:
+    """Point size for text subordinate to the axis labels: headlines, legends, panel titles.
+
+    A fraction of the tick size so it follows the active style, with a floor, since a
+    headline can carry the animal's result and a style with small ticks would shrink it
+    out of reading size.
+    """
+    return max(text_size() * _SMALL, _MIN_ANNOTATION)
 
 
 def require_data(subjids, dates, selectors, data):

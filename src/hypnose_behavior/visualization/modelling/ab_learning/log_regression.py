@@ -25,7 +25,10 @@ from hypnose_behavior.modelling.ab_learning.log_regression import (
 from hypnose_behavior.visualization.modelling.ab_learning._common import (
     BAND_ALPHA,
     REFERENCE,
+    SECOND,
     SERIES,
+    SESSION_SPAN,
+    annotation_size,
     figure,
     require_data,
     save_scope,
@@ -39,7 +42,7 @@ __all__ = ["plot_gain_decomposition"]
 
 # Slot 1 for the gain inside a session, slot 2 for the gain across the night after it.
 _WITHIN = SERIES
-_OVERNIGHT = "#eb6834"
+_OVERNIGHT = SECOND
 # Each group of gains: which rows, the colour, whether the marker is hollow, the label.
 # Hollow marks a gain outside the paired within/overnight total -- the last session's
 # W_s, which has no boundary after it, and a boundary holding a dropped session.
@@ -50,10 +53,6 @@ _GAIN_GROUPS = (
     ("across_gap", True, _OVERNIGHT, True, "spans a dropped session"),
 )
 
-# A session occupies this much of its slot on the x axis; the rest is the boundary that
-# follows it, so a within-session segment and an overnight step never overlap.
-_SESSION_SPAN = 0.72
-
 # Accuracies labelled on the right of the top panel.
 _PROBABILITY_TICKS = (0.1, 0.25, 0.5, 0.75, 0.9, 0.97)
 
@@ -61,18 +60,6 @@ _PROBABILITY_TICKS = (0.1, 0.25, 0.5, 0.75, 0.9, 0.97)
 # on the axis labels, which a 6.4in figure cannot hold beside this many sessions.
 _WIDTH = 10.0
 _PANEL_HEIGHT = 3.4
-
-# Annotations subordinate to the axis labels: the headline and the legend. Taken as a
-# fraction of the tick size so they follow the active style, with a floor, since the
-# headline carries the animal's result and a style with small ticks would shrink it out
-# of reading size.
-_SMALL = 0.55
-_MIN_ANNOTATION = 8.0
-
-
-def _annotation_size() -> float:
-    """Point size for the headline and the legend."""
-    return max(text_size() * _SMALL, _MIN_ANNOTATION)
 
 
 def _save(fig, name, sessions, save, subjid=None):
@@ -96,7 +83,7 @@ def _probability_axis(ax):
 def _plot_levels(ax, levels):
     """The fitted log-odds of M_c: a segment per session, a step across each boundary."""
     start_x = levels["session_idx"].to_numpy()
-    end_x = start_x + _SESSION_SPAN
+    end_x = start_x + SESSION_SPAN
     start, end = levels["logit_start"].to_numpy(), levels["logit_end"].to_numpy()
 
     for x, lo, hi in ((start_x, levels["logit_start_lo"], levels["logit_start_hi"]),
@@ -120,7 +107,7 @@ def _plot_running_totals(ax, gains):
     short of the total by that boundary's gain.
     """
     for component, offset, color in (("within", 0.0, _WITHIN),
-                                     ("overnight", _SESSION_SPAN, _OVERNIGHT)):
+                                     ("overnight", SESSION_SPAN, _OVERNIGHT)):
         part = gains[(gains["component"] == component) & gains["in_total"]]
         part = part.sort_values("session_idx")
         if part.empty:
@@ -140,7 +127,7 @@ def _plot_gains(ax, gains):
         part = gains[(gains["component"] == component) & (gains["in_total"] == paired)]
         if part.empty:
             continue
-        x = part["session_idx"].to_numpy() + (0.0 if component == "within" else _SESSION_SPAN)
+        x = part["session_idx"].to_numpy() + (0.0 if component == "within" else SESSION_SPAN)
         err = np.vstack([part["value"] - part["lo"], part["hi"] - part["value"]])
         ax.errorbar(x, part["value"], yerr=err, fmt="o", color=color, markersize=8,
                     markerfacecolor="white" if hollow else color,
@@ -215,13 +202,13 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
         _probability_axis(top)
         session_ticks(bottom, animal)
         bottom.set_xlim(animal["session_idx"].min() - 0.4,
-                        animal["session_idx"].max() + _SESSION_SPAN + 0.4)
+                        animal["session_idx"].max() + SESSION_SPAN + 0.4)
         # The headline titles the top axes, where constrained_layout reserves room for it
         # under the figure title; on the lower axes it would wedge between the two panels.
         top.set_title(_headline(shares.loc[subjid], tests.loc[subjid]), loc="left",
-                      fontsize=_annotation_size(), color=REFERENCE)
+                      fontsize=annotation_size(), color=REFERENCE)
         fig.legend(*bottom.get_legend_handles_labels(), loc="outside lower center", ncols=3,
-                   frameon=False, fontsize=_annotation_size())
+                   frameon=False, fontsize=annotation_size())
         title(fig, f"within-session and overnight gain | {fits[subjid]['mode']}", subjid)
         _save(fig, f"ab_learning_gain_decomposition_sub-{subjid:03d}",
               fits[subjid]["sessions"], save, subjid)

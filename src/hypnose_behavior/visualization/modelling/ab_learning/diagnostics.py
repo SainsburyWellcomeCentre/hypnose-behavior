@@ -19,6 +19,7 @@ from hypnose_behavior.modelling.ab_learning.diagnostics import (
 )
 from hypnose_behavior.visualization.modelling.ab_learning._common import (
     REFERENCE,
+    SECOND,
     SERIES,
     figure,
     line_with_band,
@@ -35,7 +36,7 @@ __all__ = ["plot_failed_attempt_accuracy", "plot_initiation_rate", "plot_lose_sh
 # Fixed categorical order: slot 1 blue, slot 2 orange, slot 3 aqua.
 _SOURCE_STYLE = {
     "completed": (SERIES, "completed trials"),
-    "failed": ("#eb6834", "failed attempts"),
+    "failed": (SECOND, "failed attempts"),
     "zero_poke": ("#1baf7a", "failed attempts, no poke"),
 }
 _GROUP_LABELS = {"none": "none", "no_visit": "no visit", "wrong_port": "wrong\nport",

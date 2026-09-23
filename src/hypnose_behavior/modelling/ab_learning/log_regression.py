@@ -71,6 +71,7 @@ __all__ = [
     "MODEL_FORMULAS",
     "MODES",
     "fit_session_models",
+    "fitted_curves",
     "gain_decomposition",
     "model_comparison",
     "overnight_share",
@@ -314,6 +315,25 @@ def shared_slope(fits: dict) -> pd.DataFrame:
         slope = _estimate(model, np.eye(len(model.params))[model.model.exog_names.index("x")])
         rows.append({**_identity(fit), **slope.iloc[0].to_dict()})
     return pd.DataFrame(rows)
+
+
+def fitted_curves(fits: dict, model: str = "M_c", points: int = 41) -> pd.DataFrame:
+    """A model's fitted accuracy over each fitted session, at ``points`` positions.
+
+    One row per animal, session and ``x`` from 0 to 1, with ``p`` the fitted probability of
+    a correct choice -- on the probability scale, a session's straight line in log-odds
+    bends.
+    """
+    grid = np.linspace(0.0, 1.0, points)
+    parts = []
+    for subjid in sorted(fits):
+        fit = fits[subjid]
+        sessions = _kept_sessions(fit)[_SESSION]
+        rows = sessions.loc[sessions.index.repeat(points)].reset_index(drop=True)
+        rows["x"] = np.tile(grid, len(sessions))
+        rows["p"] = np.asarray(fit["models"][model].predict(rows))
+        parts.append(rows.assign(mode=fit["mode"], model=model))
+    return pd.concat(parts, ignore_index=True)
 
 
 def session_levels(fits: dict) -> pd.DataFrame:
