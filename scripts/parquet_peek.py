@@ -29,26 +29,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from hypnose_helpers.cli.selector_args import add_selector_args
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import derivatives
 from hypnose_behavior.io.parquet_peek import peek, DEFAULT_ROWS
 
 
-def _resolve_dates(args):
-    if args.date_range:
-        return {"date_range": (args.date_range[0], args.date_range[1])}
-    if args.dates:
-        return {"date": list(args.dates)}
-    return {}
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--subjids", nargs="+", type=int, required=True,
-                    help="subject id(s) -- required, so a peek never walks the whole tree")
-    g = ap.add_mutually_exclusive_group()
-    g.add_argument("--dates", nargs="*", type=int, default=None, help="specific date(s) YYYYMMDD")
-    g.add_argument("--date-range", nargs=2, type=int, metavar=("START", "END"), help="inclusive YYYYMMDD range")
+    add_selector_args(ap, subjects_required=True,
+                      subjects_help="subject id(s) -- required, so a peek never walks the whole tree")
     ap.add_argument("--table", default=None,
                     help="table name, e.g. trial_data; omit for an inventory of all of them")
     ap.add_argument("--column", default=None, help="show this column alone, with its values")
@@ -58,7 +48,9 @@ def main() -> int:
                     help="show only the first N columns (default: all of them)")
     args = ap.parse_args()
 
-    selector = _resolve_dates(args)
+    selector = {k: v for k, v in dict(date=args.dates, date_range=args.date_range,
+                                      ses=args.ses, ses_range=args.ses_range).items()
+                if v is not None}
 
     sessions = []
     for subjid in args.subjids:
