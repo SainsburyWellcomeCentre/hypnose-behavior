@@ -1,9 +1,9 @@
 """The engagement, knowledge and reward figure (``modelling.ab_learning.cumulative``).
 
 `plot_cumulative_panels` takes the same subject/session selection as `load_ab_data` -- or
-the already-loaded frames as ``data=`` -- and draws **one figure per animal**, three
-panels on one task-time axis. Returns ``{subjid: Figure}``; ``save=True`` files each
-figure under its own animal with `io.save.save_figure`.
+the already-loaded frames as ``data=`` -- and draws **one figure per animal**, every
+running count on one task-time axis. Returns ``{subjid: Figure}``; ``save=True`` files
+each figure under its own animal with `io.save.save_figure`.
 """
 from __future__ import annotations
 
@@ -27,19 +27,21 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     title,
 )
 
-__all__ = ["plot_cumulative_panels"]
+__all__ = ["CURVE_STYLES", "plot_cumulative_panels"]
 
-# Panel, series drawn in it (colour, label), and the y label.
-_PANELS = (
-    ((("attempts", SECOND, "choice attempts"), ("initiations", SERIES, "initiations")),
-     "initiations"),
-    ((("excess", SERIES, None),), "excess correct"),
-    ((("rewards", SERIES, None),), "rewards"),
-)
-_BOUNDARY = dict(color=REFERENCE, linestyle=":", linewidth=1.2)
+# One look per running count, the same in every figure. Rewards sit behind the other two:
+# they are their product, so they are context rather than the comparison.
+CURVE_STYLES = {
+    "initiations": dict(color=SERIES, linewidth=2.2, zorder=3, label="initiations"),
+    "attempts": dict(color=SERIES, linewidth=1.6, linestyle=(0, (4, 2)), zorder=2,
+                     label="choice attempts"),
+    "excess": dict(color=SECOND, linewidth=2.2, zorder=4, label="excess correct"),
+    "rewards": dict(color="#1baf7a", linewidth=1.6, alpha=0.45, zorder=1, label="rewards"),
+}
+_BOUNDARY = dict(color=REFERENCE, linestyle=":", linewidth=1.2, zorder=0)
 
 _WIDTH = 10.0
-_PANEL_HEIGHT = 2.9
+_HEIGHT = 5.0
 
 
 def _save(fig, name, data, save, subjid):
@@ -65,16 +67,20 @@ def plot_cumulative_panels(subjids=None, dates=None, *, data=None, mode="complet
         plot_cumulative_panels(data=ab)
         plot_cumulative_panels(data=ab, mode="attempts")
 
-    Task time counts only the hours an odour-discrimination run was recording, so the
-    nights and the gaps between runs take no width. Dotted verticals are session
-    boundaries; the session numbers run along the top.
+    Every count is **divided by its own largest absolute value**, so each ends near 1 and
+    the lines compare by shape; the legend gives the unscaled final counts. Task time
+    counts only the hours an odour-discrimination run was recording, so nights and the
+    gaps between runs take no width. Dotted verticals are session boundaries.
 
-    - A: trials initiated. In ``"attempts"`` mode a second line adds the failed attempts
-      that ended in a port visit, so the gap between the two is the failed choices.
-    - B: excess correct over the mode's choices, ``cumsum(y - 0.5)``. Flat is chance;
-      the slope per hour is choice rate times (accuracy - 0.5), so a bend here that A
-      shares is engagement, and one A lacks is accuracy.
-    - C: rewards, the product of the two.
+    - initiations: trials initiated -- engagement. In ``"attempts"`` mode a dashed line
+      adds the failed attempts that ended in a port visit.
+    - excess correct: ``cumsum(y - 0.5)`` over the mode's choices; flat is chance. Its
+      slope per hour is choice rate times (accuracy - 0.5), so a rise it shows and the
+      initiations do not is a change in accuracy, and a bend both share is engagement.
+      Once scaled, it runs steeper than the initiations roughly where accuracy is above
+      the animal's own average and flatter where it is below (roughly: initiations also
+      count the trials that ended without a scored choice).
+    - rewards: the product of the two, drawn faded behind them.
     """
     data = require_data(subjids, dates, selectors, data)
     curves = cumulative_curves(data, mode)
@@ -84,29 +90,25 @@ def plot_cumulative_panels(subjids=None, dates=None, *, data=None, mode="complet
     for subjid in sorted(curves["subjid"].unique()):
         animal = curves[curves["subjid"] == subjid]
         spans = bounds[bounds["subjid"] == subjid].sort_values("session_idx")
-        fig, axes = figure(n_rows=3, width=_WIDTH, height=_PANEL_HEIGHT)
-        for ax, (series, ylabel) in zip(axes, _PANELS):
-            for name, color, label in series:
-                part = animal[animal["series"] == name]
-                if part.empty:
-                    continue
-                # From zero at the clock's start, so hours before the first event read as
-                # a flat count rather than as missing data.
-                ax.plot(np.r_[0.0, part["time"]], np.r_[0.0, part["value"]], color=color,
-                        linewidth=2, drawstyle="steps-post", label=label)
-            for start in spans["start"].to_numpy()[1:]:
-                ax.axvline(start, **_BOUNDARY)
-            style_axis(ax, ylabel=ylabel, ylim=None)
-            if ax is not axes[0]:
-                ax.sharex(axes[0])
-            if ax is not axes[-1]:
-                ax.tick_params(labelbottom=False)
-        axes[1].axhline(0, color=REFERENCE, linestyle="--", linewidth=1)
-        axes[0].set_xlim(0, float(np.nanmax(spans["end"])) if len(spans) else None)
-        _session_axis(axes[0], spans)
-        axes[-1].set_xlabel("task time (h)")
-        if mode == "attempts":
-            axes[0].legend(frameon=False, fontsize=annotation_size(), loc="upper left")
+        fig, (ax,) = figure(width=_WIDTH, height=_HEIGHT)
+        for name, style in CURVE_STYLES.items():
+            part = animal[animal["series"] == name]
+            if part.empty:
+                continue
+            scale = float(part["value"].abs().max()) or 1.0
+            label = f"{style['label']} ({part['value'].iloc[-1]:g})"
+            # From zero at the clock's start, so hours before the first event read as a
+            # flat count rather than as missing data.
+            ax.plot(np.r_[0.0, part["time"]], np.r_[0.0, part["value"] / scale],
+                    drawstyle="steps-post", **{**style, "label": label})
+        for start in spans["start"].to_numpy()[1:]:
+            ax.axvline(start, **_BOUNDARY)
+        ax.axhline(0, color=REFERENCE, linestyle="--", linewidth=1, zorder=0)
+        style_axis(ax, ylabel="scaled count", ylim=None)
+        ax.set_xlim(0, float(np.nanmax(spans["end"])) if len(spans) else None)
+        ax.set_xlabel("task time (h)")
+        _session_axis(ax, spans)
+        ax.legend(frameon=False, fontsize=annotation_size(), loc="upper left")
         title(fig, f"initiations, excess correct, rewards | {mode}", subjid)
         _save(fig, f"ab_learning_cumulative_panels_sub-{subjid:03d}", data, save, subjid)
         figures[int(subjid)] = fig
