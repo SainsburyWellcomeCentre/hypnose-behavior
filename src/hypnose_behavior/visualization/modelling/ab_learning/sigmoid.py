@@ -7,8 +7,8 @@ animal with `io.save.save_figure`.
 
 - `plot_accuracy_sigmoid` -- the accuracy fits against excess correct and binned accuracy
   over the row index, and the lnL surface over (center, width).
-- `plot_sigmoid_anchors`  -- the running counts of 1.1 on task time with every fit's
-  expected running count on top.
+- `plot_sigmoid_anchors`  -- every fit on task time: the 1.1 running counts with each
+  fit's expected count, and the rates and accuracy per session with the fitted curves.
 """
 from __future__ import annotations
 
@@ -75,7 +75,6 @@ _MIDPOINT = dict(marker="o", markersize=9, markeredgecolor="white", markeredgewi
 
 _WIDTH = 10.0
 _HEIGHT = 3.4
-_ANCHOR_HEIGHT = 5.0
 
 
 def _save(fig, name, sessions, save, subjid):
@@ -199,8 +198,9 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
     with the initial accuracy at 0.5, dotted blue the free fit's other optima.
 
     - top: observed excess correct (grey, every row) and each fit's expected excess,
-      ``cumsum(p(k) - 0.5)``; the free fit's ``k_s +/- w`` shaded. Where grey leaves a
-      fitted line, the one-change curve misses the data.
+      ``cumsum(p(k) - 0.5)``, the running sum of the middle panel's curve; the free fit's
+      ``k_s +/- w`` shaded. Where grey leaves a fitted line, the one-change curve misses
+      the data.
     - middle: accuracy per 50 rows (Wilson 95%) and each fit's p(k).
     - bottom: the free fit's lnL over (center, width), relative to its best grid point,
       with the 95% contour and the optima numbered by rank. Separate dark islands are
@@ -270,20 +270,92 @@ def _observed_and_fitted(name, fit, span):
             expected_count(fit, clock), midpoint)
 
 
+def _draw_counts(ax, fits, span):
+    """The scaled running counts and their fits; returns each fit's midpoint in hours."""
+    midpoints = {}
+    for name, fit in fits.items():
+        style = CURVE_STYLES[name]
+        x, observed, fitted_x, fitted, (mid_x, mid_y) = _observed_and_fitted(name, fit, span)
+        scale = float(np.abs(observed).max()) or 1.0
+        ax.plot(x, observed / scale, drawstyle="steps-post",
+                **{**style, "label": f"{style['label']}, midpoint {mid_x:.1f} h"})
+        ax.plot(fitted_x, fitted / scale, color=style["color"], **_FITTED)
+        ax.plot(mid_x, mid_y / scale, color=style["color"], **_MIDPOINT)
+        midpoints[name] = mid_x
+    ax.axhline(0, **_ZERO)
+    style_axis(ax, ylabel="scaled count", ylim=None)
+    handles, labels = ax.get_legend_handles_labels()
+    handles.append(Line2D([], [], color=REFERENCE, **{k: v for k, v in _FITTED.items()
+                                                       if k != "zorder"}))
+    labels.append("sigmoid fit")
+    ax.legend(handles, labels, frameon=False, fontsize=annotation_size(), loc="upper left")
+    return midpoints
+
+
+def _segments(ax, frame, column, colour):
+    """One horizontal bar per session, over its task-time span."""
+    ax.hlines(frame[column], frame["start"], frame["end"], color=colour, linewidth=4,
+              alpha=0.35, zorder=1)
+
+
+def _draw_rates(ax, data, spans, fits, subjid, span):
+    """Initiations and rewards per task hour, per session, with each rate fit's curve."""
+    trials = data["trials"][data["trials"]["subjid"] == subjid]
+    counts = trials.groupby("session_idx").agg(
+        initiations=("outcome", "size"),
+        rewards=("outcome", lambda o: int((o == "rewarded").sum())))
+    rates = spans.set_index("session_idx").join(counts).fillna(
+        {"initiations": 0, "rewards": 0})
+    hours = (rates["end"] - rates["start"]).where(lambda h: h > 0)
+    clock = np.linspace(0, span, 800)
+    for name in ("initiations", "rewards"):
+        colour = CURVE_STYLES[name]["color"]
+        _segments(ax, rates.assign(rate=rates[name] / hours), "rate", colour)
+        best = fits[name]["optima"].iloc[0]
+        ax.plot(clock, erf_curve(clock, best["initial"], best["final"], best["center"],
+                                 best["width"]), color=colour, linewidth=2.2, zorder=3,
+                label=name)
+    style_axis(ax, ylabel="per hour", ylim=None)
+    ax.set_ylim(bottom=0)
+    ax.legend(frameon=False, fontsize=annotation_size(), loc="upper left")
+
+
+def _draw_accuracy_on_time(ax, spans, fit):
+    """Accuracy per session, and the fitted p(k) at each trial's task time."""
+    rows = fit["rows"]
+    colour = CURVE_STYLES["excess"]["color"]
+    per_session = spans.set_index("session_idx").join(
+        rows.groupby("session_idx")["y"].mean().rename("accuracy"), how="inner")
+    _segments(ax, per_session, "accuracy", colour)
+    best = fit["optima"].iloc[0]
+    k = rows["k"].to_numpy(dtype=float)
+    ax.plot(rows["hours"], erf_curve(k, best["initial"], best["final"], best["center"],
+                                     best["width"]),
+            color=colour, linewidth=2.2, zorder=3, label="accuracy")
+    ax.axhline(0.5, **_ZERO)
+    style_axis(ax, ylabel="accuracy", ylim=(0, 1.02))
+    ax.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
+
+
 def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
                          engagement=None, rewards=None, save=False, **selectors):
-    """The running counts of 1.1 on task time, each with its sigmoid fit on top.
+    """Every sigmoid fit on task time, as running counts and as rates, one figure per
+    animal.
 
         plot_sigmoid_anchors(data=ab, accuracy=acc["free"], engagement=eng, rewards=rew)
 
     ``accuracy`` is any `fit_accuracy` result (completed, initial free when omitted);
     ``engagement`` / ``rewards`` are `fit_rate` results, fitted when omitted.
 
-    - solid: initiations, excess correct over the accuracy fit's rows, and rewards, each
-      divided by its own largest value, as in 1.1.
-    - dashed: each fit's expected running count, scaled alike -- a rate fit integrated
-      over task time, or ``cumsum(p(k) - 0.5)`` at each trial's time.
-    - dots: each fit's midpoint on its curve; the legend gives it in task hours.
+    - top: the 1.1 counts (solid; initiations, excess correct over the accuracy fit's
+      rows, rewards), each divided by its own largest value, and each fit's expected
+      running count scaled alike (dashed): a rate fit integrated over task time, or
+      ``cumsum(p(k) - 0.5)`` at each trial's time. Dots mark the midpoints.
+    - middle: initiations and rewards per task hour, per session (faded bars), and the
+      rate fits.
+    - bottom: accuracy per session, and the accuracy fit's p(k) at each trial's time. It
+      is per trial, not per hour, so it bends wherever trials bunch up in time.
+    - dashed verticals: each fit's midpoint, in its colour, on every panel.
 
     Rewards are initiation rate times accuracy, so their midpoint says which of the two
     drove the reward rate, not a third change.
@@ -298,33 +370,25 @@ def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
     for subjid in sorted(set(accuracy) & set(engagement) & set(rewards)):
         spans = bounds[bounds["subjid"] == subjid].sort_values("session_idx")
         span = float(spans["end"].max())
-        fig, (ax,) = figure(width=_WIDTH, height=_ANCHOR_HEIGHT)
-        for name, fit in (("initiations", engagement[subjid]), ("excess", accuracy[subjid]),
-                          ("rewards", rewards[subjid])):
-            style = CURVE_STYLES[name]
-            x, observed, fitted_x, fitted, (mid_x, mid_y) = _observed_and_fitted(
-                name, fit, span)
-            scale = float(np.abs(observed).max()) or 1.0
-            ax.plot(x, observed / scale, drawstyle="steps-post",
-                    **{**style, "label": f"{style['label']}, midpoint {mid_x:.1f} h"})
-            ax.plot(fitted_x, fitted / scale, color=style["color"], **_FITTED)
-            ax.plot(mid_x, mid_y / scale, color=style["color"], **_MIDPOINT)
-        for start in spans["start"].to_numpy()[1:]:
-            ax.axvline(start, **BOUNDARY)
-        ax.axhline(0, **_ZERO)
-        style_axis(ax, ylabel="scaled count", ylim=None)
-        ax.set_xlim(0, span)
-        ax.set_xlabel("task time (h)")
-        session_axis(ax, spans)
-        handles, labels = ax.get_legend_handles_labels()
-        handles.append(Line2D([], [], color=REFERENCE, **{k: v for k, v in _FITTED.items()
-                                                           if k != "zorder"}))
-        labels.append("sigmoid fit")
-        ax.legend(handles, labels, frameon=False, fontsize=annotation_size(),
-                  loc="upper left")
-        acc = accuracy[subjid]
-        title(fig, f"sigmoid fits on task time | accuracy {acc['mode']}, "
-                   f"initial {acc['variant']}", subjid)
+        fits = {"initiations": engagement[subjid], "excess": accuracy[subjid],
+                "rewards": rewards[subjid]}
+        fig, (counts, rates, acc) = figure(3, width=_WIDTH, height=_HEIGHT)
+        for ax in (rates, acc):
+            ax.sharex(counts)
+        midpoints = _draw_counts(counts, fits, span)
+        _draw_rates(rates, data, spans, fits, subjid, span)
+        _draw_accuracy_on_time(acc, spans, fits["excess"])
+        for ax in (counts, rates, acc):
+            for start in spans["start"].to_numpy()[1:]:
+                ax.axvline(start, **BOUNDARY)
+            for name, hours in midpoints.items():
+                ax.axvline(hours, color=CURVE_STYLES[name]["color"], linestyle="--",
+                           linewidth=1.2, zorder=2)
+        counts.set_xlim(0, span)
+        session_axis(counts, spans)
+        acc.set_xlabel("task time (h)")
+        title(fig, f"sigmoid fits on task time | accuracy {fits['excess']['mode']}, "
+                   f"initial {fits['excess']['variant']}", subjid)
         _save(fig, f"ab_learning_sigmoid_anchors_sub-{subjid:03d}", data["sessions"], save,
               subjid)
         figures[int(subjid)] = fig
