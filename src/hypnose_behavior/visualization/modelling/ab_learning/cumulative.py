@@ -10,22 +10,23 @@ already-loaded frames as ``data=`` -- and draws **one figure per animal**. Retur
 """
 from __future__ import annotations
 
-import math
-
 import numpy as np
 
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.modelling.ab_learning.cumulative import cumulative_curves, excess_by_index
 from hypnose_behavior.modelling.ab_learning.data import session_bounds
 from hypnose_behavior.visualization.modelling.ab_learning._common import (
-    MAX_SESSION_TICKS,
+    BOUNDARY,
     REFERENCE,
     SECOND,
     SERIES,
+    THIRD,
     annotation_size,
     figure,
+    index_bounds,
     require_data,
     save_scope,
+    session_axis,
     style_axis,
     title,
 )
@@ -39,9 +40,8 @@ CURVE_STYLES = {
     "attempts": dict(color=SERIES, linewidth=1.6, linestyle=(0, (4, 2)), zorder=2,
                      label="choice attempts"),
     "excess": dict(color=SECOND, linewidth=2.2, zorder=4, label="excess correct"),
-    "rewards": dict(color="#1baf7a", linewidth=1.6, alpha=0.45, zorder=1, label="rewards"),
+    "rewards": dict(color=THIRD, linewidth=1.6, alpha=0.45, zorder=1, label="rewards"),
 }
-_BOUNDARY = dict(color=REFERENCE, linestyle=":", linewidth=1.2, zorder=0)
 
 _WIDTH = 10.0
 _HEIGHT = 5.0
@@ -51,16 +51,6 @@ def _save(fig, name, data, save, subjid):
     if not save:
         return
     save_figure(fig, name, **save_scope(data["sessions"], subjid))
-
-
-def _session_axis(ax, bounds):
-    """Session numbers along the top, at each session's middle, thinned to fit."""
-    bounds = bounds.iloc[::math.ceil(len(bounds) / MAX_SESSION_TICKS)]
-    top = ax.secondary_xaxis("top")
-    top.set_xticks((bounds["start"] + bounds["end"]).to_numpy() / 2)
-    top.set_xticklabels(bounds["ses"].astype(str))
-    top.tick_params(length=0, labelsize=annotation_size())
-    top.set_xlabel("session", fontsize=annotation_size())
 
 
 def plot_cumulative_panels(subjids=None, dates=None, *, data=None, mode="completed",
@@ -105,26 +95,17 @@ def plot_cumulative_panels(subjids=None, dates=None, *, data=None, mode="complet
             ax.plot(np.r_[0.0, part["time"]], np.r_[0.0, part["value"] / scale],
                     drawstyle="steps-post", **{**style, "label": label})
         for start in spans["start"].to_numpy()[1:]:
-            ax.axvline(start, **_BOUNDARY)
+            ax.axvline(start, **BOUNDARY)
         ax.axhline(0, color=REFERENCE, linestyle="--", linewidth=1, zorder=0)
         style_axis(ax, ylabel="scaled count", ylim=None)
         ax.set_xlim(0, float(np.nanmax(spans["end"])) if len(spans) else None)
         ax.set_xlabel("task time (h)")
-        _session_axis(ax, spans)
+        session_axis(ax, spans)
         ax.legend(frameon=False, fontsize=annotation_size(), loc="upper left")
         title(fig, f"initiations, excess correct, rewards | {mode}", subjid)
         _save(fig, f"ab_learning_cumulative_panels_sub-{subjid:03d}", data, save, subjid)
         figures[int(subjid)] = fig
     return figures
-
-
-def _index_bounds(rows):
-    """Each session's first and last position on a choice-count axis, as ``start`` /
-    ``end``: the choices before its first and up to its last."""
-    return (rows.groupby(["ses", "session_idx"], as_index=False)
-            .agg(start=("k", "min"), end=("k", "max"))
-            .assign(end=lambda b: b["end"] + 1)
-            .sort_values("session_idx"))
 
 
 def plot_excess_by_index(subjids=None, dates=None, *, data=None, mode="completed",
@@ -147,17 +128,17 @@ def plot_excess_by_index(subjids=None, dates=None, *, data=None, mode="completed
     figures = {}
     for subjid in sorted(excess["subjid"].unique()):
         animal = excess[excess["subjid"] == subjid]
-        spans = _index_bounds(animal)
+        spans = index_bounds(animal)
         fig, (ax,) = figure(width=_WIDTH, height=_HEIGHT)
         ax.plot(np.r_[0, animal["k"] + 1], np.r_[0.0, animal["excess"]],
                 drawstyle="steps-post", **{**CURVE_STYLES["excess"], "label": None})
         for start in spans["start"].to_numpy()[1:]:
-            ax.axvline(start, **_BOUNDARY)
+            ax.axvline(start, **BOUNDARY)
         ax.axhline(0, color=REFERENCE, linestyle="--", linewidth=1, zorder=0)
         style_axis(ax, ylabel="excess correct", ylim=None)
         ax.set_xlim(0, len(animal))
         ax.set_xlabel(unit)
-        _session_axis(ax, spans)
+        session_axis(ax, spans)
         title(fig, f"excess correct by {unit[:-1]} | {mode}", subjid)
         _save(fig, f"ab_learning_excess_by_index_{mode}_sub-{subjid:03d}", data, save,
               subjid)

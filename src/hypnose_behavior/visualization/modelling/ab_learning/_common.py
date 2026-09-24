@@ -17,16 +17,20 @@ from hypnose_behavior.modelling.ab_learning.data import load_ab_data
 
 __all__ = [
     "BAND_ALPHA",
+    "BOUNDARY",
     "MAX_SESSION_TICKS",
     "REFERENCE",
     "SECOND",
     "SERIES",
     "SESSION_SPAN",
+    "THIRD",
     "annotation_size",
     "figure",
+    "index_bounds",
     "line_with_band",
     "require_data",
     "save_scope",
+    "session_axis",
     "session_ticks",
     "style_axis",
     "text_size",
@@ -34,12 +38,16 @@ __all__ = [
 ]
 
 # Categorical slots: slot 1 blue, slot 2 orange, slot 3 aqua. `SERIES` is slot 1, the
-# colour of a figure that draws a single series; `SECOND` is slot 2.
+# colour of a figure that draws a single series; `SECOND` is slot 2, `THIRD` slot 3.
 SERIES = "#2a78d6"
 SECOND = "#eb6834"
+THIRD = "#1baf7a"
 REFERENCE = "#8a8984"
 BAND_ALPHA = 0.18
 MAX_SESSION_TICKS = 6
+
+# A session boundary drawn across a continuous axis.
+BOUNDARY = dict(color=REFERENCE, linestyle=":", linewidth=1.2, zorder=0)
 
 # In a figure laid out along sessions, a session occupies this much of its slot on the x
 # axis; the rest is the boundary that follows it, so a within-session segment and the
@@ -105,6 +113,26 @@ def session_ticks(ax, frame):
     ax.set_xticks(sessions["session_idx"])
     ax.set_xticklabels(sessions["ses"].astype(str))
     ax.set_xlabel("session")
+
+
+def session_axis(ax, bounds):
+    """Session numbers along the top of a continuous axis, at each session's middle,
+    thinned to fit. ``bounds`` has ``ses``, ``start`` and ``end`` in the axis' units."""
+    bounds = bounds.iloc[::math.ceil(len(bounds) / MAX_SESSION_TICKS)]
+    top = ax.secondary_xaxis("top")
+    top.set_xticks((bounds["start"] + bounds["end"]).to_numpy() / 2)
+    top.set_xticklabels(bounds["ses"].astype(str))
+    top.tick_params(length=0, labelsize=annotation_size())
+    top.set_xlabel("session", fontsize=annotation_size())
+
+
+def index_bounds(rows):
+    """Each session's ``start`` / ``end`` on a choice-count axis: the choices before its
+    first and up to its last. ``rows`` has ``ses``, ``session_idx`` and ``k``."""
+    return (rows.groupby(["ses", "session_idx"], as_index=False)
+            .agg(start=("k", "min"), end=("k", "max"))
+            .assign(end=lambda b: b["end"] + 1)
+            .sort_values("session_idx"))
 
 
 def title(fig, what: str, subjid=None):
