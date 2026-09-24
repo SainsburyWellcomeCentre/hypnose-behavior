@@ -49,6 +49,8 @@ __all__ = [
     "RATE_EVENTS",
     "VARIANTS",
     "erf_curve",
+    "expected_count",
+    "expected_excess",
     "fit_accuracy",
     "fit_rate",
     "sigmoid_anchors",
@@ -431,6 +433,29 @@ def fit_rate(data: dict, events: str = "initiations") -> dict:
         fits[int(subjid)] = _fit(int(subjid), events, None, None, times.size, model,
                                  optima, surface, times=times, span=span)
     return fits
+
+
+# ---------------------------------------------------------------------------------------
+# Fitted running counts: what a fit predicts for the curves of `cumulative`.
+# ---------------------------------------------------------------------------------------
+
+def expected_excess(fit: dict, rank: int = 0) -> np.ndarray:
+    """Expected excess correct after each row of an accuracy fit, ``cumsum(p(k) - 0.5)``
+    under its optimum of that ``rank``: the counterpart of the observed
+    ``cumsum(y - 0.5)``."""
+    optimum = fit["optima"].iloc[rank]
+    k = fit["rows"]["k"].to_numpy(dtype=float)
+    return np.cumsum(erf_curve(k, optimum["initial"], optimum["final"], optimum["center"],
+                               optimum["width"]) - 0.5)
+
+
+def expected_count(fit: dict, hours, rank: int = 0) -> np.ndarray:
+    """Expected events of a rate fit by each of ``hours``: its rate integrated from 0,
+    under the optimum of that ``rank``. At the best optimum it ends on the observed total."""
+    optimum = fit["optima"].iloc[rank]
+    hours = np.asarray(hours, dtype=float)
+    return (optimum["initial"] * hours + (optimum["final"] - optimum["initial"])
+            * _shape_integral(hours, optimum["center"], optimum["width"]))
 
 
 # ---------------------------------------------------------------------------------------

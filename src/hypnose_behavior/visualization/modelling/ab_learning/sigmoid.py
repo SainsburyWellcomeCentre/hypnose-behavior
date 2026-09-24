@@ -5,15 +5,17 @@ already-loaded frames as ``data=``, or the fits themselves -- and draws **one fi
 animal**. Returns ``{subjid: Figure}``; ``save=True`` files each figure under its own
 animal with `io.save.save_figure`.
 
-- `plot_accuracy_sigmoid` -- the accuracy fits over the row index, and the lnL surface
-  over (center, width) that shows whether they are one optimum or several.
-- `plot_sigmoid_anchors`  -- engagement, reward and accuracy fits on one task-time axis.
+- `plot_accuracy_sigmoid` -- the accuracy fits against excess correct and binned accuracy
+  over the row index, and the lnL surface over (center, width).
+- `plot_sigmoid_anchors`  -- the running counts of 1.1 on task time with every fit's
+  expected running count on top.
 """
 from __future__ import annotations
 
 import matplotlib.colors as mcolors
 import matplotlib.ticker as mticker
 import numpy as np
+from matplotlib.lines import Line2D
 
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.modelling.ab_learning.data import session_bounds
@@ -21,6 +23,8 @@ from hypnose_behavior.modelling.ab_learning.diagnostics import wilson_interval
 from hypnose_behavior.modelling.ab_learning.sigmoid import (
     VARIANTS,
     erf_curve,
+    expected_count,
+    expected_excess,
     fit_accuracy,
     fit_rate,
 )
@@ -30,7 +34,6 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     REFERENCE,
     SECOND,
     SERIES,
-    THIRD,
     annotation_size,
     figure,
     index_bounds,
@@ -40,6 +43,7 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     style_axis,
     title,
 )
+from hypnose_behavior.visualization.modelling.ab_learning.cumulative import CURVE_STYLES
 
 __all__ = ["plot_accuracy_sigmoid", "plot_sigmoid_anchors"]
 
@@ -55,18 +59,23 @@ _SURFACE_CMAP = mcolors.LinearSegmentedColormap.from_list(
     "ab_surface", ["#f4f8fd", "#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"])
 
 _VARIANT_STYLES = {
-    "free": dict(color=SERIES, linewidth=2.2, zorder=4, label="initial free"),
+    "free": dict(color=SERIES, linewidth=2.2, zorder=4, label="fit, initial free"),
     "chance": dict(color=SECOND, linewidth=2.0, linestyle=(0, (5, 2)), zorder=3,
-                   label="initial 0.5"),
+                   label="fit, initial 0.5"),
 }
 _OTHER_OPTIMA = dict(color=SERIES, linewidth=1.2, linestyle=":", zorder=2)
+_OBSERVED = dict(color=REFERENCE, linewidth=1.8, zorder=1)
 _DATA = dict(color=REFERENCE, markersize=5, zorder=1)
-_CHANCE = dict(color=REFERENCE, linestyle="--", linewidth=1, zorder=0)
+_ZERO = dict(color=REFERENCE, linestyle="--", linewidth=1, zorder=0)
 
-_ANCHOR_COLOURS = {"initiations": SERIES, "rewards": THIRD, "accuracy": SECOND}
+# A fit drawn over its observed count: the count's colour, dashed.
+_FITTED = dict(linewidth=2.2, linestyle=(0, (4, 2)), alpha=1.0, zorder=5)
+_MIDPOINT = dict(marker="o", markersize=9, markeredgecolor="white", markeredgewidth=1.5,
+                 linestyle="none", zorder=6)
 
 _WIDTH = 10.0
-_HEIGHT = 3.8
+_HEIGHT = 3.4
+_ANCHOR_HEIGHT = 5.0
 
 
 def _save(fig, name, sessions, save, subjid):
@@ -91,28 +100,24 @@ def _binned(rows):
     return bins.assign(p=bins["c"] / bins["n"], lo=lo, hi=hi)
 
 
-def _draw_fits(ax, fits, subjid, k):
-    """Each variant's best curve, and the free fit's other optima, dotted."""
+def _curves(fits, subjid):
+    """``(fit, rank, style)`` for each curve to draw: every variant's best, and the free
+    fit's other optima."""
+    out = []
     for variant, style in _VARIANT_STYLES.items():
         fit = fits.get(variant, {}).get(subjid)
         if fit is None:
             continue
-        optima = fit["optima"]
-        best = optima.iloc[0]
-        ax.plot(k, erf_curve(k, best["initial"], best["final"], best["center"],
-                             best["width"]), **style)
-        if variant != "free":
-            continue
-        ax.axvspan(best["center"] - best["width"], best["center"] + best["width"],
-                   color=style["color"], alpha=BAND_ALPHA / 2, linewidth=0, zorder=0)
-        for i, (_, other) in enumerate(optima.iloc[1:].iterrows()):
-            ax.plot(k, erf_curve(k, other["initial"], other["final"], other["center"],
-                                 other["width"]),
-                    **{**_OTHER_OPTIMA, "label": "other optima" if i == 0 else None})
+        out.append((fit, 0, style))
+        if variant == "free":
+            out += [(fit, rank, {**_OTHER_OPTIMA, "label": "other optima" if rank == 1
+                                 else None})
+                    for rank in range(1, len(fit["optima"]))]
+    return out
 
 
 def _headline(fits, subjid):
-    """The best free fit, and what fixing the initial accuracy at 0.5 costs in lnL."""
+    """The best free fit, the next optimum, and what fixing the initial at 0.5 costs."""
     lines = []
     free, chance = (fits.get(v, {}).get(subjid) for v in VARIANTS)
     if free is not None:
@@ -130,6 +135,30 @@ def _headline(fits, subjid):
     return "\n".join(lines)
 
 
+def _draw_excess(ax, rows, curves):
+    """Observed excess correct over the row count, and each curve's expected excess."""
+    count = np.r_[0, rows["k"].to_numpy() + 1]
+    observed = np.r_[0.0, np.cumsum(rows["y"].to_numpy() - 0.5)]
+    ax.plot(count, observed, drawstyle="steps-post", label="observed", **_OBSERVED)
+    for fit, rank, style in curves:
+        ax.plot(count, np.r_[0.0, expected_excess(fit, rank)], **style)
+    ax.axhline(0, **_ZERO)
+
+
+def _draw_accuracy(ax, rows, curves):
+    """Accuracy per `_BIN` rows and each curve's p(k)."""
+    k = rows["k"].to_numpy(dtype=float)
+    bins = _binned(rows)
+    spread = np.clip([bins["p"] - bins["lo"], bins["hi"] - bins["p"]], 0, None)
+    ax.errorbar(bins["k"], bins["p"], yerr=spread, fmt="o", elinewidth=1, capsize=0,
+                label=f"per {_BIN}", **_DATA)
+    for fit, rank, style in curves:
+        optimum = fit["optima"].iloc[rank]
+        ax.plot(k, erf_curve(k, optimum["initial"], optimum["final"], optimum["center"],
+                             optimum["width"]), **{**style, "label": None})
+    ax.axhline(0.5, **_ZERO)
+
+
 def _draw_surface(ax, fit):
     """The free fit's lnL over (center, width), relative to its best grid point."""
     surface = fit["surface"]
@@ -143,10 +172,9 @@ def _draw_surface(ax, fit):
     for _, optimum in fit["optima"].iterrows():
         x = np.clip(optimum["center"], centers[0], centers[-1])
         y = np.clip(optimum["width"], widths[0], widths[-1])
-        ax.plot(x, y, marker="o", markersize=9, color=SECOND, markeredgecolor="white",
-                markeredgewidth=1.5, linestyle="none", zorder=5)
+        ax.plot(x, y, color=SECOND, **_MIDPOINT)
         ax.annotate(str(int(optimum["rank"]) + 1), (x, y), xytext=(6, 4),
-                    textcoords="offset points", fontsize=annotation_size(), zorder=6)
+                    textcoords="offset points", fontsize=annotation_size(), zorder=7)
     ax.set_yscale("log")
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:g}"))
     ax.yaxis.set_minor_formatter(mticker.NullFormatter())
@@ -167,13 +195,16 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
         plot_accuracy_sigmoid(fits=acc)
 
     ``fits`` maps a `VARIANTS` entry to its `fit_accuracy` result; without it both are
-    fitted from the selection in ``mode``.
+    fitted from the selection in ``mode``. Blue is the free fit, dashed orange the fit
+    with the initial accuracy at 0.5, dotted blue the free fit's other optima.
 
-    - top: accuracy per 50 rows (grey, Wilson 95%), each variant's best curve, the free
-      fit's other optima dotted, and its ``k_s +/- w`` shaded.
+    - top: observed excess correct (grey, every row) and each fit's expected excess,
+      ``cumsum(p(k) - 0.5)``; the free fit's ``k_s +/- w`` shaded. Where grey leaves a
+      fitted line, the one-change curve misses the data.
+    - middle: accuracy per 50 rows (Wilson 95%) and each fit's p(k).
     - bottom: the free fit's lnL over (center, width), relative to its best grid point,
-      with the 95% contour and the optima numbered by rank. Separate islands of dark
-      blue are separate optima.
+      with the 95% contour and the optima numbered by rank. Separate dark islands are
+      separate optima.
     """
     if fits is None:
         data = require_data(subjids, dates, selectors, data)
@@ -182,34 +213,36 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
 
     figures = {}
     for subjid in sorted(reference):
-        main = reference[subjid]
-        rows, mode = main["rows"], main["mode"]
-        k = rows["k"].to_numpy(dtype=float)
+        rows, mode = reference[subjid]["rows"], reference[subjid]["mode"]
         spans = index_bounds(rows)
+        curves = _curves(fits, subjid)
         unit = "trials" if mode == "completed" else "choice attempts"
 
-        fig, (top, bottom) = figure(2, width=_WIDTH, height=_HEIGHT)
-        bottom.sharex(top)
-        bins = _binned(rows)
-        spread = np.clip([bins["p"] - bins["lo"], bins["hi"] - bins["p"]], 0, None)
-        top.errorbar(bins["k"], bins["p"], yerr=spread, fmt="o", elinewidth=1, capsize=0,
-                     label=f"per {_BIN}", **_DATA)
-        _draw_fits(top, fits, subjid, k)
-        top.axhline(0.5, **_CHANCE)
-        for ax in (top, bottom):
-            for start in spans["start"].to_numpy()[1:]:
-                ax.axvline(start, **BOUNDARY)
-        style_axis(top, ylabel="accuracy", ylim=(0, 1.02))
-        top.text(0.01, 0.03, _headline(fits, subjid), transform=top.transAxes,
-                 fontsize=annotation_size(), va="bottom", ha="left")
-        top.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
-        top.set_xlim(0, len(rows))
-        session_axis(top, spans)
-
+        fig, (excess, accuracy, surface) = figure(3, width=_WIDTH, height=_HEIGHT)
+        for ax in (accuracy, surface):
+            ax.sharex(excess)
+        _draw_excess(excess, rows, curves)
+        _draw_accuracy(accuracy, rows, curves)
         free = fits.get("free", {}).get(subjid)
         if free is not None:
-            _draw_surface(bottom, free)
-        bottom.set_xlabel(unit)
+            best = free["optima"].iloc[0]
+            for ax in (excess, accuracy):
+                ax.axvspan(best["center"] - best["width"], best["center"] + best["width"],
+                           color=SERIES, alpha=BAND_ALPHA / 2, linewidth=0, zorder=0)
+            _draw_surface(surface, free)
+        for ax in (excess, accuracy, surface):
+            for start in spans["start"].to_numpy()[1:]:
+                ax.axvline(start, **BOUNDARY)
+
+        style_axis(excess, ylabel="excess correct", ylim=None)
+        excess.text(0.01, 0.97, _headline(fits, subjid), transform=excess.transAxes,
+                    fontsize=annotation_size(), va="top", ha="left")
+        excess.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
+        excess.set_xlim(0, len(rows))
+        session_axis(excess, spans)
+        style_axis(accuracy, ylabel="accuracy", ylim=(0, 1.02))
+        accuracy.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
+        surface.set_xlabel(unit)
         title(fig, f"accuracy sigmoid | {mode}", subjid)
         _save(fig, f"ab_learning_accuracy_sigmoid_{mode}_sub-{subjid:03d}", rows, save,
               subjid)
@@ -217,45 +250,40 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
     return figures
 
 
-def _session_rates(data, spans, subjid):
-    """Initiations and rewards per task hour, per session."""
-    trials = data["trials"][data["trials"]["subjid"] == subjid]
-    counts = trials.groupby("session_idx").agg(
-        initiations=("outcome", "size"),
-        rewards=("outcome", lambda o: int((o == "rewarded").sum())))
-    out = spans.set_index("session_idx").join(counts).fillna(
-        {"initiations": 0, "rewards": 0})
-    hours = (out["end"] - out["start"]).where(lambda h: h > 0)
-    return out.assign(initiations=out["initiations"] / hours,
-                      rewards=out["rewards"] / hours).reset_index()
-
-
-def _session_accuracy(rows, spans):
-    """Accuracy per session of the fitted rows, over each session's task-time span."""
-    accuracy = rows.groupby("session_idx")["y"].mean().rename("accuracy")
-    return spans.set_index("session_idx").join(accuracy, how="inner").reset_index()
-
-
-def _segments(ax, frame, column, colour):
-    """One horizontal segment per session, over its task-time span."""
-    ax.hlines(frame[column], frame["start"], frame["end"], color=colour, linewidth=4,
-              alpha=0.35, zorder=1)
+def _observed_and_fitted(name, fit, span):
+    """``(x, observed, fitted_x, fitted, midpoint_xy)`` of one running count on task time."""
+    if name == "excess":
+        rows = fit["rows"]
+        hours = rows["hours"].to_numpy(dtype=float)
+        observed = np.cumsum(rows["y"].to_numpy() - 0.5)
+        fitted = expected_excess(fit)
+        best = fit["optima"].iloc[0]
+        k = rows["k"].to_numpy(dtype=float)
+        midpoint = (best["center_hours"], np.interp(best["center"], k, fitted))
+        return (np.r_[0.0, hours], np.r_[0.0, observed], np.r_[0.0, hours],
+                np.r_[0.0, fitted], midpoint)
+    times = fit["times"]
+    clock = np.linspace(0, span, 800)
+    best = fit["optima"].iloc[0]
+    midpoint = (best["center"], float(expected_count(fit, best["center"])))
+    return (np.r_[0.0, times], np.r_[0.0, np.arange(1, times.size + 1)], clock,
+            expected_count(fit, clock), midpoint)
 
 
 def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
                          engagement=None, rewards=None, save=False, **selectors):
-    """Where each fitted change falls on task time, one figure per animal.
+    """The running counts of 1.1 on task time, each with its sigmoid fit on top.
 
         plot_sigmoid_anchors(data=ab, accuracy=acc["free"], engagement=eng, rewards=rew)
 
     ``accuracy`` is any `fit_accuracy` result (completed, initial free when omitted);
     ``engagement`` / ``rewards`` are `fit_rate` results, fitted when omitted.
 
-    - top: initiations and rewards per task hour, per session (faded bars), with the
-      rate fits' best curves.
-    - bottom: accuracy per session, with the accuracy curve read onto task time through
-      each row's timestamp.
-    - dashed verticals: each fit's midpoint, in its own colour, on both panels.
+    - solid: initiations, excess correct over the accuracy fit's rows, and rewards, each
+      divided by its own largest value, as in 1.1.
+    - dashed: each fit's expected running count, scaled alike -- a rate fit integrated
+      over task time, or ``cumsum(p(k) - 0.5)`` at each trial's time.
+    - dots: each fit's midpoint on its curve; the legend gives it in task hours.
 
     Rewards are initiation rate times accuracy, so their midpoint says which of the two
     drove the reward rate, not a third change.
@@ -269,52 +297,34 @@ def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
     figures = {}
     for subjid in sorted(set(accuracy) & set(engagement) & set(rewards)):
         spans = bounds[bounds["subjid"] == subjid].sort_values("session_idx")
-        acc = accuracy[subjid]
-        fig, (top, bottom) = figure(2, width=_WIDTH, height=_HEIGHT)
-        bottom.sharex(top)
         span = float(spans["end"].max())
-        clock = np.linspace(0, span, 600)
-
-        rates = _session_rates(data, spans, subjid)
-        anchors = {}
-        for name, fits in (("initiations", engagement), ("rewards", rewards)):
-            colour = _ANCHOR_COLOURS[name]
-            best = fits[subjid]["optima"].iloc[0]
-            _segments(top, rates, name, colour)
-            top.plot(clock, erf_curve(clock, best["initial"], best["final"], best["center"],
-                                      best["width"]), color=colour, linewidth=2.2,
-                     label=name, zorder=3)
-            anchors[name] = best["center"]
-
-        rows = acc["rows"]
-        _segments(bottom, _session_accuracy(rows, spans), "accuracy", SECOND)
-        best = acc["optima"].iloc[0]
-        k = rows["k"].to_numpy(dtype=float)
-        bottom.plot(rows["hours"], erf_curve(k, best["initial"], best["final"],
-                                             best["center"], best["width"]),
-                    color=SECOND, linewidth=2.2, zorder=3,
-                    label=f"accuracy ({acc['mode']}, initial {acc['variant']})")
-        bottom.axhline(0.5, **_CHANCE)
-        anchors["accuracy"] = best["center_hours"]
-
-        for ax in (top, bottom):
-            for start in spans["start"].to_numpy()[1:]:
-                ax.axvline(start, **BOUNDARY)
-            for name, hours in anchors.items():
-                ax.axvline(hours, color=_ANCHOR_COLOURS[name], linestyle="--",
-                           linewidth=1.4, zorder=2)
-        style_axis(top, ylabel="per hour", ylim=None)
-        top.set_ylim(bottom=0)
-        style_axis(bottom, ylabel="accuracy", ylim=(0, 1.02))
-        top.legend(frameon=False, fontsize=annotation_size(), loc="upper left")
-        bottom.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
-        top.text(0.99, 0.97, "midpoints (h): " + ", ".join(
-            f"{name} {hours:.1f}" for name, hours in anchors.items()),
-            transform=top.transAxes, fontsize=annotation_size(), ha="right", va="top")
-        top.set_xlim(0, span)
-        session_axis(top, spans)
-        bottom.set_xlabel("task time (h)")
-        title(fig, "sigmoid midpoints on task time", subjid)
+        fig, (ax,) = figure(width=_WIDTH, height=_ANCHOR_HEIGHT)
+        for name, fit in (("initiations", engagement[subjid]), ("excess", accuracy[subjid]),
+                          ("rewards", rewards[subjid])):
+            style = CURVE_STYLES[name]
+            x, observed, fitted_x, fitted, (mid_x, mid_y) = _observed_and_fitted(
+                name, fit, span)
+            scale = float(np.abs(observed).max()) or 1.0
+            ax.plot(x, observed / scale, drawstyle="steps-post",
+                    **{**style, "label": f"{style['label']}, midpoint {mid_x:.1f} h"})
+            ax.plot(fitted_x, fitted / scale, color=style["color"], **_FITTED)
+            ax.plot(mid_x, mid_y / scale, color=style["color"], **_MIDPOINT)
+        for start in spans["start"].to_numpy()[1:]:
+            ax.axvline(start, **BOUNDARY)
+        ax.axhline(0, **_ZERO)
+        style_axis(ax, ylabel="scaled count", ylim=None)
+        ax.set_xlim(0, span)
+        ax.set_xlabel("task time (h)")
+        session_axis(ax, spans)
+        handles, labels = ax.get_legend_handles_labels()
+        handles.append(Line2D([], [], color=REFERENCE, **{k: v for k, v in _FITTED.items()
+                                                           if k != "zorder"}))
+        labels.append("sigmoid fit")
+        ax.legend(handles, labels, frameon=False, fontsize=annotation_size(),
+                  loc="upper left")
+        acc = accuracy[subjid]
+        title(fig, f"sigmoid fits on task time | accuracy {acc['mode']}, "
+                   f"initial {acc['variant']}", subjid)
         _save(fig, f"ab_learning_sigmoid_anchors_sub-{subjid:03d}", data["sessions"], save,
               subjid)
         figures[int(subjid)] = fig
