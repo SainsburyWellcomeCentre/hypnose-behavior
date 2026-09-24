@@ -58,14 +58,15 @@ _CONTOUR = -1.92
 _SURFACE_CMAP = mcolors.LinearSegmentedColormap.from_list(
     "ab_surface", ["#f4f8fd", "#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"])
 
+# The observed choices keep excess correct's colour from 1.1; the fits take blue and grey.
 _VARIANT_STYLES = {
     "free": dict(color=SERIES, linewidth=2.2, zorder=4, label="fit, initial free"),
-    "chance": dict(color=SECOND, linewidth=2.0, linestyle=(0, (5, 2)), zorder=3,
+    "chance": dict(color=REFERENCE, linewidth=2.0, linestyle=(0, (5, 2)), zorder=3,
                    label="fit, initial 0.5"),
 }
 _OTHER_OPTIMA = dict(color=SERIES, linewidth=1.2, linestyle=":", zorder=2)
-_OBSERVED = dict(color=REFERENCE, linewidth=1.8, zorder=1)
-_DATA = dict(color=REFERENCE, markersize=5, zorder=1)
+_OBSERVED = dict(color=SECOND, linewidth=1.8, zorder=1)
+_DATA = dict(color=SECOND, markersize=5, zorder=1)
 _ZERO = dict(color=REFERENCE, linestyle="--", linewidth=1, zorder=0)
 
 # A fit drawn over its observed count: the count's colour, dashed.
@@ -194,12 +195,13 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
         plot_accuracy_sigmoid(fits=acc)
 
     ``fits`` maps a `VARIANTS` entry to its `fit_accuracy` result; without it both are
-    fitted from the selection in ``mode``. Blue is the free fit, dashed orange the fit
-    with the initial accuracy at 0.5, dotted blue the free fit's other optima.
+    fitted from the selection in ``mode``. Orange is the observed choices, blue the free
+    fit, dashed grey the fit with the initial accuracy at 0.5, dotted blue the free fit's
+    other optima.
 
-    - top: observed excess correct (grey, every row) and each fit's expected excess,
+    - top: observed excess correct (every row) and each fit's expected excess,
       ``cumsum(p(k) - 0.5)``, the running sum of the middle panel's curve; the free fit's
-      ``k_s +/- w`` shaded. Where grey leaves a fitted line, the one-change curve misses
+      ``k_s +/- w`` shaded. Where orange leaves a fitted line, the one-change curve misses
       the data.
     - middle: accuracy per 50 rows (Wilson 95%) and each fit's p(k).
     - bottom: the free fit's lnL over (center, width), relative to its best grid point,
