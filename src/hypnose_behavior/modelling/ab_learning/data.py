@@ -33,11 +33,13 @@ from hypnose_behavior.io.load_results import load_non_initiated_attempts
 from hypnose_behavior.io.loaders import _odor_to_letter, iter_sessions
 
 __all__ = [
+    "INDEX_COLUMNS",
     "MODES",
     "PORT_LETTERS",
     "PORT_VISIT_LABELS",
     "build_choices",
     "choice_rows",
+    "choice_sequence",
     "is_ab_stage",
     "load_ab_data",
     "session_bounds",
@@ -47,6 +49,9 @@ __all__ = [
 
 # Which choices are rows: completed trials only, or every choice attempt.
 MODES = ("completed", "attempts")
+
+# Each mode's row index in `build_choices`.
+INDEX_COLUMNS = {"completed": "trial_idx", "attempts": "choice_attempt_idx"}
 
 # `odourdiscrimination-stageN`, also inside a schema path. Stage 1 presents no odor (light
 # and reward-port pokes only) and is not part of the analysis.
@@ -424,6 +429,22 @@ def task_time(data: dict, frame: pd.DataFrame, column: str) -> pd.Series:
         clock[["start", "hours", "offset"]], on=["subjid", "session_idx", "run_id"])
     elapsed = (pd.to_datetime(frame[column]) - joined["start"]).dt.total_seconds() / 3600
     return joined["offset"] + elapsed.clip(lower=0, upper=joined["hours"])
+
+
+def choice_sequence(data: dict, mode: str) -> pd.DataFrame:
+    """The mode's choices as one indexed sequence per animal.
+
+    One row per choice, in index order within an animal: the session identity,
+    ``run_id``, ``k`` (the mode's `INDEX_COLUMNS` entry: 0-based over the animal's
+    completed trials, or over every choice attempt), ``y`` (1 correct, 0 not) and
+    ``hours`` (`task_time` at the choice).
+    """
+    column = INDEX_COLUMNS[mode]
+    rows = choice_rows(data, mode).sort_values(["subjid", column])
+    return rows[_IDENTITY + ["run_id"]].assign(
+        k=rows[column].astype(int).to_numpy(),
+        y=rows["correct"].astype(int).to_numpy(),
+        hours=task_time(data, rows, "time").to_numpy()).reset_index(drop=True)
 
 
 def session_bounds(data: dict) -> pd.DataFrame:

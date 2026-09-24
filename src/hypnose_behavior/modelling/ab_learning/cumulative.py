@@ -14,14 +14,17 @@ Rewards are the product of the other two: ``r(t) = rate(t) * p(t)``. Excess corr
 removes chance from each choice, but on a time axis its slope is still ``choice rate *
 (p - 0.5)``: a bend in ``excess`` that ``initiations`` shares at the same time is a change
 in engagement, and only one that ``initiations`` lacks is a change in accuracy.
+
+`excess_by_index` takes the rate out: excess correct over the mode's own row index, where
+the slope is ``p - 0.5`` alone.
 """
 from __future__ import annotations
 
 import pandas as pd
 
-from hypnose_behavior.modelling.ab_learning.data import choice_rows, task_time
+from hypnose_behavior.modelling.ab_learning.data import choice_rows, choice_sequence, task_time
 
-__all__ = ["SERIES", "cumulative_curves"]
+__all__ = ["SERIES", "cumulative_curves", "excess_by_index"]
 
 # The running counts, in the order the figure stacks them.
 SERIES = ("initiations", "attempts", "excess", "rewards")
@@ -69,3 +72,17 @@ def cumulative_curves(data: dict, mode: str = "completed") -> pd.DataFrame:
         parts.append(_series(data, both, "time", "attempts"))
     curves = pd.concat(parts, ignore_index=True).assign(mode=mode)
     return curves[_KEEP + ["mode", "series", "time", "value"]]
+
+
+def excess_by_index(data: dict, mode: str = "completed") -> pd.DataFrame:
+    """Excess correct over the mode's own row index, one row per choice.
+
+        excess = excess_by_index(load_ab_data(...), mode="attempts")
+
+    The `data.choice_sequence` rows (``k``, ``y``, ``hours``) plus ``excess``,
+    ``cumsum(y - 0.5)`` within the animal once that row is included. Each row is one
+    step, so the slope is ``p - 0.5`` and a bend is a change in accuracy only.
+    """
+    rows = choice_sequence(data, mode)
+    rows["excess"] = (rows["y"] - 0.5).groupby(rows["subjid"]).cumsum()
+    return rows.assign(mode=mode)

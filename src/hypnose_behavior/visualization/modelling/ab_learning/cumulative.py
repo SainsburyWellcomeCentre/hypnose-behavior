@@ -1,9 +1,12 @@
-"""The engagement, knowledge and reward figure (``modelling.ab_learning.cumulative``).
+"""The engagement, knowledge and reward figures (``modelling.ab_learning.cumulative``).
 
-`plot_cumulative_panels` takes the same subject/session selection as `load_ab_data` -- or
-the already-loaded frames as ``data=`` -- and draws **one figure per animal**, every
-running count on one task-time axis. Returns ``{subjid: Figure}``; ``save=True`` files
-each figure under its own animal with `io.save.save_figure`.
+Each ``plot_*`` takes the same subject/session selection as `load_ab_data` -- or the
+already-loaded frames as ``data=`` -- and draws **one figure per animal**. Returns
+``{subjid: Figure}``; ``save=True`` files each figure under its own animal with
+`io.save.save_figure`.
+
+- `plot_cumulative_panels` -- every running count on one task-time axis.
+- `plot_excess_by_index`   -- excess correct over the mode's own row index.
 """
 from __future__ import annotations
 
@@ -12,7 +15,7 @@ import math
 import numpy as np
 
 from hypnose_behavior.io.save import save_figure
-from hypnose_behavior.modelling.ab_learning.cumulative import cumulative_curves
+from hypnose_behavior.modelling.ab_learning.cumulative import cumulative_curves, excess_by_index
 from hypnose_behavior.modelling.ab_learning.data import session_bounds
 from hypnose_behavior.visualization.modelling.ab_learning._common import (
     MAX_SESSION_TICKS,
@@ -27,7 +30,7 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     title,
 )
 
-__all__ = ["CURVE_STYLES", "plot_cumulative_panels"]
+__all__ = ["CURVE_STYLES", "plot_cumulative_panels", "plot_excess_by_index"]
 
 # One look per running count, the same in every figure. Rewards sit behind the other two:
 # they are their product, so they are context rather than the comparison.
@@ -111,5 +114,52 @@ def plot_cumulative_panels(subjids=None, dates=None, *, data=None, mode="complet
         ax.legend(frameon=False, fontsize=annotation_size(), loc="upper left")
         title(fig, f"initiations, excess correct, rewards | {mode}", subjid)
         _save(fig, f"ab_learning_cumulative_panels_sub-{subjid:03d}", data, save, subjid)
+        figures[int(subjid)] = fig
+    return figures
+
+
+def _index_bounds(rows):
+    """Each session's first and last position on a choice-count axis, as ``start`` /
+    ``end``: the choices before its first and up to its last."""
+    return (rows.groupby(["ses", "session_idx"], as_index=False)
+            .agg(start=("k", "min"), end=("k", "max"))
+            .assign(end=lambda b: b["end"] + 1)
+            .sort_values("session_idx"))
+
+
+def plot_excess_by_index(subjids=None, dates=None, *, data=None, mode="completed",
+                         save=False, **selectors):
+    """Excess correct over the mode's own row index, one figure per animal.
+
+        plot_excess_by_index(data=ab)
+        plot_excess_by_index(data=ab, mode="attempts")
+
+    ``cumsum(y - 0.5)`` against the number of choices so far: completed trials, or every
+    choice attempt. Each choice is one step whatever time it took, so the slope is
+    accuracy minus 0.5 and engagement is off the axis: flat is chance, a slope of 0.5
+    is all correct, and a bend is a change in accuracy. Unscaled, in choices. Dotted
+    verticals are session boundaries.
+    """
+    data = require_data(subjids, dates, selectors, data)
+    excess = excess_by_index(data, mode)
+    unit = "trials" if mode == "completed" else "choice attempts"
+
+    figures = {}
+    for subjid in sorted(excess["subjid"].unique()):
+        animal = excess[excess["subjid"] == subjid]
+        spans = _index_bounds(animal)
+        fig, (ax,) = figure(width=_WIDTH, height=_HEIGHT)
+        ax.plot(np.r_[0, animal["k"] + 1], np.r_[0.0, animal["excess"]],
+                drawstyle="steps-post", **{**CURVE_STYLES["excess"], "label": None})
+        for start in spans["start"].to_numpy()[1:]:
+            ax.axvline(start, **_BOUNDARY)
+        ax.axhline(0, color=REFERENCE, linestyle="--", linewidth=1, zorder=0)
+        style_axis(ax, ylabel="excess correct", ylim=None)
+        ax.set_xlim(0, len(animal))
+        ax.set_xlabel(unit)
+        _session_axis(ax, spans)
+        title(fig, f"excess correct by {unit[:-1]} | {mode}", subjid)
+        _save(fig, f"ab_learning_excess_by_index_{mode}_sub-{subjid:03d}", data, save,
+              subjid)
         figures[int(subjid)] = fig
     return figures
