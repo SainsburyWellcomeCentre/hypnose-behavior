@@ -13,6 +13,8 @@ One module per role:
 - ``cumulative``  -- running counts of initiations, excess correct and rewards.
 - ``sigmoid``     -- single-sigmoid fits of accuracy, engagement and reward rate, with
   every separated optimum.
+- ``step``        -- the step model: whether a step describes the change, and the
+  posterior over when it happened.
 
 Figures live in ``hypnose_behavior.visualization.modelling.ab_learning``.
 """
