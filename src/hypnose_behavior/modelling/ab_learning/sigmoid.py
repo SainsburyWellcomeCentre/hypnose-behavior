@@ -4,7 +4,8 @@ One curve, ``f(x) = initial + (final - initial)/2 * [1 + erf((x - center)/width)
 three ways:
 
 - `fit_accuracy` -- Bernoulli on each choice's correctness over the mode's row index
-  ``k`` (`data.choice_sequence`); ``initial`` free, or fixed at chance.
+  ``k`` (`data.choice_sequence`); ``initial`` free, fixed at chance, or picked per
+  animal by a likelihood-ratio test (`variant_test`).
 - `fit_rate`     -- inhomogeneous Poisson on event times over task hours: initiations
   (engagement), or rewards (rate times accuracy, so descriptive only).
 
@@ -43,6 +44,8 @@ from hypnose_behavior.modelling.ab_learning.data import (
 )
 
 __all__ = [
+    "BEST",
+    "LRT_ALPHA",
     "N_CENTERS",
     "N_WIDTHS",
     "PROMINENCE",
@@ -53,8 +56,10 @@ __all__ = [
     "expected_excess",
     "fit_accuracy",
     "fit_rate",
+    "pick_variant",
     "sigmoid_anchors",
     "sigmoid_optima",
+    "variant_test",
 ]
 
 # The (center, width) grid: centers evenly over the data, widths log-spaced from half a
@@ -66,8 +71,11 @@ N_WIDTHS = 36
 # count as an optimum of its own.
 PROMINENCE = 2.0
 
-# `fit_accuracy` variants: ``initial`` free, or fixed at chance.
+# `fit_accuracy` variants: ``initial`` free, or fixed at chance. ``BEST`` picks one per
+# animal: free only where it beats chance in a likelihood-ratio test at ``LRT_ALPHA``.
 VARIANTS = ("free", "chance")
+BEST = "best"
+LRT_ALPHA = 0.05
 
 # `fit_rate` events, from `load_ab_data`'s trials.
 RATE_EVENTS = ("initiations", "rewards")
@@ -359,15 +367,21 @@ def fit_accuracy(data: dict, mode: str = "completed", variant: str = "free") -> 
 
         fits = fit_accuracy(ab)                          # initial accuracy free
         fits = fit_accuracy(ab, variant="chance")        # initial accuracy fixed at 0.5
+        fits = fit_accuracy(ab, variant="best")          # per animal, by `variant_test`
 
     Returns ``{subjid: fit}``, each a dict of ``optima`` (every separated optimum, best
     first; columns in `sigmoid_optima`), ``surface`` (the grid's ``centers``, ``widths``
     and ``lnl``), ``rows`` (the animal's `data.choice_sequence` rows) and the fit's
     identity. Centers and widths are in rows; the ``*_hours`` columns read the center and
     ``center +/- width`` off the rows' task hours.
+
+    ``"best"`` fits both `VARIANTS` and keeps `pick_variant`'s choice; each fit's
+    ``variant`` names the one kept.
     """
+    if variant == BEST:
+        return pick_variant({v: fit_accuracy(data, mode, v) for v in VARIANTS})
     if variant not in VARIANTS:
-        raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
+        raise ValueError(f"variant must be one of {VARIANTS + (BEST,)}, got {variant!r}")
     fits = {}
     for subjid, rows in choice_sequence(data, mode).groupby("subjid"):
         rows = rows.reset_index(drop=True)
@@ -384,6 +398,36 @@ def fit_accuracy(data: dict, mode: str = "completed", variant: str = "free") -> 
         fits[int(subjid)] = _fit(int(subjid), "accuracy", mode, variant, len(rows), model,
                                  optima, surface, rows=rows)
     return fits
+
+
+def variant_test(fits: dict) -> pd.DataFrame:
+    """Initial accuracy free against fixed at chance, per animal: a likelihood-ratio test.
+
+    ``fits`` maps each of `VARIANTS` to its `fit_accuracy` result. The chance fit is the
+    free one with ``initial`` held at 0.5, so ``2 * delta_lnl`` is chi-square with df 1.
+    One row per animal: each variant's best ``lnl``, ``delta_lnl`` (free minus chance),
+    ``p``, and ``picked``: free where ``p < LRT_ALPHA``, chance otherwise.
+    """
+    free, chance = (fits[v] for v in VARIANTS)
+    rows = []
+    for subjid in sorted(set(free) & set(chance)):
+        lnl_free = float(free[subjid]["optima"]["lnl"].iloc[0])
+        lnl_chance = float(chance[subjid]["optima"]["lnl"].iloc[0])
+        delta = max(lnl_free - lnl_chance, 0.0)
+        p = float(chi2.sf(2 * delta, 1))
+        rows.append({"subjid": subjid, "mode": free[subjid]["mode"], "lnl_free": lnl_free,
+                     "lnl_chance": lnl_chance, "delta_lnl": delta, "p": p,
+                     "picked": "free" if p < LRT_ALPHA else "chance"})
+    return pd.DataFrame(rows)
+
+
+def pick_variant(fits: dict) -> dict:
+    """``{subjid: fit}`` of the variant `variant_test` picks for each animal.
+
+        acc_best = pick_variant({v: fit_accuracy(ab, "completed", v) for v in VARIANTS})
+    """
+    picked = variant_test(fits).set_index("subjid")["picked"]
+    return {subjid: fits[variant][subjid] for subjid, variant in picked.items()}
 
 
 def _rate_model(times, span):
