@@ -136,6 +136,24 @@ def _plot_gains(ax, gains):
     ax.axhline(0, **_CHANCE)
 
 
+def _plot_running_totals(ax, gains):
+    """The running sum of each component, drawn through the points it sums.
+
+    A within gain is empty where a session's two windows overlap, and a boundary spanning
+    an unfitted session is left out, so the two lines need not add up to the change from
+    the first window to the last.
+    """
+    for component, offset, color in (("within", 0.0, _WITHIN),
+                                     ("across", SESSION_SPAN, _ACROSS)):
+        part = gains[(gains["component"] == component) & gains["value"].notna()]
+        part = part.sort_values("session_idx")
+        if part.empty:
+            continue
+        ax.plot(part["session_idx"].to_numpy() + offset, part["value"].cumsum(),
+                color=color, linewidth=1.3, alpha=0.8, zorder=1,
+                label=f"{component}, running total")
+
+
 def _headline(summary, n: int, unit: str) -> str:
     """The animal's mean gain per component, with its 95% interval."""
     parts = []
@@ -160,9 +178,9 @@ def plot_edge_gains(subjids=None, dates=None, *, data=None, fits=None, mode="com
     a dashed step to the next session's first window. The dashed horizontal is chance.
 
     Bottom: the within gain (last minus first) at each session and the across gain (next
-    first minus last) at each boundary, with Newcombe 95% intervals. The text above the
-    panels is each component's mean over the animal's sessions, with the number of gains
-    averaged.
+    first minus last) at each boundary, with Newcombe 95% intervals, and a thin running
+    total through each component. The text above the panels is each component's mean
+    over the animal's sessions, with the number of gains averaged.
     """
     fits = _fits(subjids, dates, data, fits, mode, min_trials, selectors)
     windows, gains = edge_windows(fits, n), edge_gains(fits, n)
@@ -176,6 +194,7 @@ def plot_edge_gains(subjids=None, dates=None, *, data=None, fits=None, mode="com
         fig, (top, bottom) = figure(n_rows=2, width=_WIDTH, height=_PANEL_HEIGHT)
         top.sharex(bottom)
         _plot_windows(top, animal)
+        _plot_running_totals(bottom, gains[gains["subjid"] == subjid])
         _plot_gains(bottom, gains[gains["subjid"] == subjid])
 
         style_axis(top, ylabel="accuracy")
