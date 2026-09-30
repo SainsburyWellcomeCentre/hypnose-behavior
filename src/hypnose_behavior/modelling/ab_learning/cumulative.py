@@ -16,7 +16,8 @@ removes chance from each choice, but on a time axis its slope is still ``choice 
 in engagement, and only one that ``initiations`` lacks is a change in accuracy.
 
 `excess_by_index` takes the rate out: excess correct over the mode's own row index, where
-the slope is ``p - 0.5`` alone.
+the slope is ``p - 0.5`` alone. `rolling_accuracy` is accuracy itself, over a window of
+choices, at each choice's task time.
 """
 from __future__ import annotations
 
@@ -24,10 +25,13 @@ import pandas as pd
 
 from hypnose_behavior.modelling.ab_learning.data import choice_rows, choice_sequence, task_time
 
-__all__ = ["SERIES", "cumulative_curves", "excess_by_index"]
+__all__ = ["SERIES", "WINDOW", "cumulative_curves", "excess_by_index", "rolling_accuracy"]
 
 # The running counts, in the order the figure stacks them.
 SERIES = ("initiations", "attempts", "excess", "rewards")
+
+# Choices per `rolling_accuracy` window.
+WINDOW = 50
 
 _KEEP = ["subjid", "ses", "date", "session_idx"]
 
@@ -85,4 +89,19 @@ def excess_by_index(data: dict, mode: str = "completed") -> pd.DataFrame:
     """
     rows = choice_sequence(data, mode)
     rows["excess"] = (rows["y"] - 0.5).groupby(rows["subjid"]).cumsum()
+    return rows.assign(mode=mode)
+
+
+def rolling_accuracy(data: dict, mode: str = "completed", window: int = WINDOW) -> pd.DataFrame:
+    """Accuracy over each ``window`` of consecutive choices, one row per choice.
+
+        acc = rolling_accuracy(load_ab_data(...), mode="attempts", window=30)
+
+    The `data.choice_sequence` rows plus ``accuracy``, the share correct over the window
+    centred on the row, within the animal and across its sessions. NaN within
+    ``window / 2`` rows of either end, where the window is not full.
+    """
+    rows = choice_sequence(data, mode)
+    rows["accuracy"] = rows.groupby("subjid")["y"].transform(
+        lambda y: y.rolling(window, center=True, min_periods=window).mean())
     return rows.assign(mode=mode)

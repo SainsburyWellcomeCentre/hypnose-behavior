@@ -18,6 +18,7 @@ from hypnose_behavior.modelling.ab_learning.data import load_ab_data
 __all__ = [
     "BAND_ALPHA",
     "BOUNDARY",
+    "CATEGORICAL",
     "MAX_SESSION_TICKS",
     "REFERENCE",
     "SECOND",
@@ -33,6 +34,7 @@ __all__ = [
     "session_axis",
     "session_ticks",
     "style_axis",
+    "subject_colour",
     "text_size",
     "title",
 ]
@@ -48,6 +50,11 @@ MAX_SESSION_TICKS = 6
 
 # A session boundary drawn across a continuous axis.
 BOUNDARY = dict(color=REFERENCE, linestyle=":", linewidth=1.2, zorder=0)
+
+# All eight categorical slots in their validated order, for a figure with one line per
+# animal (`subject_colour`).
+CATEGORICAL = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300",
+               "#4a3aa7", "#e34948")
 
 # In a figure laid out along sessions, a session occupies this much of its slot on the x
 # axis; the rest is the boundary that follows it, so a within-session segment and the
@@ -113,6 +120,12 @@ def session_ticks(ax, frame):
     ax.set_xticks(sessions["session_idx"])
     ax.set_xticklabels(sessions["ses"].astype(str))
     ax.set_xlabel("session")
+
+
+def subject_colour(subjid) -> str:
+    """An animal's colour: its `CATEGORICAL` slot by subject number, so it keeps the
+    colour in any subset of the cohort."""
+    return CATEGORICAL[int(subjid) % len(CATEGORICAL)]
 
 
 def session_axis(ax, bounds):

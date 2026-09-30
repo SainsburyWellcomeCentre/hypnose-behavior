@@ -1,20 +1,28 @@
 """The engagement, knowledge and reward figures (``modelling.ab_learning.cumulative``).
 
 Each ``plot_*`` takes the same subject/session selection as `load_ab_data` -- or the
-already-loaded frames as ``data=`` -- and draws **one figure per animal**. Returns
-``{subjid: Figure}``; ``save=True`` files each figure under its own animal with
+already-loaded frames as ``data=``. ``save=True`` files a figure with
 `io.save.save_figure`.
 
-- `plot_cumulative_panels` -- every running count on one task-time axis.
-- `plot_excess_by_index`   -- excess correct over the mode's own row index.
+- `plot_cumulative_panels` -- every running count on one task-time axis, one figure per
+  animal (``{subjid: Figure}``).
+- `plot_excess_by_index`   -- excess correct over the mode's own row index, one figure per
+  animal (``{subjid: Figure}``).
+- `plot_cohort_accuracy`   -- rolling accuracy over task time, every animal in one Figure.
 """
 from __future__ import annotations
 
 import numpy as np
+from matplotlib.lines import Line2D
 
 from hypnose_behavior.io.save import save_figure
-from hypnose_behavior.modelling.ab_learning.cumulative import cumulative_curves, excess_by_index
-from hypnose_behavior.modelling.ab_learning.data import session_bounds
+from hypnose_behavior.modelling.ab_learning.cumulative import (
+    WINDOW,
+    cumulative_curves,
+    excess_by_index,
+    rolling_accuracy,
+)
+from hypnose_behavior.modelling.ab_learning.data import MODES, session_bounds
 from hypnose_behavior.visualization.modelling.ab_learning._common import (
     BOUNDARY,
     REFERENCE,
@@ -28,10 +36,13 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     save_scope,
     session_axis,
     style_axis,
+    subject_colour,
+    text_size,
     title,
 )
 
-__all__ = ["CURVE_STYLES", "plot_cumulative_panels", "plot_excess_by_index"]
+__all__ = ["ACCURACY_MODES", "CURVE_STYLES", "plot_cohort_accuracy", "plot_cumulative_panels",
+           "plot_excess_by_index"]
 
 # One look per running count, the same in every figure. Rewards sit behind the other two:
 # they are their product, so they are context rather than the comparison.
@@ -42,6 +53,11 @@ CURVE_STYLES = {
     "excess": dict(color=SECOND, linewidth=2.2, zorder=4, label="excess correct"),
     "rewards": dict(color=THIRD, linewidth=1.6, alpha=0.45, zorder=1, label="rewards"),
 }
+
+# `plot_cohort_accuracy` modes, and each choice mode's line: completed trials solid,
+# choice attempts dashed.
+ACCURACY_MODES = MODES + ("both",)
+_MODE_LINES = {"completed": ("-", "trials"), "attempts": ((0, (4, 2)), "choice attempts")}
 
 _WIDTH = 10.0
 _HEIGHT = 5.0
@@ -144,3 +160,64 @@ def plot_excess_by_index(subjids=None, dates=None, *, data=None, mode="completed
               subjid)
         figures[int(subjid)] = fig
     return figures
+
+
+def plot_cohort_accuracy(subjids=None, dates=None, *, data=None, mode="completed",
+                         window=WINDOW, save=False, **selectors):
+    """Accuracy over task time, every animal of the selection in one figure.
+
+        plot_cohort_accuracy(data=ab)
+        plot_cohort_accuracy(data=ab, mode="both", window=30)
+
+    Each line is the share correct over ``window`` consecutive choices
+    (`cumulative.rolling_accuracy`), drawn at each choice's task time, in the animal's own
+    colour. ``mode`` is ``"completed"``, ``"attempts"`` or ``"both"`` (completed solid,
+    attempts dashed). Session boundaries are drawn when the selection is one animal.
+    Returns the Figure.
+    """
+    if mode not in ACCURACY_MODES:
+        raise ValueError(f"mode must be one of {ACCURACY_MODES}, got {mode!r}")
+    data = require_data(subjids, dates, selectors, data)
+    modes = MODES if mode == "both" else (mode,)
+    frames = {m: rolling_accuracy(data, m, window) for m in modes}
+    subjects = sorted(set().union(*(frame["subjid"].unique() for frame in frames.values())))
+    bounds = session_bounds(data)
+    bounds = bounds[bounds["subjid"].isin(subjects)]
+
+    fig, (ax,) = figure(width=_WIDTH, height=_HEIGHT)
+    for subjid in subjects:
+        for m in modes:
+            rows = frames[m][frames[m]["subjid"] == subjid]
+            ax.plot(rows["hours"], rows["accuracy"], color=subject_colour(subjid),
+                    linewidth=1.8, linestyle=_MODE_LINES[m][0],
+                    label=f"sub-{subjid:03d}" if m == modes[0] else None)
+    ax.axhline(0.5, color=REFERENCE, linestyle="--", linewidth=0.8, zorder=0)
+    ax.set_ylim(0, 1)
+    ax.set_xlim(0, float(bounds["end"].max()))
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.set_ylabel("accuracy")
+    ax.set_xlabel("task time (h)")
+
+    handles, labels = ax.get_legend_handles_labels()
+    if len(modes) > 1:
+        for m in modes:
+            handles.append(Line2D([], [], color=REFERENCE, linewidth=1.8,
+                                  linestyle=_MODE_LINES[m][0]))
+            labels.append(_MODE_LINES[m][1])
+    ax.legend(handles, labels, frameon=False, fontsize=annotation_size(), loc="lower right",
+              ncols=2 if len(handles) > 4 else 1)
+
+    what = f"accuracy over task time | {mode}, {window}-choice window"
+    if len(subjects) == 1:
+        spans = bounds.sort_values("session_idx")
+        for start in spans["start"].to_numpy()[1:]:
+            ax.axvline(start, **BOUNDARY)
+        session_axis(ax, spans)
+        title(fig, what, subjects[0])
+        name = f"ab_learning_accuracy_over_time_{mode}_sub-{subjects[0]:03d}"
+    else:
+        fig.suptitle(f"cohort | {what}", x=0.01, ha="left", fontsize=text_size())
+        name = f"ab_learning_cohort_accuracy_{mode}"
+    if save:
+        save_figure(fig, name, **save_scope(data["sessions"]))
+    return fig
