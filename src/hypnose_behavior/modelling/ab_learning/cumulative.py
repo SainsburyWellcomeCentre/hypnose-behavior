@@ -98,10 +98,11 @@ def rolling_accuracy(data: dict, mode: str = "completed", window: int = WINDOW) 
         acc = rolling_accuracy(load_ab_data(...), mode="attempts", window=30)
 
     The `data.choice_sequence` rows plus ``accuracy``, the share correct over the window
-    centred on the row, within the animal and across its sessions. NaN within
-    ``window / 2`` rows of either end, where the window is not full.
+    centred on the row, within the animal and across its sessions. Within ``window / 2``
+    rows of either end the window keeps only its part inside the data, so it holds at
+    least half its choices there and the line reaches both ends, noisier.
     """
     rows = choice_sequence(data, mode)
     rows["accuracy"] = rows.groupby("subjid")["y"].transform(
-        lambda y: y.rolling(window, center=True, min_periods=window).mean())
+        lambda y: y.rolling(window, center=True, min_periods=max(1, window // 2)).mean())
     return rows.assign(mode=mode)

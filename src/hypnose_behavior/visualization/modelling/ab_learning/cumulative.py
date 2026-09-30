@@ -65,6 +65,12 @@ _MODE_LINES = {"completed": ("-", "trials"), "attempts": ((0, (4, 2)), "choice a
 # session-to-session wobble.
 NORMALIZED_WINDOW = 150
 
+# With the cohort mean on top: each animal a faint grey line, the mean a thick dark one
+# over its SEM band, taken at this many points across the axis.
+_INDIVIDUAL = dict(color=REFERENCE, linewidth=1.2, alpha=0.45)
+_MEAN = dict(color="#222222", linewidth=3.0, zorder=5)
+_MEAN_POINTS = 201
+
 _WIDTH = 10.0
 _HEIGHT = 5.0
 
@@ -121,7 +127,7 @@ def plot_cumulative_panels(subjids=None, dates=None, *, data=None, mode="complet
         ax.axhline(0, color=REFERENCE, linestyle="--", linewidth=1, zorder=0)
         style_axis(ax, ylabel="scaled count", ylim=None)
         ax.set_xlim(0, float(np.nanmax(spans["end"])) if len(spans) else None)
-        ax.set_xlabel("task time (h)")
+        ax.set_xlabel("Task time (h)")
         session_axis(ax, spans)
         ax.legend(frameon=False, fontsize=annotation_size(), loc="upper left")
         title(fig, f"initiations, excess correct, rewards | {mode}", subjid)
@@ -168,11 +174,32 @@ def plot_excess_by_index(subjids=None, dates=None, *, data=None, mode="completed
     return figures
 
 
-def _accuracy_figure(data, mode, window, clock, xlabel, xlim, what):
+def _mean_curve(frame, subjects, clock, grid):
+    """Mean and SEM over animals of their rolling accuracy, interpolated onto ``grid``.
+
+    An animal counts at a grid point only inside its own data; the SEM uses the animals
+    counted there.
+    """
+    curves = []
+    for subjid in subjects:
+        rows = frame[(frame["subjid"] == subjid)].dropna(subset=["hours", "accuracy"])
+        x = clock(subjid, rows["hours"].to_numpy())
+        curves.append(np.interp(grid, x, rows["accuracy"].to_numpy(), left=np.nan,
+                                right=np.nan))
+    stack = np.vstack(curves)
+    n = np.isfinite(stack).sum(axis=0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean = np.nanmean(stack, axis=0)
+        sem = np.nanstd(stack, axis=0, ddof=1) / np.sqrt(n)
+    return mean, sem
+
+
+def _accuracy_figure(data, mode, window, clock, xlabel, xlim, what, show_mean=False):
     """The cohort accuracy figure, on the x axis ``clock(subjid, hours)`` maps task hours to.
 
     Session boundaries, drawn for a single animal, go through ``clock`` too; ``xlim`` of
-    None runs from 0 to the end of the last session. Returns the figure and the animals.
+    None runs from 0 to the end of the last session. ``show_mean`` greys the animals and
+    draws their mean with its SEM. Returns the figure and the animals.
     """
     if mode not in ACCURACY_MODES:
         raise ValueError(f"mode must be one of {ACCURACY_MODES}, got {mode!r}")
@@ -183,17 +210,30 @@ def _accuracy_figure(data, mode, window, clock, xlabel, xlim, what):
     bounds = bounds[bounds["subjid"].isin(subjects)]
 
     fig, (ax,) = figure(width=_WIDTH, height=_HEIGHT)
-    for subjid in subjects:
+    for index, subjid in enumerate(subjects):
         for m in modes:
             rows = frames[m][frames[m]["subjid"] == subjid]
+            if show_mean:
+                look = {**_INDIVIDUAL, "label": "animals" if index == 0 and m == modes[0]
+                        else None}
+            else:
+                look = dict(color=subject_colour(subjid), linewidth=1.8,
+                            label=f"sub-{subjid:03d}" if m == modes[0] else None)
             ax.plot(clock(subjid, rows["hours"].to_numpy()), rows["accuracy"],
-                    color=subject_colour(subjid), linewidth=1.8, linestyle=_MODE_LINES[m][0],
-                    label=f"sub-{subjid:03d}" if m == modes[0] else None)
+                    linestyle=_MODE_LINES[m][0], **look)
     ax.axhline(0.5, color=REFERENCE, linestyle="--", linewidth=0.8, zorder=0)
     ax.set_ylim(0, 1)
     ax.set_xlim(*(xlim or (0, float(bounds["end"].max()))))
+    if show_mean:
+        grid = np.linspace(*ax.get_xlim(), _MEAN_POINTS)
+        for m in modes:
+            mean, sem = _mean_curve(frames[m], subjects, clock, grid)
+            ax.fill_between(grid, mean - sem, mean + sem, color=REFERENCE, alpha=0.3,
+                            linewidth=0, zorder=4)
+            ax.plot(grid, mean, linestyle=_MODE_LINES[m][0], **_MEAN,
+                    label=f"mean ± SEM, n = {len(subjects)}" if m == modes[0] else None)
     ax.spines[["top", "right"]].set_visible(False)
-    ax.set_ylabel("accuracy")
+    ax.set_ylabel("Accuracy")
     ax.set_xlabel(xlabel)
 
     handles, labels = ax.get_legend_handles_labels()
@@ -249,17 +289,20 @@ def plot_cohort_accuracy(subjids=None, dates=None, *, data=None, mode="completed
 
 
 def plot_cohort_accuracy_normalized(subjids=None, dates=None, *, data=None,
-                                    mode="completed", window=NORMALIZED_WINDOW, save=False,
-                                    **selectors):
+                                    mode="completed", window=NORMALIZED_WINDOW,
+                                    show_mean=False, save=False, **selectors):
     """Accuracy over each animal's own span of rewarded task time, all animals aligned.
 
         plot_cohort_accuracy_normalized(data=ab)
         plot_cohort_accuracy_normalized(data=ab, mode="both", window=200)
+        plot_cohort_accuracy_normalized(data=ab, show_mean=True)
 
     As `plot_cohort_accuracy`, with task time rescaled per animal: 0 at its first reward,
     1 at its last (`data.reward_bounds`), so every animal spans the same width. Choices
     before the first reward fall left of 0 and are not shown; the window still counts
-    them. Returns the Figure.
+    them. ``show_mean`` draws the animals as faint grey lines and their mean in black
+    over its SEM band, each animal interpolated onto a common grid of normalized time.
+    Returns the Figure.
     """
     data = require_data(subjids, dates, selectors, data)
     rewards = reward_bounds(data).set_index("subjid")
@@ -269,9 +312,9 @@ def plot_cohort_accuracy_normalized(subjids=None, dates=None, *, data=None,
         return (hours - first) / (last - first)
 
     fig, subjects = _accuracy_figure(data, mode, window, clock,
-                                     "time, first to last reward", (0, 1),
-                                     "accuracy over normalized task time")
+                                     "Normalized time in arena", (0, 1),
+                                     "Accuracy over normalized task time", show_mean)
     if save:
-        save_figure(fig, _save_name("cohort_accuracy_normalized", mode, subjects),
-                    **save_scope(data["sessions"]))
+        stem = "cohort_accuracy_normalized" + ("_mean" if show_mean else "")
+        save_figure(fig, _save_name(stem, mode, subjects), **save_scope(data["sessions"]))
     return fig
