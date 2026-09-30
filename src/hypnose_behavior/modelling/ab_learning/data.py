@@ -42,6 +42,7 @@ __all__ = [
     "choice_sequence",
     "is_ab_stage",
     "load_ab_data",
+    "reward_bounds",
     "session_bounds",
     "task_time",
     "within_session_position",
@@ -445,6 +446,18 @@ def choice_sequence(data: dict, mode: str) -> pd.DataFrame:
         k=rows[column].astype(int).to_numpy(),
         y=rows["correct"].astype(int).to_numpy(),
         hours=task_time(data, rows, "time").to_numpy()).reset_index(drop=True)
+
+
+def reward_bounds(data: dict) -> pd.DataFrame:
+    """Each animal's first and last rewarded trial on the `task_time` clock.
+
+    One row per animal with a timed reward: ``first`` and ``last`` in task hours.
+    """
+    rewarded = data["trials"][data["trials"]["outcome"] == "rewarded"]
+    hours = task_time(data, rewarded, "sequence_start")
+    return (rewarded[["subjid"]].assign(hours=hours.to_numpy()).dropna()
+            .groupby("subjid", as_index=False).agg(first=("hours", "min"),
+                                                   last=("hours", "max")))
 
 
 def session_bounds(data: dict) -> pd.DataFrame:
