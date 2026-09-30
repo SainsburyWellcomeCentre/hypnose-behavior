@@ -11,21 +11,22 @@ Visualization functions belong into src/hypnose_behavior/visualization/modelling
 
 # Order of execution
 
-| Block | Content | Section | Answers | Blocking? |
-|---|---|---|---|---|
-| 1 | Cumulative rewards over time | 0.2 | is there any bend at all? | no |
-| 2 | D1 initiation rate, D2 non-initiated accuracy, D3 lose-shift count | 0.5 | is completed-trials-only defensible? | **yes** — determines whether the primary DV needs restricting |
-| 3 | Logistic regression M_a / M_b / M_c + W_s/O_s decomposition | 0.6 | overnight vs within-session; % of gain overnight | no, but this is the main hypothesis test |
-| 4 | Within- and across-session gain, N trials | 0.7 | descriptive companion to block 3 | no |
-| 5 | Three-panel figure per animal | 1.1 | engagement vs knowledge, visually; shape check | **yes** — if panel B shows two bends, block 7 is invalid |
-| 6 | Smith et al. state-space | 1.2 | trial-by-trial accuracy with CIs; shape check | no — optional, but run before block 7 |
-| 7 | Bernoulli sigmoid fit | 2.1–2.3 | **how sudden** — ŵ | core |
-| 8 | Step model + posterior over k_s | 2.4–2.5 | **when, ± how much** | core; run only if ŵ small |
-| 9 | Constant-model ΔlnL | 2.6 | did anything change at all? | one number, quote with block 8 |
-| 10 | GLM-HMM: strategy model + knowledge model | 3 | occupancy of a good state vs arrival at a better one | later |
-| 11 | Attempt-level re-run | 4 | initiation learning, false alarms, exposure axis | later |
+| Block | Content | Section | Answers | Blocking? | Status |
+|---|---|---|---|---|---|
+| 1 | Cumulative rewards over time | 0.2 | is there any bend at all? | no | done |
+| 2 | D1 initiation rate, D2 non-initiated accuracy, D3 lose-shift count, D4 repeated-choice agreement | 0.5 | is completed-trials-only defensible? | **yes** — determines whether the primary DV needs restricting | done |
+| 3 | Logistic regression M_a / M_b / M_c + W_s/O_s decomposition | 0.6 | overnight vs within-session; % of gain overnight | no, but this is the main hypothesis test | done |
+| 4 | Within- and across-session gain, N trials | 0.7 | descriptive companion to block 3 | no | done |
+| 5 | Initiations, excess correct and rewards per animal, on task time and excess correct on trial index | 1.1 | engagement vs knowledge, visually; shape check | **yes** — if excess correct shows two bends, block 7 is a compromise | done |
+| 6 | Smith et al. state-space | 1.2 | trial-by-trial accuracy with CIs; shape check | no | **open** |
+| 7 | Bernoulli sigmoid fit (p_i free / 0.5 / picked by likelihood ratio), rate sigmoids for initiations and rewards | 2.1–2.3 | **how sudden** — ŵ | core | done |
+| 8 | Step model + posterior over k_s | 2.4–2.5 | **when, ± how much** | core; read only where the sigmoid does not beat a step (ΔlnL < 1.92) | done |
+| 9 | Constant-model ΔlnL | 2.6 | did anything change at all? | one number, quote with block 8 | done |
+| 10 | More than one change: global sigmoid curve and multi-step model | 2.7 | how many changes, and where | no | **open** |
+| 11 | GLM-HMM: strategy model + knowledge model | 3 | occupancy of a good state vs arrival at a better one | later | **open** |
+| 12 | Attempt-level extension | 4 | initiation learning, false alarms, extinction, exposure axis | later | **partly** — blocks 3–9 re-run on every choice attempt; §4.1–4.4 open |
 
-Blocks 1–9 are the figure. 10–11 are the deeper account.
+Blocks 1–9 are the figure; 10 checks it for more than one change. 11–12 are the deeper account.
 
 ---
 
@@ -427,6 +428,15 @@ Note: check for multimodal posteriors --> multimodality may mean more than 1 swi
 Fit a constant-accuracy model (M0: p(k) = p0, one parameter, same Bernoulli likelihood) and report the log-likelihood difference against the sigmoid.
 
 Guards against interpreting k_s and w from an animal that never changed. A broad, flat P(k_s) in 2.5 says the same thing and is the primary evidence; this is the one number to quote alongside it.
+
+### 2.7 More than one change
+
+A single sigmoid fits two changes as one compromise, often a wide ramp that beats either step (62: rise, relapse in ses 11–12, recovery; 66: early level near 0.6, main rise in ses 7). Two fits, run side by side:
+
+- **Global curve:** a sum of 1–3 erf sigmoids over the trial index plus a per-session random offset (PyMC); the number of sigmoids chosen by LOO or marginal likelihood.
+- **Multi-step:** the step model with at most 3 changes; the number chosen by the Beta-marginal likelihood or BIC, optionally with a smallest change of interest (Δp ≥ 0.10).
+
+Where the two disagree, the difference isolates transient single-session shifts: the per-session offset absorbs them, the steps do not. No minimum segment length.
 
 
 
