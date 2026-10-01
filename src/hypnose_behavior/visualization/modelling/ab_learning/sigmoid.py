@@ -34,14 +34,13 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     REFERENCE,
     SECOND,
     SERIES,
+    ZERO,
     annotation_size,
     figure,
     index_bounds,
     require_data,
     save_scope,
-    session_axis,
     style_axis,
-    title,
 )
 from hypnose_behavior.visualization.modelling.ab_learning.cumulative import CURVE_STYLES
 
@@ -67,7 +66,6 @@ _VARIANT_STYLES = {
 _OTHER_OPTIMA = dict(color=SERIES, linewidth=1.2, linestyle=":", zorder=2)
 _OBSERVED = dict(color=SECOND, linewidth=1.8, zorder=1)
 _DATA = dict(color=SECOND, markersize=5, zorder=1)
-_ZERO = dict(color=REFERENCE, linestyle="--", linewidth=1, zorder=0)
 
 # A fit drawn over its observed count: the count's colour, dashed.
 _FITTED = dict(linewidth=2.2, linestyle=(0, (4, 2)), alpha=1.0, zorder=5)
@@ -142,7 +140,7 @@ def _draw_excess(ax, rows, curves):
     ax.plot(count, observed, drawstyle="steps-post", label="observed", **_OBSERVED)
     for fit, rank, style in curves:
         ax.plot(count, np.r_[0.0, expected_excess(fit, rank)], **style)
-    ax.axhline(0, **_ZERO)
+    ax.axhline(0, **ZERO)
 
 
 def _draw_accuracy(ax, rows, curves):
@@ -156,7 +154,7 @@ def _draw_accuracy(ax, rows, curves):
         optimum = fit["optima"].iloc[rank]
         ax.plot(k, erf_curve(k, optimum["initial"], optimum["final"], optimum["center"],
                              optimum["width"]), **{**style, "label": None})
-    ax.axhline(0.5, **_ZERO)
+    ax.axhline(0.5, **ZERO)
 
 
 def _draw_surface(ax, fit):
@@ -178,7 +176,7 @@ def _draw_surface(ax, fit):
     ax.set_yscale("log")
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:g}"))
     ax.yaxis.set_minor_formatter(mticker.NullFormatter())
-    ax.set_ylabel("width")
+    ax.set_ylabel("Width")
     ax.spines[["top", "right"]].set_visible(False)
     bar_ax = ax.inset_axes([0.72, 1.02, 0.26, 0.05])
     bar = ax.figure.colorbar(mesh, cax=bar_ax, orientation="horizontal",
@@ -236,16 +234,14 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
             for start in spans["start"].to_numpy()[1:]:
                 ax.axvline(start, **BOUNDARY)
 
-        style_axis(excess, ylabel="excess correct", ylim=None)
+        style_axis(excess, ylabel="Excess correct", ylim=None)
         excess.text(0.01, 0.97, _headline(fits, subjid), transform=excess.transAxes,
                     fontsize=annotation_size(), va="top", ha="left")
         excess.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
         excess.set_xlim(0, len(rows))
-        session_axis(excess, spans)
-        style_axis(accuracy, ylabel="accuracy", ylim=(0, 1.02))
+        style_axis(accuracy, ylabel="Accuracy", ylim=(0, 1.02))
         accuracy.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
-        surface.set_xlabel(unit)
-        title(fig, f"accuracy sigmoid | {mode}", subjid)
+        surface.set_xlabel(unit.capitalize())
         _save(fig, f"ab_learning_accuracy_sigmoid_{mode}_sub-{subjid:03d}", rows, save,
               subjid)
         figures[int(subjid)] = fig
@@ -284,8 +280,8 @@ def _draw_counts(ax, fits, span):
         ax.plot(fitted_x, fitted / scale, color=style["color"], **_FITTED)
         ax.plot(mid_x, mid_y / scale, color=style["color"], **_MIDPOINT)
         midpoints[name] = mid_x
-    ax.axhline(0, **_ZERO)
-    style_axis(ax, ylabel="scaled count", ylim=None)
+    ax.axhline(0, **ZERO)
+    style_axis(ax, ylabel="Normalized count", ylim=None)
     handles, labels = ax.get_legend_handles_labels()
     handles.append(Line2D([], [], color=REFERENCE, **{k: v for k, v in _FITTED.items()
                                                        if k != "zorder"}))
@@ -317,7 +313,7 @@ def _draw_rates(ax, data, spans, fits, subjid, span):
         ax.plot(clock, erf_curve(clock, best["initial"], best["final"], best["center"],
                                  best["width"]), color=colour, linewidth=2.2, zorder=3,
                 label=name)
-    style_axis(ax, ylabel="per hour", ylim=None)
+    style_axis(ax, ylabel="Per hour", ylim=None)
     ax.set_ylim(bottom=0)
     ax.legend(frameon=False, fontsize=annotation_size(), loc="upper left")
 
@@ -334,8 +330,8 @@ def _draw_accuracy_on_time(ax, spans, fit):
     ax.plot(rows["hours"], erf_curve(k, best["initial"], best["final"], best["center"],
                                      best["width"]),
             color=colour, linewidth=2.2, zorder=3, label="accuracy")
-    ax.axhline(0.5, **_ZERO)
-    style_axis(ax, ylabel="accuracy", ylim=(0, 1.02))
+    ax.axhline(0.5, **ZERO)
+    style_axis(ax, ylabel="Accuracy", ylim=(0, 1.02))
     ax.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
 
 
@@ -387,10 +383,7 @@ def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
                 ax.axvline(hours, color=CURVE_STYLES[name]["color"], linestyle="--",
                            linewidth=1.2, zorder=2)
         counts.set_xlim(0, span)
-        session_axis(counts, spans)
-        acc.set_xlabel("task time (h)")
-        title(fig, f"sigmoid fits on task time | accuracy {fits['excess']['mode']}, "
-                   f"initial {fits['excess']['variant']}", subjid)
+        acc.set_xlabel("Task time (h)")
         _save(fig, f"ab_learning_sigmoid_anchors_sub-{subjid:03d}", data["sessions"], save,
               subjid)
         figures[int(subjid)] = fig

@@ -40,6 +40,7 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     REFERENCE,
     SECOND,
     SERIES,
+    ZERO,
     SESSION_SPAN,
     annotation_size,
     figure,
@@ -49,7 +50,6 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     session_ticks,
     style_axis,
     text_size,
-    title,
 )
 
 __all__ = ["plot_edge_gains", "plot_position_profile", "plot_session_profiles"]
@@ -64,7 +64,6 @@ _GAIN_GROUPS = (
     ("across", _ACROSS, False, "across sessions"),
     ("across_gap", _ACROSS, True, "spans an unfitted session"),
 )
-_CHANCE = dict(color=REFERENCE, linestyle="--", linewidth=1)
 
 # Same frame as the regression figure: two stacked panels of per-session detail.
 _WIDTH = 10.0
@@ -118,7 +117,7 @@ def _plot_windows(ax, windows):
         ax.plot([x0, x1], [y0, y1], color=_ACROSS, linewidth=1.6, linestyle=(0, (2, 1.5)))
     ax.plot(np.r_[start_x, end_x], np.r_[first, last], linestyle="none", marker="o",
             markersize=5.5, color=_WITHIN, markeredgecolor="white", markeredgewidth=1)
-    ax.axhline(0.5, **_CHANCE)
+    ax.axhline(0.5, **ZERO)
 
 
 def _plot_gains(ax, gains):
@@ -133,7 +132,7 @@ def _plot_gains(ax, gains):
                     markerfacecolor="white" if hollow else color,
                     markeredgecolor=color if hollow else "white", markeredgewidth=1.6,
                     elinewidth=2.5, capsize=0, label=label)
-    ax.axhline(0, **_CHANCE)
+    ax.axhline(0, **ZERO)
 
 
 def _plot_running_totals(ax, gains):
@@ -175,7 +174,7 @@ def plot_edge_gains(subjids=None, dates=None, *, data=None, fits=None, mode="com
 
     Top: each session's first-window and last-window accuracy with Wilson 95% intervals,
     joined by a solid segment inside the session (dotted where the windows overlap) and
-    a dashed step to the next session's first window. The dashed horizontal is chance.
+    a dashed step to the next session's first window. The grey horizontal is chance.
 
     Bottom: the within gain (last minus first) at each session and the across gain (next
     first minus last) at each boundary, with Newcombe 95% intervals, and a thin running
@@ -197,8 +196,8 @@ def plot_edge_gains(subjids=None, dates=None, *, data=None, fits=None, mode="com
         _plot_running_totals(bottom, gains[gains["subjid"] == subjid])
         _plot_gains(bottom, gains[gains["subjid"] == subjid])
 
-        style_axis(top, ylabel="accuracy")
-        style_axis(bottom, ylabel="gain", ylim=None)
+        style_axis(top, ylabel="Accuracy")
+        style_axis(bottom, ylabel="Gain", ylim=None)
         top.tick_params(labelbottom=False)
         session_ticks(bottom, animal)
         bottom.set_xlim(animal["session_idx"].min() - 0.4,
@@ -207,7 +206,6 @@ def plot_edge_gains(subjids=None, dates=None, *, data=None, fits=None, mode="com
                       fontsize=annotation_size(), color=REFERENCE)
         fig.legend(*bottom.get_legend_handles_labels(), loc="outside lower center", ncols=3,
                    frameon=False, fontsize=annotation_size())
-        title(fig, f"first and last {n} {unit}s | {fit['mode']}", subjid)
         _save(fig, f"ab_learning_edge_gains_sub-{subjid:03d}", fit, save)
         figures[subjid] = fig
     return figures
@@ -221,7 +219,7 @@ def _plot_profile(ax, profile):
             label="M_c fit")
     ax.plot(profile["center"], profile["fitted_a"], color=REFERENCE, linewidth=2,
             linestyle=(0, (1, 1.5)), label="M_a fit")
-    ax.axhline(0.5, **_CHANCE)
+    ax.axhline(0.5, **ZERO)
 
 
 def plot_position_profile(subjids=None, dates=None, *, data=None, fits=None,
@@ -240,7 +238,7 @@ def plot_position_profile(subjids=None, dates=None, *, data=None, fits=None,
     predictions averaged over the same rows: M_a (flat within every session), which on
     the top panel is what the changing mix of sessions alone produces, and M_c (a
     straight line in log-odds per session), which is what the per-session slopes add up
-    to once pooled. The dashed horizontal is chance.
+    to once pooled. The grey horizontal is chance.
     """
     fits = _fits(subjids, dates, data, fits, mode, min_trials, selectors)
     by_choice = position_profile(fits, "choices", bin_width=bin_width)
@@ -257,13 +255,12 @@ def plot_position_profile(subjids=None, dates=None, *, data=None, fits=None,
         _plot_profile(top, choice)
         _plot_profile(bottom, fraction)
         for ax in (top, bottom):
-            style_axis(ax, ylabel="accuracy", ylim=None)
-        top.set_xlabel(f"{unit} in session")
-        bottom.set_xlabel("fraction of session")
+            style_axis(ax, ylabel="Accuracy", ylim=None)
+        top.set_xlabel(f"{unit.capitalize()} in session")
+        bottom.set_xlabel("Fraction of session")
         bottom.set_xlim(0, 1)
         fig.legend(*bottom.get_legend_handles_labels(), loc="outside lower center", ncols=3,
                    frameon=False, fontsize=annotation_size())
-        title(fig, f"accuracy by position in session | {fit['mode']}", subjid)
         _save(fig, f"ab_learning_position_profile_sub-{subjid:03d}", fit, save)
         figures[subjid] = fig
     return figures
@@ -280,7 +277,7 @@ def plot_session_profiles(subjids=None, dates=None, *, data=None, fits=None,
     intervals; the line is the session's M_c fit, a straight line in log-odds and so a
     gentle curve here. Each panel is titled with the session and its W_s, M_c's gain
     across the session in log-odds. A profile that rises and then falls, or climbs only in
-    its first bins, is one the line describes poorly. The dashed horizontal is chance.
+    its first bins, is one the line describes poorly. The grey horizontal is chance.
     """
     fits = _fits(subjids, dates, data, fits, mode, min_trials, selectors)
     profiles = session_profile(fits, bins=bins)
@@ -310,7 +307,7 @@ def plot_session_profiles(subjids=None, dates=None, *, data=None, fits=None,
             ax.errorbar(profile["center"], profile["accuracy"], yerr=err, fmt="o",
                         color=SERIES, markersize=6, markeredgecolor="white",
                         markeredgewidth=1, elinewidth=2, capsize=0, label="observed")
-            ax.axhline(0.5, **_CHANCE)
+            ax.axhline(0.5, **ZERO)
             style_axis(ax)
             ax.set_xlim(0, 1)
             ax.tick_params(labelsize=annotation_size())
@@ -321,11 +318,10 @@ def plot_session_profiles(subjids=None, dates=None, *, data=None, fits=None,
         for index in range(len(sessions), rows * columns):
             axes.flat[index].set_visible(False)
             axes.flat[index - columns].tick_params(labelbottom=True)
-        fig.supxlabel("fraction of session", fontsize=text_size())
-        fig.supylabel("accuracy", fontsize=text_size())
+        fig.supxlabel("Fraction of session", fontsize=text_size())
+        fig.supylabel("Accuracy", fontsize=text_size())
         fig.legend(*axes.flat[0].get_legend_handles_labels(), loc="outside upper right",
                    ncols=2, frameon=False, fontsize=annotation_size())
-        title(fig, f"accuracy within each session | {fit['mode']}", subjid)
         _save(fig, f"ab_learning_session_profiles_sub-{subjid:03d}", fit, save)
         figures[subjid] = fig
     return figures

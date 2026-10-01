@@ -3322,3 +3322,33 @@ disk costs correctness.
 **Gate:** `regression` **GREEN, 90 fingerprints across all nine sessions**, byte-identical
 · `check_imports` PASS. The per-session write path is untouched; only the batch layer
 above it changed.
+
+---
+
+## 40. Plotters take `legend` and `show` and finish each figure with `finish_figure` *(ab_learning figures, 2026-10-01)*
+
+Every plotting function takes `legend=None` and `show=None` and follows the convention in
+`hypnose_helpers.viz.plotter` (re-exported from `io.save`):
+
+```python
+entries += finish_figure(fig, legend, show)        # each figure, before saving
+save_figure(fig, f"name{show_suffix(show)}", ...)  # each build-up step saves apart
+legend_figure(entries)                             # once, after the figures
+```
+
+- `legend`: True in the figure, False in one legend-only figure (shown, never saved), None
+  as `use_style` says -- apart under the presentation style.
+- `show`: the series to draw, by legend number or label in any order; None draws all.
+  Hidden series keep their place, so every build-up step has the same axes.
+
+**What it requires of a plotter:** every series drawn with a label, in a fixed order --
+legend order is the numbering `show` uses. A band, error bars or markers that belong to a
+series without its label are tied to it with `tie(artist, label)`, or they stay visible
+when the series is hidden. Call `finish_figure` before saving, not after: a figure saved
+first keeps every line and its legend.
+
+New plotters follow it from the start; existing ones adopt it when next touched.
+`ab_learning`'s `plot_cumulative_panels` is the first.
+
+**Gate:** helpers `tests/test_legends.py`, `test_series.py`, `test_plotter.py` pass ·
+`check_imports` PASS · `check_layering` PASS.

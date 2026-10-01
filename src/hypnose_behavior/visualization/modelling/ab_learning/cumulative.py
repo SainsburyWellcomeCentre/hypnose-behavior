@@ -15,9 +15,15 @@ already-loaded frames as ``data=``. ``save=True`` files a figure with
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 from matplotlib.lines import Line2D
 
-from hypnose_behavior.io.save import save_figure
+from hypnose_behavior.io.save import (
+    finish_figure,
+    legend_figure,
+    save_figure,
+    show_suffix,
+)
 from hypnose_behavior.modelling.ab_learning.cumulative import (
     WINDOW,
     cumulative_curves,
@@ -31,16 +37,14 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     SECOND,
     SERIES,
     THIRD,
+    ZERO,
     annotation_size,
     figure,
     index_bounds,
     require_data,
     save_scope,
-    session_axis,
     style_axis,
     subject_colour,
-    text_size,
-    title,
 )
 
 __all__ = ["ACCURACY_MODES", "CURVE_STYLES", "NORMALIZED_WINDOW", "plot_cohort_accuracy",
@@ -82,16 +86,25 @@ def _save(fig, name, data, save, subjid):
 
 
 def plot_cumulative_panels(subjids=None, dates=None, *, data=None, mode="completed",
-                           save=False, **selectors):
+                           legend=None, show=None, save=False, **selectors):
     """Initiations, excess correct and rewards over task time, one figure per animal.
 
         plot_cumulative_panels(data=ab)
         plot_cumulative_panels(data=ab, mode="attempts")
 
     Every count is **divided by its own largest absolute value**, so each ends near 1 and
-    the lines compare by shape; the legend gives the unscaled final counts. Task time
-    counts only the hours an odour-discrimination run was recording, so nights and the
-    gaps between runs take no width. Dotted verticals are session boundaries.
+    the lines compare by shape; the unscaled final counts are printed as a table, one row
+    per animal. Task time counts only the hours an odour-discrimination run was
+    recording, so nights and the gaps between runs take no width. Dotted verticals are
+    session boundaries.
+
+    ``legend``: True draws it in each figure, False in one legend-only figure (shown,
+    never saved), None as `use_style` says -- apart under the presentation style.
+
+    ``show`` draws only some lines, to build a slide up step by step: legend numbers
+    (initiations 1, excess correct 2, rewards 3; in ``"attempts"`` mode choice attempts is
+    2) or labels, in any order, e.g. ``[1]``, ``[1, 2]``, ``[3, 1]``. None draws them all.
+    The axes stay as with every line, and each selection saves under its own name.
 
     - initiations: trials initiated -- engagement. In ``"attempts"`` mode a dashed line
       adds the failed attempts that ended in a port visit.
@@ -107,32 +120,37 @@ def plot_cumulative_panels(subjids=None, dates=None, *, data=None, mode="complet
     curves = cumulative_curves(data, mode)
     bounds = session_bounds(data)
 
-    figures = {}
+    figures, totals, entries = {}, [], []
     for subjid in sorted(curves["subjid"].unique()):
         animal = curves[curves["subjid"] == subjid]
         spans = bounds[bounds["subjid"] == subjid].sort_values("session_idx")
         fig, (ax,) = figure(width=_WIDTH, height=_HEIGHT)
+        final = {"subjid": int(subjid)}
         for name, style in CURVE_STYLES.items():
             part = animal[animal["series"] == name]
             if part.empty:
                 continue
             scale = float(part["value"].abs().max()) or 1.0
-            label = f"{style['label']} ({part['value'].iloc[-1]:g})"
+            final[style["label"]] = part["value"].iloc[-1]
             # From zero at the clock's start, so hours before the first event read as a
             # flat count rather than as missing data.
             ax.plot(np.r_[0.0, part["time"]], np.r_[0.0, part["value"] / scale],
-                    drawstyle="steps-post", **{**style, "label": label})
+                    drawstyle="steps-post", **style)
+        totals.append(final)
         for start in spans["start"].to_numpy()[1:]:
             ax.axvline(start, **BOUNDARY)
-        ax.axhline(0, color=REFERENCE, linestyle="--", linewidth=1, zorder=0)
-        style_axis(ax, ylabel="scaled count", ylim=None)
+        ax.axhline(0, **ZERO)
+        style_axis(ax, ylabel="Normalized count", ylim=None)
         ax.set_xlim(0, float(np.nanmax(spans["end"])) if len(spans) else None)
         ax.set_xlabel("Task time (h)")
-        session_axis(ax, spans)
         ax.legend(frameon=False, fontsize=annotation_size(), loc="upper left")
-        title(fig, f"initiations, excess correct, rewards | {mode}", subjid)
-        _save(fig, f"ab_learning_cumulative_panels_sub-{subjid:03d}", data, save, subjid)
+        entries += finish_figure(fig, legend, show)
+        _save(fig, f"ab_learning_cumulative_panels{show_suffix(show)}_sub-{subjid:03d}", data,
+              save, subjid)
         figures[int(subjid)] = fig
+    legend_figure(entries, fontsize=annotation_size())
+    print(f"Final counts ({mode}):")
+    print(pd.DataFrame(totals).to_string(index=False, float_format=lambda v: f"{v:g}"))
     return figures
 
 
@@ -162,12 +180,10 @@ def plot_excess_by_index(subjids=None, dates=None, *, data=None, mode="completed
                 drawstyle="steps-post", **{**CURVE_STYLES["excess"], "label": None})
         for start in spans["start"].to_numpy()[1:]:
             ax.axvline(start, **BOUNDARY)
-        ax.axhline(0, color=REFERENCE, linestyle="--", linewidth=1, zorder=0)
-        style_axis(ax, ylabel="excess correct", ylim=None)
+        ax.axhline(0, **ZERO)
+        style_axis(ax, ylabel="Excess correct", ylim=None)
         ax.set_xlim(0, len(animal))
-        ax.set_xlabel(unit)
-        session_axis(ax, spans)
-        title(fig, f"excess correct by {unit[:-1]} | {mode}", subjid)
+        ax.set_xlabel(unit.capitalize())
         _save(fig, f"ab_learning_excess_by_index_{mode}_sub-{subjid:03d}", data, save,
               subjid)
         figures[int(subjid)] = fig
@@ -194,7 +210,7 @@ def _mean_curve(frame, subjects, clock, grid):
     return mean, sem
 
 
-def _accuracy_figure(data, mode, window, clock, xlabel, xlim, what, show_mean=False):
+def _accuracy_figure(data, mode, window, clock, xlabel, xlim, show_mean=False):
     """The cohort accuracy figure, on the x axis ``clock(subjid, hours)`` maps task hours to.
 
     Session boundaries, drawn for a single animal, go through ``clock`` too; ``xlim`` of
@@ -221,7 +237,7 @@ def _accuracy_figure(data, mode, window, clock, xlabel, xlim, what, show_mean=Fa
                             label=f"sub-{subjid:03d}" if m == modes[0] else None)
             ax.plot(clock(subjid, rows["hours"].to_numpy()), rows["accuracy"],
                     linestyle=_MODE_LINES[m][0], **look)
-    ax.axhline(0.5, color=REFERENCE, linestyle="--", linewidth=0.8, zorder=0)
+    ax.axhline(0.5, **ZERO)
     ax.set_ylim(0, 1)
     ax.set_xlim(*(xlim or (0, float(bounds["end"].max()))))
     if show_mean:
@@ -245,7 +261,6 @@ def _accuracy_figure(data, mode, window, clock, xlabel, xlim, what, show_mean=Fa
     ax.legend(handles, labels, frameon=False, fontsize=annotation_size(), loc="lower right",
               ncols=2 if len(handles) > 4 else 1)
 
-    what = f"{what} | {mode}, {window}-choice window"
     if len(subjects) == 1:
         subjid = subjects[0]
         spans = bounds.sort_values("session_idx")
@@ -253,10 +268,6 @@ def _accuracy_figure(data, mode, window, clock, xlabel, xlim, what, show_mean=Fa
                              end=clock(subjid, spans["end"].to_numpy()))
         for start in spans["start"].to_numpy()[1:]:
             ax.axvline(start, **BOUNDARY)
-        session_axis(ax, spans)
-        title(fig, what, subjid)
-    else:
-        fig.suptitle(f"cohort | {what}", x=0.01, ha="left", fontsize=text_size())
     return fig, subjects
 
 
@@ -281,7 +292,7 @@ def plot_cohort_accuracy(subjids=None, dates=None, *, data=None, mode="completed
     """
     data = require_data(subjids, dates, selectors, data)
     fig, subjects = _accuracy_figure(data, mode, window, lambda subjid, hours: hours,
-                                     "task time (h)", None, "accuracy over task time")
+                                     "Task time (h)", None)
     if save:
         save_figure(fig, _save_name("cohort_accuracy", mode, subjects),
                     **save_scope(data["sessions"]))
@@ -312,8 +323,7 @@ def plot_cohort_accuracy_normalized(subjids=None, dates=None, *, data=None,
         return (hours - first) / (last - first)
 
     fig, subjects = _accuracy_figure(data, mode, window, clock,
-                                     "Normalized time in arena", (0, 1),
-                                     "Accuracy over normalized task time", show_mean)
+                                     "Normalized time in arena", (0, 1), show_mean)
     if save:
         stem = "cohort_accuracy_normalized" + ("_mean" if show_mean else "")
         save_figure(fig, _save_name(stem, mode, subjects), **save_scope(data["sessions"]))

@@ -11,5 +11,5 @@ One module per analysis block, mirroring the modelling package:
 - ``step``           -- the step fit on the data and its posterior over the switch trial.
 
 ``_common`` holds what they share: the loader guard, the figure and axis setup, the
-session ticks, the title and the colour slots.
+session ticks, the reference lines and the colour slots.
 """

@@ -2,7 +2,7 @@
 
 Every figure in this package draws **one animal per figure**, so the pieces they share
 are the frame around the data: the loader guard, the figure and axis setup, the session
-ticks, the title and the save call. The colours are the categorical slots the package
+ticks, the reference lines and the save call. The colours are the categorical slots the package
 draws in, in a fixed order, so a series keeps its colour from one figure to the next.
 
 Package-internal: the plotters import from here, nothing outside does.
@@ -25,18 +25,17 @@ __all__ = [
     "SERIES",
     "SESSION_SPAN",
     "THIRD",
+    "ZERO",
     "annotation_size",
     "figure",
     "index_bounds",
     "line_with_band",
     "require_data",
     "save_scope",
-    "session_axis",
     "session_ticks",
     "style_axis",
     "subject_colour",
     "text_size",
-    "title",
 ]
 
 # Categorical slots: slot 1 blue, slot 2 orange, slot 3 aqua. `SERIES` is slot 1, the
@@ -48,8 +47,9 @@ REFERENCE = "#8a8984"
 BAND_ALPHA = 0.18
 MAX_SESSION_TICKS = 6
 
-# A session boundary drawn across a continuous axis.
+# A session boundary drawn across a continuous axis, and the zero line it stands on.
 BOUNDARY = dict(color=REFERENCE, linestyle=":", linewidth=1.2, zorder=0)
+ZERO = dict(color="#5c5b57", linewidth=0.8, zorder=0)
 
 # All eight categorical slots in their validated order, for a figure with one line per
 # animal (`subject_colour`).
@@ -119,24 +119,13 @@ def session_ticks(ax, frame):
     sessions = sessions.iloc[::math.ceil(len(sessions) / MAX_SESSION_TICKS)]
     ax.set_xticks(sessions["session_idx"])
     ax.set_xticklabels(sessions["ses"].astype(str))
-    ax.set_xlabel("session")
+    ax.set_xlabel("Session")
 
 
 def subject_colour(subjid) -> str:
     """An animal's colour: its `CATEGORICAL` slot by subject number, so it keeps the
     colour in any subset of the cohort."""
     return CATEGORICAL[int(subjid) % len(CATEGORICAL)]
-
-
-def session_axis(ax, bounds):
-    """Session numbers along the top of a continuous axis, at each session's middle,
-    thinned to fit. ``bounds`` has ``ses``, ``start`` and ``end`` in the axis' units."""
-    bounds = bounds.iloc[::math.ceil(len(bounds) / MAX_SESSION_TICKS)]
-    top = ax.secondary_xaxis("top")
-    top.set_xticks((bounds["start"] + bounds["end"]).to_numpy() / 2)
-    top.set_xticklabels(bounds["ses"].astype(str))
-    top.tick_params(length=0, labelsize=annotation_size())
-    top.set_xlabel("session", fontsize=annotation_size())
 
 
 def index_bounds(rows):
@@ -146,12 +135,6 @@ def index_bounds(rows):
             .agg(start=("k", "min"), end=("k", "max"))
             .assign(end=lambda b: b["end"] + 1)
             .sort_values("session_idx"))
-
-
-def title(fig, what: str, subjid=None):
-    """``sub-0NN | what``, left-aligned above the figure; ``pooled`` without a subject."""
-    who = "pooled" if subjid is None else f"sub-{subjid:03d}"
-    fig.suptitle(f"{who} | {what}", x=0.01, ha="left", fontsize=text_size())
 
 
 def line_with_band(ax, frame, x, y, lo, hi, color, label=None):

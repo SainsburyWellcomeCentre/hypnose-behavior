@@ -27,6 +27,7 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     REFERENCE,
     SECOND,
     SERIES,
+    ZERO,
     SESSION_SPAN,
     annotation_size,
     figure,
@@ -35,7 +36,6 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     session_ticks,
     style_axis,
     text_size,
-    title,
 )
 
 __all__ = ["plot_gain_decomposition"]
@@ -76,7 +76,7 @@ def _probability_axis(ax):
     right.set_yticks(logit(ticks))
     right.set_yticklabels([f"{p:g}" for p in ticks])
     right.spines[["top", "left"]].set_visible(False)
-    right.set_ylabel("accuracy", fontsize=text_size())
+    right.set_ylabel("Accuracy", fontsize=text_size())
     right.tick_params(length=2, labelsize=text_size() * 0.8)
 
 
@@ -95,7 +95,7 @@ def _plot_levels(ax, levels):
         ax.plot([x0, x1], [y0, y1], color=_OVERNIGHT, linewidth=1.6, linestyle=(0, (2, 1.5)))
     ax.plot(np.r_[start_x, end_x], np.r_[start, end], linestyle="none", marker="o",
             markersize=5.5, color=_WITHIN, markeredgecolor="white", markeredgewidth=1)
-    ax.axhline(0, color=REFERENCE, linestyle="--", linewidth=1)
+    ax.axhline(0, **ZERO)
 
 
 def _plot_running_totals(ax, gains):
@@ -133,7 +133,7 @@ def _plot_gains(ax, gains):
                     markerfacecolor="white" if hollow else color,
                     markeredgecolor=color if hollow else "white", markeredgewidth=1.6,
                     elinewidth=2.5, capsize=0, label=label)
-    ax.axhline(0, color=REFERENCE, linestyle="--", linewidth=1)
+    ax.axhline(0, **ZERO)
 
 
 def _headline(share, test) -> str:
@@ -167,7 +167,7 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
 
     Top: M_c's fitted log-odds over training. A solid segment runs from a session's
     first choice to its last, a dashed step crosses to the next session's first, and the
-    shaded bars are the 95% intervals on the two fitted edges. The dashed horizontal is
+    shaded bars are the 95% intervals on the two fitted edges. The grey horizontal is
     chance.
 
     Bottom: the same change read as gains -- W_s over each session, O_s across each
@@ -196,8 +196,8 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
         _plot_running_totals(bottom, gains[gains["subjid"] == subjid])
         _plot_gains(bottom, gains[gains["subjid"] == subjid])
 
-        style_axis(top, ylabel="log-odds", ylim=None)
-        style_axis(bottom, ylabel="gain", ylim=None)
+        style_axis(top, ylabel="Log-odds", ylim=None)
+        style_axis(bottom, ylabel="Gain", ylim=None)
         top.tick_params(labelbottom=False)
         _probability_axis(top)
         session_ticks(bottom, animal)
@@ -209,7 +209,6 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
                       fontsize=annotation_size(), color=REFERENCE)
         fig.legend(*bottom.get_legend_handles_labels(), loc="outside lower center", ncols=3,
                    frameon=False, fontsize=annotation_size())
-        title(fig, f"within-session and overnight gain | {fits[subjid]['mode']}", subjid)
         _save(fig, f"ab_learning_gain_decomposition_sub-{subjid:03d}",
               fits[subjid]["sessions"], save, subjid)
         figures[subjid] = fig

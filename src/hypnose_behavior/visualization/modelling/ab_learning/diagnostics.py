@@ -18,9 +18,9 @@ from hypnose_behavior.modelling.ab_learning.diagnostics import (
     lose_shift_summary,
 )
 from hypnose_behavior.visualization.modelling.ab_learning._common import (
-    REFERENCE,
     SECOND,
     SERIES,
+    ZERO,
     figure,
     line_with_band,
     require_data,
@@ -28,7 +28,6 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     session_ticks,
     style_axis,
     text_size,
-    title,
 )
 
 __all__ = ["plot_failed_attempt_accuracy", "plot_initiation_rate", "plot_lose_shift"]
@@ -61,9 +60,8 @@ def plot_initiation_rate(subjids=None, dates=None, *, data=None, save=False, **s
         frame = rate[rate["subjid"] == subjid]
         fig, (ax,) = figure()
         line_with_band(ax, frame, "session_idx", "rate", "rate_lo", "rate_hi", SERIES)
-        style_axis(ax, ylabel="initiation rate")
+        style_axis(ax, ylabel="Initiation rate")
         session_ticks(ax, frame)
-        title(fig, "initiated trials / attempts with a poke", subjid)
         _save(fig, f"ab_learning_initiation_rate_sub-{subjid:03d}", data, save, subjid)
         figures[subjid] = fig
     return figures
@@ -74,7 +72,7 @@ def plot_failed_attempt_accuracy(subjids=None, dates=None, *, data=None, save=Fa
     """D2: port-choice accuracy after failed attempts next to completed-trial accuracy.
 
     Top: accuracy of completed trials, of failed attempts with a poke that led to a port
-    visit, and of zero-poke failed attempts that did. The dashed line is chance.
+    visit, and of zero-poke failed attempts that did. The grey line is chance.
     Bottom: the share of failed attempts followed by a port visit.
     """
     data = require_data(subjids, dates, selectors, data)
@@ -92,14 +90,13 @@ def plot_failed_attempt_accuracy(subjids=None, dates=None, *, data=None, save=Fa
                 bottom.plot(part["session_idx"], part["visit_rate"], color=color,
                             linewidth=2, marker="o", markersize=5, markeredgecolor="white",
                             markeredgewidth=1, label=label)
-        top.axhline(0.5, color=REFERENCE, linestyle="--", linewidth=1)
-        style_axis(top, ylabel="accuracy")
-        style_axis(bottom, ylabel="port visit rate")
+        top.axhline(0.5, **ZERO)
+        style_axis(top, ylabel="Accuracy")
+        style_axis(bottom, ylabel="Port visit rate")
         top.tick_params(labelbottom=False)
         session_ticks(bottom, frame)
         fig.legend(*top.get_legend_handles_labels(), loc="outside lower center", ncols=2,
                    frameon=False, fontsize=text_size() * 0.7)
-        title(fig, "accuracy after failed attempts", subjid)
         _save(fig, f"ab_learning_failed_attempt_accuracy_sub-{subjid:03d}", data, save,
               subjid)
         figures[subjid] = fig
@@ -111,7 +108,7 @@ def plot_lose_shift(subjids=None, dates=None, *, data=None, save=False, **select
 
     One figure per animal plus one pooled over them, keyed ``"pooled"``; each group is
     labelled with its trial count. Elimination would show as ``wrong port`` above
-    ``none``; the dashed line is chance.
+    ``none``; the grey line is chance.
     """
     data = require_data(subjids, dates, selectors, data)
     per_animal = lose_shift_summary(data, by=("subjid",))
@@ -129,13 +126,12 @@ def plot_lose_shift(subjids=None, dates=None, *, data=None, save=False, **select
                          frame["accuracy_hi"] - frame["accuracy"]])
         ax.errorbar(x, frame["accuracy"], yerr=err, fmt="o", color=SERIES, markersize=7,
                     markeredgecolor="white", markeredgewidth=1, elinewidth=2, capsize=0)
-        ax.axhline(0.5, color=REFERENCE, linestyle="--", linewidth=1)
-        style_axis(ax, ylabel="accuracy")
+        ax.axhline(0.5, **ZERO)
+        style_axis(ax, ylabel="Accuracy")
         ax.set_xticks(x)
         ax.set_xticklabels([f"{_GROUP_LABELS[g]}\n{int(n)}" for g, n in zip(groups, frame["n"])])
         ax.set_xlim(-0.5, len(groups) - 0.5)
-        ax.set_xlabel("attempt before (n trials)")
-        title(fig, "accuracy by prior attempt", subjid)
+        ax.set_xlabel("Attempt before (n trials)")
         name = ("ab_learning_lose_shift_pooled" if subjid is None
                 else f"ab_learning_lose_shift_sub-{subjid:03d}")
         _save(fig, name, data, save, subjid)

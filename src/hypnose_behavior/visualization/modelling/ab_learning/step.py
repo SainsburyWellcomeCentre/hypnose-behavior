@@ -16,13 +16,12 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     REFERENCE,
     SECOND,
     SERIES,
+    ZERO,
     annotation_size,
     figure,
     index_bounds,
     save_scope,
-    session_axis,
     style_axis,
-    title,
 )
 
 __all__ = ["plot_step_posterior"]
@@ -31,7 +30,6 @@ _OBSERVED = dict(color=SECOND, linewidth=1.8, zorder=1, label="observed")
 _STEP = dict(color=SERIES, linewidth=2.2, zorder=4, label="step at the peak")
 _SIGMOID = dict(color=REFERENCE, linewidth=2.0, linestyle=(0, (5, 2)), zorder=3,
                 label="sigmoid")
-_ZERO = dict(color=REFERENCE, linestyle="--", linewidth=1, zorder=0)
 _MODE = dict(marker="o", markersize=8, color=SECOND, markeredgecolor="white",
              markeredgewidth=1.5, linestyle="none", zorder=6)
 
@@ -84,8 +82,8 @@ def _draw_fit(ax, step):
     p_sigmoid = erf_curve(k, sigmoid["initial"], sigmoid["final"], sigmoid["center"],
                           sigmoid["width"])
     ax.plot(count, np.r_[0.0, np.cumsum(p_sigmoid - 0.5)], **_SIGMOID)
-    ax.axhline(0, **_ZERO)
-    style_axis(ax, ylabel="excess correct", ylim=None)
+    ax.axhline(0, **ZERO)
+    style_axis(ax, ylabel="Excess correct", ylim=None)
     ax.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
 
 
@@ -142,9 +140,8 @@ def plot_step_posterior(steps: dict, *, save=False):
                     transform=fit_ax.transAxes, fontsize=annotation_size(), va="top",
                     ha="left")
         fit_ax.set_xlim(0, len(rows))
-        session_axis(fit_ax, spans)
         unit = "trials" if mode == "completed" else "choice attempts"
-        zoom.set_xlabel(unit)
+        zoom.set_xlabel(unit.capitalize())
         left, right = zoom.get_xlim()
         shown = (spans[["start", "end"]].clip(left, right).diff(axis=1)["end"]
                  >= _LABEL_SHARE * (right - left))
@@ -153,7 +150,6 @@ def plot_step_posterior(steps: dict, *, save=False):
                           xycoords=("data", "axes fraction"), xytext=(3, -2),
                           textcoords="offset points", va="top",
                           fontsize=annotation_size(), color=REFERENCE)
-        title(fig, f"step model | {mode}, initial {step['variant']}", subjid)
         _save(fig, f"ab_learning_step_posterior_{mode}_sub-{subjid:03d}", rows, save,
               subjid)
         figures[int(subjid)] = fig
