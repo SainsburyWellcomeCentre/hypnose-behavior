@@ -11,7 +11,9 @@ One module per role:
 - ``session_gain`` -- raw-accuracy gains within and across sessions, and accuracy by
   position in a session.
 - ``cumulative``  -- running counts of initiations, excess correct and rewards.
-- ``sigmoid``     -- single-sigmoid fits of accuracy, engagement and reward rate, with
+- ``state_space`` -- the Smith et al. random walk: accuracy trial by trial with a credible
+  band, the learning trial, and how many changes the curve holds.
+- ``sigmoid``   -- single-sigmoid fits of accuracy, engagement and reward rate, with
   every separated optimum.
 - ``step``        -- the step model: whether a step describes the change, and the
   posterior over when it happened.

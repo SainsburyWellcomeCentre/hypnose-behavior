@@ -6,6 +6,8 @@ One module per analysis block, mirroring the modelling package:
 - ``log_regression`` -- the fitted per-session log-odds and the within/overnight gains.
 - ``session_gain``   -- first/last-window gains and accuracy by position in a session.
 - ``cumulative``     -- running counts on task time, and excess correct by row index.
+- ``state_space``    -- the random walk's p_k and expected excess over the data, with the
+  learning trial and the counted changes.
 - ``sigmoid``        -- the sigmoid fits, their lnL surface, and their midpoints on task
   time.
 - ``step``           -- the step fit on the data and its posterior over the switch trial.
