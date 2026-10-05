@@ -46,7 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 import numpy as np
 import matplotlib.pyplot as plt
 
-from hypnose_behavior.io.save import nature_style, save_figure
+from hypnose_behavior.io.save import nature_style, save_figure, show_suffix
 from hypnose_behavior.qc.validate import validate_subject
 from hypnose_behavior.modelling.switchpoint import (
     ACF_MATERIAL_THRESHOLD,
@@ -206,7 +206,8 @@ def _print_model_table(comparison: dict) -> None:
 
 def _analyse_sequence(prep: dict, rewarded_only: bool, likelihood_window: int,
                       qlearning_overlay: bool = True, defer_figures: bool = False,
-                      around_switch: bool = False, plot_trials: int = 200) -> Optional[dict]:
+                      around_switch: bool = False, plot_trials: int = 200,
+                      models=None, legend: Optional[bool] = None) -> Optional[dict]:
     """Fit, print and plot one SHORT/LONG sequence -- a whole animal, or one A/B split of it.
 
     Figures are built in the order they should be read: strategy, model comparison, posterior.
@@ -265,7 +266,7 @@ def _analyse_sequence(prep: dict, rewarded_only: bool, likelihood_window: int,
     if not defer_figures:
         for kind in _FIGURE_KINDS:
             fig = _build_sequence_figure(result, kind, rewarded_only, likelihood_window,
-                                         around_switch, plot_trials)
+                                         around_switch, plot_trials, models, legend)
             if fig is not None:
                 result["figures"][kind] = fig
     return result
@@ -286,37 +287,48 @@ _FIGURE_SAVE_NAMES = {
 }
 
 
-def _save_sequence_figures(result: dict, subjid: int, dates) -> list:
+def _save_sequence_figures(result: dict, subjid: int, dates, models=None) -> list:
     """Save each of a sequence's figures as its own PDF under the subject's figures directory.
 
     File names are ``<letter>_<kind>`` (the letter present only for an A/B split), e.g.
-    ``A_all_models`` or ``B_qlearning_generative``; ``save_figure`` appends the subject/date tags
-    and resolves the path -- subject-level (``derivatives/sub-NNN_id-*/figures``) for the
-    multi-date ranges this analysis uses. Returns the saved paths.
+    ``A_all_models`` or ``B_qlearning_generative``; a ``models`` selection suffixes the
+    model-comparison name, e.g. ``A_all_models_show-1-2``. ``save_figure`` appends the
+    subject/date tags and resolves the path -- subject-level (``derivatives/sub-NNN_id-*/figures``)
+    for the multi-date ranges this analysis uses. Returns the saved paths.
+
+    Figures are saved without their titles, which name only what the path already does; the
+    displayed figures keep them.
     """
     letter = result.get("ab_split")
     prefix = f"{letter}_" if letter else ""
-    return [save_figure(fig, f"{prefix}{_FIGURE_SAVE_NAMES.get(kind, kind)}",
-                        subjids=[subjid], dates=dates)
-            for kind, fig in result["figures"].items()]
+    saved = []
+    for kind, fig in result["figures"].items():
+        name = f"{prefix}{_FIGURE_SAVE_NAMES.get(kind, kind)}"
+        if kind == "model_comparison":
+            name += show_suffix(models)
+        saved.append(save_figure(fig, name, subjids=[subjid], dates=dates, titles=False))
+    return saved
 
 
 def _build_sequence_figure(result: dict, kind: str, rewarded_only: bool, likelihood_window: int,
-                           around_switch: bool = False, plot_trials: int = 200):
+                           around_switch: bool = False, plot_trials: int = 200, models=None,
+                           legend: Optional[bool] = None):
     """Create one figure of the given kind for a sequence analysed by ``_analyse_sequence``.
 
     Kept separate from the maths so ``run_analysis`` can interleave the A and B splits by figure
     kind. Returns None for ``generative`` when the Q-learning overlay was off for this sequence.
-    ``around_switch`` / ``plot_trials`` crop the model-comparison figure's x-axis to the switch.
+    ``around_switch`` / ``plot_trials`` crop the model-comparison figure's x-axis to the switch,
+    and ``models`` is its ``show``; ``legend`` goes to the model-comparison and posterior figures.
     """
     prep = result["prep"]
     if kind == "strategy":
         return plot_strategy(prep, rewarded_only)
     if kind == "model_comparison":
         return plot_model_comparison(prep, result["comparison"], result["qlearning"],
-                                     around_switch=around_switch, plot_trials=plot_trials)
+                                     around_switch=around_switch, plot_trials=plot_trials,
+                                     legend=legend, show=models)
     if kind == "posterior":
-        return plot_posterior(prep, result["fit"], likelihood_window)
+        return plot_posterior(prep, result["fit"], likelihood_window, legend=legend)
     if kind == "generative":
         if result["qlearning"] is None:
             return None
@@ -355,7 +367,8 @@ def run_analysis(
     rewarded_only: bool = False,
     likelihood_window: int = 100,
     split_ab: bool = False,
-    show: bool = True,
+    show: Union[bool, int, str, Sequence] = True,
+    legend: Optional[bool] = None,
     qlearning_overlay: bool = True,
     around_switch: bool = False,
     plot_trials: int = 200,
@@ -381,8 +394,17 @@ def run_analysis(
     split_ab : bool
         Analyse the A- and B-reward trials separately: each subset gets its own contiguous
         trial axis, its own fits, and its own three figures.
-    show : bool
-        Display each animal's figures once built (default True).
+    show : bool | int | str | list
+        True (default) displays each animal's figures once built; False only builds them.
+        A selection -- legend numbers or labels, e.g. ``[1, 2]`` -- also displays them, with
+        only those models on the model-comparison figure: 1 constant, 2 switch, 3 logistic,
+        4 switch2, 5-7 the Q-learning variants; 0 draws none, the trials only. Hidden models
+        keep their blank legend rows, so the axes and legend stay put from one selection to
+        the next.
+    legend : bool | None
+        The legends of the model-comparison and posterior figures, and the AIC/BIC table: True
+        in the figure; False each set apart in its own figure, shown and never saved; None as
+        ``use_style`` says (apart under the presentation style).
     qlearning_overlay : bool
         Fit the three Q-learning variants (default True). 
     around_switch : bool
@@ -392,7 +414,9 @@ def run_analysis(
     plot_trials : int
         Half-width in trials of the ``around_switch`` crop (default 200).
     save : bool
-        Save every figure to disk (default False). Each is written as its own PDF.
+        Save every figure to disk (default False). Each is written as its own PDF, without its
+        title, and under a ``show`` selection the model-comparison file is named for it, e.g.
+        ``all_models_show-1-2``.
 
     Returns
     -------
@@ -409,6 +433,7 @@ def run_analysis(
         identity: ``results[subjid]["A"]`` and ``results[subjid]["B"]``.
     """
     subjids, date_ranges, dates_for = normalize_subjids_dates(subjids, date_ranges)
+    models = None if isinstance(show, bool) else show
     results = {}
 
     with plt.rc_context(nature_style()):
@@ -428,14 +453,15 @@ def run_analysis(
                     for kind in _FIGURE_KINDS:
                         for letter, r in splits.items():
                             fig = _build_sequence_figure(r, kind, rewarded_only, likelihood_window,
-                                                         around_switch, plot_trials)
+                                                         around_switch, plot_trials, models,
+                                                         legend)
                             if fig is not None:
                                 r["figures"][kind] = fig
                     results[subjid] = splits
             else:
                 result = _analyse_sequence(prep, rewarded_only, likelihood_window,
                                            qlearning_overlay, around_switch=around_switch,
-                                           plot_trials=plot_trials)
+                                           plot_trials=plot_trials, models=models, legend=legend)
                 if result is not None:
                     results[subjid] = result
             # Save this subject's figures (one PDF each) before display. A stored value is either a
@@ -444,13 +470,13 @@ def run_analysis(
                 stored = results[subjid]
                 seqs = [stored] if "figures" in stored else list(stored.values())
                 saved = [p for seq in seqs
-                         for p in _save_sequence_figures(seq, subjid, dates_for(subjid))]
+                         for p in _save_sequence_figures(seq, subjid, dates_for(subjid), models)]
                 if saved:
                     print(f"[switchpoint] Subject {subjid}: saved {len(saved)} figure(s) to "
                           f"{saved[0].parent}")
             # Per animal: build figures for this subject, then display. In the notebook the
             # flush hook renders them in creation order; see _show_figures.
-            _show_figures(show)
+            _show_figures(show is not False)
     return results
 
 

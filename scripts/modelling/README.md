@@ -147,24 +147,38 @@ Shown in this order, one animal at a time.
 
 1. **Strategy** — SHORT/LONG per trial on the continuous trial axis, each trial coloured by
    its reward identity (A red, B teal, unresolved grey), with a blue dotted vertical line at
-   each session end (sleep).
+   each session end (sleep). Only the whole-animal figure has a legend, naming the colours;
+   an A/B split's figure has one colour and none.
 2. **Model comparison** — the data with every fitted model overlaid as **one fitted line each**
    (constant line, switch step, switch2 two-step, logistic curve), and the five-row AIC/BIC table 
-   in-panel with the BIC winner marked, so *no switch / abrupt / gradual / two-stage* can be read 
-   off directly. The printed table adds each model's loglik, the nesting check, and the winner's 
-   fitted parameters.
+   beside it with each column's best score in bold red, so *no switch / abrupt / gradual /
+   two-stage* can be read off directly. The legend gives each model's fitted parameters (e.g.
+   `Switch, τ:220, 0.08|0.97`); the printed table adds each model's loglik, the nesting check,
+   and the winner's fitted parameters.
 
    Unless `qlearning_overlay=False`, the three Q-learning variants are also drawn here, one
-   **solid line each labelled `(null)`** — the variant's **one-step-ahead** curve, the quantity
-   its AIC/BIC scores. That curve is conditioned on the animal's own choices, so it is *not* a
-   prediction of the trajectory (with a large `kappa` it becomes a one-trial-lagged copy of the
-   data); the honest, generative view is figure 4. 
+   **solid line each** — the variant's **one-step-ahead** curve, the quantity its AIC/BIC
+   scores. That curve is conditioned on the animal's own choices, so it is *not* a prediction
+   of the trajectory (with a large `kappa` it becomes a one-trial-lagged copy of the data); the
+   honest, generative view is figure 4. 
+
+   For slides, `show=[1, 2]` draws only those models, numbered in legend order: 1 constant,
+   2 switch, 3 logistic, 4 switch2 (the table's rows), 5–7 the Q-learning variants; `show=0`
+   draws none, the trials only, as the first frame (`A_all_models_show-0`). Hidden
+   models keep their blank legend rows, so the axes and legend stay put from step to step, and
+   `save=True` names each step's file, e.g. `A_all_models_show-1-2`. `legend=False` sets the
+   legend and the table apart, each in its own figure, shown and never saved (`None`, the
+   default, does so under the presentation style).
 3. **Posterior** — the switch-point posterior over *all* trials, plotted windowed to
    ±`likelihood_window` trials around its peak. `tau`, its session, and the HDI width are
    printed and annotated (HDI primary, FWHM secondary).
 4. **Q-learning generative** (overlay only) — three stacked panels, one per variant, showing
    what each fitted null actually *predicts*: the model run forward on its own choices, drawn as
    the generative mean (thick), the 5–95% band, and a few individual simulated runs (faint). 
+
+With `save=True`, every PDF is saved without its title (subject and reward are in the path and
+file name); the displayed figures keep them. `legend=False` also sets the posterior's legend
+apart, like the model comparison's.
 
 
 ### `run_logistic_diagnostic` — is the logistic fit trustworthy?

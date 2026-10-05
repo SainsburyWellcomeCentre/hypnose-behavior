@@ -14,6 +14,7 @@ from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt
 
+from hypnose_behavior.io.save import finish_figure, legend_figure, legends_apart, show_apart
 from hypnose_behavior.modelling.switchpoint.data import subject_label
 from hypnose_behavior.modelling.switchpoint.switch import logistic_p
 from hypnose_behavior.modelling.switchpoint.compare import MODEL_ORDER
@@ -24,11 +25,18 @@ from hypnose_behavior.modelling.switchpoint.qlearning import (
 
 # --- style constants ----------------------------------------------------------------------
 _SESSION_LINE_COLOR = "tab:blue"
+_SESSION_LABEL = "Session end (sleep)"
 _CONSTANT_COLOR = "#3C5488"
 _SWITCH_COLOR = "#FF26F4"
 _SWITCH2_COLOR = "#8491B4"
 _LOGISTIC_COLOR = "#E2BA06"
 _DATA_COLOR = "#2b2b2b"
+
+# Model-comparison legend and AIC/BIC table: font size, the colour of each column's best
+# score, and an italic tau (Arial has no U+1D70F, so mathtext draws it).
+_KEY_FONTSIZE = 6.5
+_BEST_COLOR = "#DC0000"
+_TAU = r"$\mathit{\tau}$"
 
 # Q-learning null: one colour per variant.
 #
@@ -112,14 +120,15 @@ def _mark_sessions(ax, session_ends: np.ndarray, label: bool = True) -> None:
     """Draw a blue dotted vertical line at the last trial of each session (a sleep marker)."""
     for i, end in enumerate(session_ends):
         ax.axvline(end, color=_SESSION_LINE_COLOR, linestyle=":", linewidth=0.9, alpha=0.8,
-                   zorder=1, label="Session end (sleep)" if (label and i == 0) else None)
+                   zorder=1, label=_SESSION_LABEL if (label and i == 0) else None)
 
 
 def plot_strategy(prep: dict, rewarded_only: bool):
     """Binary SHORT/LONG strategy across the continuous trial axis, coloured by reward identity.
 
     SHORT is the lower row and LONG the upper row (the y axis is inverted). Every trial --
-    SHORT or LONG -- takes the colour of the reward it is associated with.
+    SHORT or LONG -- takes the colour of the reward it is associated with. Only a whole animal,
+    with both rewards' colours, has a legend; an A/B split's single colour needs none.
     """
     fig, ax = plt.subplots(figsize=(11, 2.8))
     ab, trials, s = prep["ab"], prep["trial_ids"], prep["s"]
@@ -133,22 +142,27 @@ def plot_strategy(prep: dict, rewarded_only: bool):
         ax.scatter(trials[unresolved], s[unresolved], marker="|", s=44, linewidths=0.9,
                    color=_AB_UNKNOWN_COLOR, alpha=0.8, zorder=2,
                    label=f"unresolved ({int(unresolved.sum())})")
-    _mark_sessions(ax, prep["session_ends"])
+    _mark_sessions(ax, prep["session_ends"], label=False)
     ax.set_yticks([0, 1])
     ax.set_yticklabels(["LONG", "SHORT"])
     ax.set_ylim(1.35, -0.35)  # inverted: SHORT on the lower row, LONG on the upper row
     ax.set_xlim(-1, max(prep["n_trials"], 1))
-    ax.set_xlabel("Trial (continuous across sessions)")
+    ax.set_xlabel("Trial")
     kept = "rewarded" if rewarded_only else "completed"
     ax.set_title(f"{subject_label(prep)} - strategy per {kept} trial "
                  f"({prep['n_trials']} trials, {len(prep['session_labels'])} sessions)")
-    ax.legend(loc="lower left", fontsize=7, ncol=3)
+    if prep.get("ab_split") is None:
+        ax.legend(loc="lower left", fontsize=7, ncol=3)
     fig.tight_layout()
     return fig
 
 
-def plot_posterior(prep: dict, fit: dict, likelihood_window: int):
-    """Switch-point posterior, windowed to +/- ``likelihood_window`` trials around the peak."""
+def plot_posterior(prep: dict, fit: dict, likelihood_window: int, legend=None):
+    """Switch-point posterior, windowed to +/- ``likelihood_window`` trials around the peak.
+
+    ``legend`` follows the plotter convention: False sets it apart in its own figure, shown and
+    never saved; None does so under the presentation style.
+    """
     posterior, tau, n = fit["posterior"], fit["tau"], prep["n_trials"]
     hdi_lo, hdi_hi = fit["hdi"]
     fwhm_lo, fwhm_hi = fit["fwhm"]
@@ -168,11 +182,15 @@ def plot_posterior(prep: dict, fit: dict, likelihood_window: int):
     _mark_sessions(ax, prep["session_ends"], label=False)
     ax.set_xlim(lo - 0.5, hi - 0.5)
     ax.set_ylim(bottom=0)
-    ax.set_xlabel("Trial (continuous across sessions)")
+    ax.set_xlabel("Trial")
     ax.set_ylabel("Posterior P(tau)")
     ax.set_title(f"{subject_label(prep)} - switch-point posterior "
                  f"(+/-{likelihood_window} trials around peak)")
     ax.legend(loc="upper right", fontsize=7)
+    entries = finish_figure(fig, legend)
+    if entries:
+        print(f"{subject_label(prep)} - switch-point posterior")
+        legend_figure(entries, fontsize=7)
     fig.tight_layout()
     return fig
 
@@ -185,6 +203,35 @@ def _qlearn_label(variant: str, fit: dict) -> str:
             f"b={fit['b']:.3g}{kappa}, BIC {fit['bic']:.0f}{flag}")
 
 
+def _qlearn_key(variant: str, fit: dict) -> str:
+    """Model-comparison legend entry, e.g. ``Q persev, a:0.008, b:8.33, k:0.52``; the BIC is in
+    the table."""
+    kappa = f", k:{fit['kappa']:.2f}" if variant == "qlearn_perseveration" else ""
+    return f"{_QLEARN_SHORT_LABELS[variant]}, a:{fit['alpha']:.3g}, b:{fit['b']:.3g}{kappa}"
+
+
+def _score_table(ax, comparison: dict, **placement):
+    """The AIC/BIC table, one row per model in ``MODEL_ORDER``; each column's best in bold red.
+
+    ``placement`` goes to ``ax.table`` (``bbox`` or ``loc``).
+    """
+    cells = []
+    for m in MODEL_ORDER:
+        score = comparison[m]
+        done = comparison["fits"][m].get("implemented", True)
+        cells.append([m, str(score["k_params"]),
+                      f"{score['aic']:.1f}" if done else "n/a",
+                      f"{score['bic']:.1f}" if done else "n/a"])
+    table = ax.table(cellText=cells, colLabels=["model", "k", "AIC", "BIC"], cellLoc="center",
+                     edges="open", **placement)
+    table.auto_set_font_size(False)
+    table.set_fontsize(_KEY_FONTSIZE)
+    for col, best in ((2, comparison["best_aic"]), (3, comparison["best_bic"])):
+        table[MODEL_ORDER.index(best) + 1, col].get_text().set(color=_BEST_COLOR,
+                                                               fontweight="bold")
+    return table
+
+
 def _overlay_qlearning(ax, x: np.ndarray, qlearning_fits: dict) -> None:
     """Draw each fitted Q-learning variant's one-step-ahead curve over the data, one solid line.
 
@@ -195,8 +242,8 @@ def _overlay_qlearning(ax, x: np.ndarray, qlearning_fits: dict) -> None:
     conditioned on the animal's choices; see the qlearning module docstring), and with a large
     kappa it degenerates into a lagged copy of the data -- which is exactly why the honest,
     generative view lives in its own figure, ``plot_qlearning_generative``, rather than being
-    layered on here. Each variant gets its own coloured legend entry (tagged ``(null)``); no extra
-    proxy handle is added, so every legend swatch corresponds to a line actually on the plot.
+    layered on here. Each variant gets its own coloured legend entry; no extra proxy handle is
+    added, so every legend swatch corresponds to a line actually on the plot.
     """
     for variant in QLEARN_VARIANT_ORDER:
         fit = qlearning_fits.get(variant)
@@ -205,11 +252,12 @@ def _overlay_qlearning(ax, x: np.ndarray, qlearning_fits: dict) -> None:
         p = np.asarray(fit["p_short"], dtype=float)
         if p.size == x.size and not np.all(np.isnan(p)):
             ax.plot(x, p, color=_QLEARN_COLORS[variant], linewidth=1.5, zorder=8,
-                    label=_qlearn_label(variant, fit))
+                    label=_qlearn_key(variant, fit))
 
 
 def plot_model_comparison(prep: dict, comparison: dict, qlearning_fits: dict | None = None,
-                          around_switch: bool = False, plot_trials: int = 200):
+                          around_switch: bool = False, plot_trials: int = 200, legend=None,
+                          show=None):
     """Overlay every fitted model on the data, with the AIC/BIC table beside it.
 
     SHORT is the lower row, matching the strategy plot: the y axis is inverted, so the fitted
@@ -217,18 +265,27 @@ def plot_model_comparison(prep: dict, comparison: dict, qlearning_fits: dict | N
     per-reward strategy figures. The switch model is a solid red step and the logistic a solid
     green sigmoid, both drawn thick; where they would coincide (a sharp switch the logistic
     matches) each is nudged a hair apart so both stay visible. switch2 stays a dotted grey line.
-    The legend and the AIC/BIC table both sit outside the axes, stacked on the right.
+    The legend and the AIC/BIC table both sit outside the axes, stacked on the right; each
+    column's best score is bold red.
 
     ``qlearning_fits`` (as returned by ``fit_qlearning_variants``) additionally overlays the
-    three Q-learning variants -- the mechanistic null -- one solid line each, labelled "(null)"
-    in the legend to keep them apart from the descriptive models. The line drawn is each
-    variant's **one-step-ahead** trajectory, the quantity its AIC/BIC in the table scores; it is
-    conditioned on the animal's choices and so is not a prediction of the trajectory -- for that,
-    read ``plot_qlearning_generative``. Pass ``None`` to omit them; the ``qlearning`` table row
-    is drawn either way.
+    three Q-learning variants -- the mechanistic null -- one solid line each. The line drawn is
+    each variant's **one-step-ahead** trajectory, the quantity its AIC/BIC in the table scores;
+    it is conditioned on the animal's choices and so is not a prediction of the trajectory --
+    for that, read ``plot_qlearning_generative``. Pass ``None`` to omit them; the ``qlearning``
+    table row is drawn either way.
 
     With ``around_switch`` the x-axis is cropped to ``plot_trials`` trials either side of the
     switch tau (default 200), zooming in on the transition; the fits are unchanged, only the view.
+
+    ``legend`` and ``show`` follow the plotter convention (`hypnose_helpers.viz.plotter`):
+
+    - ``legend`` -- False sets the legend and the table apart, each in its own figure, shown
+      and never saved; None does so under the presentation style.
+    - ``show`` -- the models to draw, by legend number or label; 0 draws none (the trials
+      only), None draws them all. Legend order is the table's: 1 constant, 2 switch,
+      3 logistic, 4 switch2, then 5-7 the Q-learning variants. The session lines and the
+      table always stay.
     """
     s, x, n = prep["s"], prep["trial_ids"], prep["n_trials"]
     ab = prep["ab"]
@@ -250,7 +307,7 @@ def plot_model_comparison(prep: dict, comparison: dict, qlearning_fits: dict | N
                    color=_AB_UNKNOWN_COLOR, alpha=0.55, zorder=2)
 
     ax.axhline(constant["p"], color=_CONSTANT_COLOR, linewidth=1.6, zorder=4,
-               label=f"Constant: p = {constant['p']:.2f}")
+               label=f"Constant, p:{constant['p']:.2f}")
 
     # The switch step and the logistic sigmoid coincide when the switch is sharp; when their
     # largest vertical gap is tiny, nudge each apart so both stay visible (see _CURVE_OFFSET).
@@ -260,34 +317,23 @@ def plot_model_comparison(prep: dict, comparison: dict, qlearning_fits: dict | N
     switch_on_grid = np.where(grid < switch["tau"], switch["p1"], switch["p2"])
     off = _CURVE_OFFSET if np.nanmax(np.abs(switch_on_grid - log_y)) < _CURVE_OVERLAP_TOL else 0.0
 
-    # switch2 first, so the red switch and green logistic draw on top of it.
+    # Drawn in the table's order, which numbers the legend for ``show``; zorder keeps the
+    # switch and logistic on top of switch2.
+    ax.step([0, switch["tau"], n - 1],
+            [switch["p1"] + off, switch["p2"] + off, switch["p2"] + off], where="post",
+            color=_SWITCH_COLOR, linewidth=2.6, zorder=6,
+            label=f"Switch, {_TAU}:{switch['tau']}, {switch['p1']:.2f}|{switch['p2']:.2f}")
+    ax.plot(grid, log_y - off, color=_LOGISTIC_COLOR, linewidth=2.6, zorder=7,
+            label=f"Logistic, slope:{logistic['slope']:.3g}")
     if np.isfinite(switch2["loglik"]):
         ax.step([0, switch2["tau1"], switch2["tau2"], n - 1],
                 [switch2["p1"], switch2["p2"], switch2["p3"], switch2["p3"]], where="post",
                 color=_SWITCH2_COLOR, linewidth=2.2, linestyle=":", zorder=5,
-                label=f"Switch2: tau = ({switch2['tau1']}, {switch2['tau2']}), "
-                      f"{switch2['p1']:.2f} -> {switch2['p2']:.2f} -> {switch2['p3']:.2f}")
-    ax.step([0, switch["tau"], n - 1],
-            [switch["p1"] + off, switch["p2"] + off, switch["p2"] + off], where="post",
-            color=_SWITCH_COLOR, linewidth=2.6, zorder=6,
-            label=f"Switch: tau = {switch['tau']}, {switch['p1']:.2f} -> {switch['p2']:.2f}")
-    ax.plot(grid, log_y - off, color=_LOGISTIC_COLOR, linewidth=2.6, zorder=7,
-            label=f"Logistic: slope = {logistic['slope']:.3f} "
-                  f"(start {logistic.get('start_label', '?')})")
+                label=f"Switch2, {_TAU}:{switch2['tau1']}|{switch2['tau2']}, "
+                      f"{switch2['p1']:.2f}|{switch2['p2']:.2f}|{switch2['p3']:.2f}")
     if qlearning_fits:
         _overlay_qlearning(ax, x, qlearning_fits)
     _mark_sessions(ax, prep["session_ends"])
-
-    best_bic = comparison["best_bic"]
-    rows = [f"{'model':<10}{'k':>3}{'AIC':>10}{'BIC':>10}"]
-    for m in MODEL_ORDER:
-        fit, score = comparison["fits"][m], comparison[m]
-        mark = " <- BIC" if m == best_bic else ""
-        if not fit.get("implemented", True):
-            rows.append(f"{m:<10}{score['k_params']:>3}{'n/a':>10}{'n/a':>10}  (not impl.)")
-        else:
-            rows.append(f"{m:<10}{score['k_params']:>3}{score['aic']:>10.1f}{score['bic']:>10.1f}{mark}")
-    rows.append(f"best: AIC {comparison['best_aic']}, BIC {best_bic}")
 
     ax.set_ylim(1.45, -0.35)  # inverted: SHORT on the lower row, LONG on the upper row
     if around_switch:
@@ -297,18 +343,30 @@ def plot_model_comparison(prep: dict, comparison: dict, qlearning_fits: dict | N
         ax.set_xlim(-1, max(n, 1))
     ax.set_yticks([0, 1])
     ax.set_yticklabels(["LONG", "SHORT"])
-    ax.set_xlabel("Trial (continuous across sessions)")
+    ax.set_xlabel("Trial")
     ax.set_ylabel("P(SHORT)")
     ax.set_title(f"{subject_label(prep)} - model comparison")
 
     # Legend and AIC/BIC table both outside the axes on the right: legend at the top, table at the
-    # bottom, so neither covers the trace.
+    # bottom, so neither covers the trace. Set apart, each gets its own figure and the axes widen.
+    apart = legends_apart(legend)
     ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0,
-              fontsize=6.5, ncol=1)
-    ax.text(1.02, 0.0, "\n".join(rows), transform=ax.transAxes, va="bottom", ha="left",
-            family="monospace", fontsize=6.5,
-            bbox=dict(boxstyle="round", facecolor="white", edgecolor="#cccccc", alpha=0.9))
-    fig.subplots_adjust(left=0.06, right=0.74, top=0.9, bottom=0.13)
+              fontsize=_KEY_FONTSIZE, ncol=1)
+    if not apart:
+        _score_table(ax, comparison, bbox=[1.02, 0.0, 0.3, 0.42])
+    fig.subplots_adjust(left=0.06, right=0.98 if apart else 0.74, top=0.9, bottom=0.13)
+
+    if show is not None:
+        show = ([show] if isinstance(show, (int, str)) else list(show)) + (
+            [_SESSION_LABEL] if len(prep["session_ends"]) else [])
+    entries = finish_figure(fig, legend, show)
+    if apart:
+        print(f"{subject_label(prep)} - model comparison")
+        legend_figure(entries, fontsize=_KEY_FONTSIZE)
+        table_fig, table_ax = plt.subplots(figsize=(2.6, 1.3))
+        table_ax.axis("off")
+        _score_table(table_ax, comparison, bbox=[0, 0, 1, 1])
+        show_apart(table_fig)
     return fig
 
 
@@ -387,7 +445,7 @@ def plot_qlearning_generative(prep: dict, qlearning_fits: dict, qlearning_bands:
         ax.set_ylabel("P(SHORT)")
         ax.legend(loc="upper right", fontsize=6.5, ncol=2)
 
-    np.atleast_1d(axes)[-1].set_xlabel("Trial (continuous across sessions)")
+    np.atleast_1d(axes)[-1].set_xlabel("Trial")
     fig.suptitle(f"{subject_label(prep)} - Q-learning generative predictions "
                  f"(model's own choices) vs the observed switch", fontsize=9)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
@@ -438,7 +496,7 @@ def plot_multistart(prep: dict, fits: list[dict], best: int, warm: int):
     ax.set_xlim(-1, max(n, 1))
     ax.set_yticks([0, 1])
     ax.set_yticklabels(["LONG", "SHORT"])
-    ax.set_xlabel("Trial (continuous across sessions)")
+    ax.set_xlabel("Trial")
     ax.set_ylabel("P(SHORT)")
     ax.set_title(f"{subject_label(prep)} - logistic multi-start diagnostic "
                  f"({len(fits)} initial conditions)")
@@ -542,9 +600,9 @@ def plot_qlearning_sweep(prep: dict, variant: str, fit: dict, sweep: list[dict],
     ax.set_xlim(-1, max(n, 1))
     ax.set_yticks([0, 1])
     ax.set_yticklabels(["LONG", "SHORT"])
-    ax.set_xlabel("Trial (continuous across sessions)")
+    ax.set_xlabel("Trial")
     ax.set_ylabel("P(SHORT)")
-    held = (f"Q0 = ({fit['q0_short']:.2f}, {fit['q0_long']:.2f})"
+    held =(f"Q0 = ({fit['q0_short']:.2f}, {fit['q0_long']:.2f})"
             + (f", kappa = {fit['kappa']:.2f}" if variant == "qlearn_perseveration" else ""))
     # Name which grid is drawn. The one-step-ahead grid carries the kappa * s_prev term, so with
     # a non-zero kappa held at ML it spikes on every choice flip -- that is the curve tracking

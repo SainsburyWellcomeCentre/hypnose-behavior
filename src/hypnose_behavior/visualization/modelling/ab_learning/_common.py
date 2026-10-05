@@ -13,6 +13,7 @@ import math
 
 import matplotlib.pyplot as plt
 
+from hypnose_behavior.io.save import tie
 from hypnose_behavior.modelling.ab_learning.data import load_ab_data
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "ZERO",
     "annotation_size",
     "figure",
+    "in_order",
     "index_bounds",
     "line_with_band",
     "require_data",
@@ -138,14 +140,31 @@ def index_bounds(rows):
 
 
 def line_with_band(ax, frame, x, y, lo, hi, color, label=None):
-    """A line of markers with its interval as a filled band; rows without ``y`` dropped."""
+    """A line of markers with its interval as a filled band; rows without ``y`` dropped.
+
+    The band is tied to the line's ``label``, so ``show`` hides the two together.
+    """
     frame = frame[frame[y].notna()].sort_values(x)
     if frame.empty:
         return
-    ax.fill_between(frame[x], frame[lo], frame[hi], color=color, alpha=BAND_ALPHA,
-                    linewidth=0)
+    band = ax.fill_between(frame[x], frame[lo], frame[hi], color=color, alpha=BAND_ALPHA,
+                           linewidth=0)
+    if label:
+        tie(band, label)
     ax.plot(frame[x], frame[y], color=color, linewidth=2, marker="o", markersize=5,
             markeredgecolor="white", markeredgewidth=1, label=label)
+
+
+def in_order(ax, order):
+    """``ax``'s legend handles and labels, those named in ``order`` first in that order.
+
+    Legend order is the numbering ``show`` uses, so a series whose presence varies by
+    animal goes last in ``order``, where it cannot shift the others.
+    """
+    handles, labels = ax.get_legend_handles_labels()
+    rank = {label: i for i, label in enumerate(order)}
+    pairs = sorted(zip(handles, labels), key=lambda pair: rank.get(pair[1], len(rank)))
+    return [h for h, _ in pairs], [lab for _, lab in pairs]
 
 
 def save_scope(sessions, subjid=None) -> dict:

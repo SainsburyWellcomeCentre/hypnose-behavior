@@ -13,7 +13,13 @@ from __future__ import annotations
 import numpy as np
 from scipy.special import logit
 
-from hypnose_behavior.io.save import save_figure
+from hypnose_behavior.io.save import (
+    finish_figure,
+    legend_figure,
+    save_figure,
+    show_suffix,
+    tie,
+)
 from hypnose_behavior.modelling.ab_learning.log_regression import (
     MIN_TRIALS,
     fit_session_models,
@@ -31,6 +37,7 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     SESSION_SPAN,
     annotation_size,
     figure,
+    in_order,
     require_data,
     save_scope,
     session_ticks,
@@ -43,15 +50,21 @@ __all__ = ["plot_gain_decomposition"]
 # Slot 1 for the gain inside a session, slot 2 for the gain across the night after it.
 _WITHIN = SERIES
 _OVERNIGHT = SECOND
+_WITHIN_LABEL = "within session"
+_OVERNIGHT_LABEL = "overnight"
+_GAP_LABEL = "spans a dropped session"
 # Each group of gains: which rows, the colour, whether the marker is hollow, the label.
 # Hollow marks a gain outside the paired within/overnight total -- the last session's
 # W_s, which has no boundary after it, and a boundary holding a dropped session.
 _GAIN_GROUPS = (
-    ("within", True, _WITHIN, False, "within session"),
+    ("within", True, _WITHIN, False, _WITHIN_LABEL),
     ("within", False, _WITHIN, True, "within, unpaired"),
-    ("overnight", True, _OVERNIGHT, False, "overnight"),
-    ("across_gap", True, _OVERNIGHT, True, "spans a dropped session"),
+    ("overnight", True, _OVERNIGHT, False, _OVERNIGHT_LABEL),
+    ("across_gap", True, _OVERNIGHT, True, _GAP_LABEL),
 )
+# Legend order, which numbers ``show``; the gap series, present only for some animals, last.
+_LEGEND_ORDER = (_WITHIN_LABEL, "within, unpaired", _OVERNIGHT_LABEL, "within, running total",
+                 "overnight, running total", _GAP_LABEL)
 
 # Accuracies labelled on the right of the top panel.
 _PROBABILITY_TICKS = (0.1, 0.25, 0.5, 0.75, 0.9, 0.97)
@@ -63,9 +76,10 @@ _PANEL_HEIGHT = 3.4
 
 
 def _save(fig, name, sessions, save, subjid=None):
+    """Save without the headline title, which the displayed figure keeps."""
     if not save:
         return
-    save_figure(fig, name, **save_scope(sessions, subjid))
+    save_figure(fig, name, titles=False, **save_scope(sessions, subjid))
 
 
 def _probability_axis(ax):
@@ -81,20 +95,28 @@ def _probability_axis(ax):
 
 
 def _plot_levels(ax, levels):
-    """The fitted log-odds of M_c: a segment per session, a step across each boundary."""
+    """The fitted log-odds of M_c: a segment per session, a step across each boundary.
+
+    Segments, edges and their intervals are tied to the within series and the steps to
+    the overnight one, so ``show`` builds both panels up together.
+    """
     start_x = levels["session_idx"].to_numpy()
     end_x = start_x + SESSION_SPAN
     start, end = levels["logit_start"].to_numpy(), levels["logit_end"].to_numpy()
 
     for x, lo, hi in ((start_x, levels["logit_start_lo"], levels["logit_start_hi"]),
                       (end_x, levels["logit_end_lo"], levels["logit_end_hi"])):
-        ax.vlines(x, lo, hi, color=_WITHIN, linewidth=3.5, alpha=BAND_ALPHA)
+        tie(ax.vlines(x, lo, hi, color=_WITHIN, linewidth=3.5, alpha=BAND_ALPHA),
+            _WITHIN_LABEL)
     for x0, x1, y0, y1 in zip(start_x, end_x, start, end):
-        ax.plot([x0, x1], [y0, y1], color=_WITHIN, linewidth=2, solid_capstyle="round")
+        tie(ax.plot([x0, x1], [y0, y1], color=_WITHIN, linewidth=2,
+                    solid_capstyle="round")[0], _WITHIN_LABEL)
     for x0, x1, y0, y1 in zip(end_x[:-1], start_x[1:], end[:-1], start[1:]):
-        ax.plot([x0, x1], [y0, y1], color=_OVERNIGHT, linewidth=1.6, linestyle=(0, (2, 1.5)))
-    ax.plot(np.r_[start_x, end_x], np.r_[start, end], linestyle="none", marker="o",
-            markersize=5.5, color=_WITHIN, markeredgecolor="white", markeredgewidth=1)
+        tie(ax.plot([x0, x1], [y0, y1], color=_OVERNIGHT, linewidth=1.6,
+                    linestyle=(0, (2, 1.5)))[0], _OVERNIGHT_LABEL)
+    tie(ax.plot(np.r_[start_x, end_x], np.r_[start, end], linestyle="none", marker="o",
+                markersize=5.5, color=_WITHIN, markeredgecolor="white",
+                markeredgewidth=1)[0], _WITHIN_LABEL)
     ax.axhline(0, **ZERO)
 
 
@@ -158,8 +180,8 @@ def _headline(share, test) -> str:
 
 
 def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
-                            mode="completed", min_trials=MIN_TRIALS, save=False,
-                            **selectors):
+                            mode="completed", min_trials=MIN_TRIALS, legend=None, show=None,
+                            save=False, **selectors):
     """Where each animal's accuracy changed: inside sessions, or between them.
 
         plot_gain_decomposition(data=ab)
@@ -174,10 +196,16 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
     boundary that follows one, with 95% intervals, and a thin running total through each
     component, which says whether its sum built up steadily or came from a session or
     two. The text above the panels is the animal's total change, the share of it that
-    happened between sessions, and the M_a against M_c test.
+    happened between sessions, and the M_a against M_c test; it is shown, not saved
+    (the same numbers are in `overnight_share` and `model_comparison`).
 
     A session too short to fit (under ``min_trials``) leaves a gap on the x axis, and
     the overnight step drawn across that gap spans more than one night.
+
+    ``legend`` and ``show`` follow the plotter convention. ``show`` numbers: 1 within
+    session, 2 within unpaired, 3 overnight, 4 and 5 the within and overnight running
+    totals, 6 spans a dropped session (only where one exists). Within and overnight take
+    the top panel's segments and steps with them.
     """
     if fits is None:
         data = require_data(subjids, dates, selectors, data)
@@ -187,7 +215,7 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
     tests = model_comparison(fits)
     tests = tests[tests["comparison"] == "M_a vs M_c"].set_index("subjid")
 
-    figures = {}
+    figures, entries = {}, []
     for subjid in sorted(fits):
         animal = levels[levels["subjid"] == subjid].sort_values("session_idx")
         fig, (top, bottom) = figure(n_rows=2, width=_WIDTH, height=_PANEL_HEIGHT)
@@ -207,9 +235,11 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
         # under the figure title; on the lower axes it would wedge between the two panels.
         top.set_title(_headline(shares.loc[subjid], tests.loc[subjid]), loc="left",
                       fontsize=annotation_size(), color=REFERENCE)
-        fig.legend(*bottom.get_legend_handles_labels(), loc="outside lower center", ncols=3,
+        fig.legend(*in_order(bottom, _LEGEND_ORDER), loc="outside lower center", ncols=3,
                    frameon=False, fontsize=annotation_size())
-        _save(fig, f"ab_learning_gain_decomposition_sub-{subjid:03d}",
+        entries += finish_figure(fig, legend, show)
+        _save(fig, f"ab_learning_gain_decomposition{show_suffix(show)}_sub-{subjid:03d}",
               fits[subjid]["sessions"], save, subjid)
         figures[subjid] = fig
+    legend_figure(entries, fontsize=annotation_size())
     return figures

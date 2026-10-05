@@ -5,12 +5,15 @@ already-loaded frames as ``data=`` -- and draws **one figure per animal**, x = t
 odour-discrimination sessions in order, labelled by session number. Every proportion is
 drawn with its 95% Wilson interval. Returns ``{subjid: Figure}``; ``save=True`` files each
 figure under its own animal with `io.save.save_figure`.
+
+`plot_failed_attempt_accuracy` and `plot_lose_shift` take ``legend`` and ``show`` (plotter
+convention, `hypnose_helpers.viz.plotter`).
 """
 from __future__ import annotations
 
 import numpy as np
 
-from hypnose_behavior.io.save import save_figure
+from hypnose_behavior.io.save import finish_figure, legend_figure, save_figure, show_suffix
 from hypnose_behavior.modelling.ab_learning.diagnostics import (
     PRIOR_GROUPS,
     failed_attempt_accuracy,
@@ -67,17 +70,20 @@ def plot_initiation_rate(subjids=None, dates=None, *, data=None, save=False, **s
     return figures
 
 
-def plot_failed_attempt_accuracy(subjids=None, dates=None, *, data=None, save=False,
-                                 **selectors):
+def plot_failed_attempt_accuracy(subjids=None, dates=None, *, data=None, legend=None,
+                                 show=None, save=False, **selectors):
     """D2: port-choice accuracy after failed attempts next to completed-trial accuracy.
 
     Top: accuracy of completed trials, of failed attempts with a poke that led to a port
     visit, and of zero-poke failed attempts that did. The grey line is chance.
     Bottom: the share of failed attempts followed by a port visit.
+
+    ``show`` numbers: 1 completed trials, 2 failed attempts, 3 failed attempts with no
+    poke; each hides in both panels, with its band.
     """
     data = require_data(subjids, dates, selectors, data)
     acc = failed_attempt_accuracy(data)
-    figures = {}
+    figures, entries = {}, []
     for subjid in sorted(acc["subjid"].unique()):
         frame = acc[acc["subjid"] == subjid]
         fig, (top, bottom) = figure(n_rows=2, height=3.6)
@@ -97,18 +103,24 @@ def plot_failed_attempt_accuracy(subjids=None, dates=None, *, data=None, save=Fa
         session_ticks(bottom, frame)
         fig.legend(*top.get_legend_handles_labels(), loc="outside lower center", ncols=2,
                    frameon=False, fontsize=text_size() * 0.7)
-        _save(fig, f"ab_learning_failed_attempt_accuracy_sub-{subjid:03d}", data, save,
-              subjid)
+        entries += finish_figure(fig, legend, show)
+        _save(fig, f"ab_learning_failed_attempt_accuracy{show_suffix(show)}_sub-{subjid:03d}",
+              data, save, subjid)
         figures[subjid] = fig
+    legend_figure(entries, fontsize=text_size() * 0.7)
     return figures
 
 
-def plot_lose_shift(subjids=None, dates=None, *, data=None, save=False, **selectors):
+def plot_lose_shift(subjids=None, dates=None, *, data=None, legend=None, show=None,
+                    save=False, **selectors):
     """D3: completed-trial accuracy by the failed attempt right before the trial.
 
     One figure per animal plus one pooled over them, keyed ``"pooled"``; each group is
     labelled with its trial count. Elimination would show as ``wrong port`` above
     ``none``; the grey line is chance.
+
+    No legend: the x axis names the groups, so ``legend`` changes nothing. ``show``
+    picks groups, numbered left to right: 1 none, 2 no visit, 3 wrong port, 4 correct port.
     """
     data = require_data(subjids, dates, selectors, data)
     per_animal = lose_shift_summary(data, by=("subjid",))
@@ -124,16 +136,21 @@ def plot_lose_shift(subjids=None, dates=None, *, data=None, save=False, **select
         fig, (ax,) = figure(width=5.6, height=4.6)
         err = np.vstack([frame["accuracy"] - frame["accuracy_lo"],
                          frame["accuracy_hi"] - frame["accuracy"]])
-        ax.errorbar(x, frame["accuracy"], yerr=err, fmt="o", color=SERIES, markersize=7,
-                    markeredgecolor="white", markeredgewidth=1, elinewidth=2, capsize=0)
+        # One errorbar per group, labelled, so ``show`` can pick groups.
+        for i, group in enumerate(groups):
+            ax.errorbar(x[i], frame["accuracy"].iloc[i], yerr=err[:, i:i + 1], fmt="o",
+                        color=SERIES, markersize=7, markeredgecolor="white",
+                        markeredgewidth=1, elinewidth=2, capsize=0,
+                        label=_GROUP_LABELS[group].replace("\n", " "))
         ax.axhline(0.5, **ZERO)
         style_axis(ax, ylabel="Accuracy")
         ax.set_xticks(x)
         ax.set_xticklabels([f"{_GROUP_LABELS[g]}\n{int(n)}" for g, n in zip(groups, frame["n"])])
         ax.set_xlim(-0.5, len(groups) - 0.5)
         ax.set_xlabel("Attempt before (n trials)")
-        name = ("ab_learning_lose_shift_pooled" if subjid is None
-                else f"ab_learning_lose_shift_sub-{subjid:03d}")
+        finish_figure(fig, legend, show)
+        name = (f"ab_learning_lose_shift{show_suffix(show)}_pooled" if subjid is None
+                else f"ab_learning_lose_shift{show_suffix(show)}_sub-{subjid:03d}")
         _save(fig, name, data, save, subjid)
         figures["pooled" if subjid is None else subjid] = fig
     return figures

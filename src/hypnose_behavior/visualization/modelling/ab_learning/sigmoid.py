@@ -6,18 +6,28 @@ animal**. Returns ``{subjid: Figure}``; ``save=True`` files each figure under it
 animal with `io.save.save_figure`.
 
 - `plot_accuracy_sigmoid` -- the accuracy fits against excess correct and binned accuracy
-  over the row index, and the lnL surface over (center, width).
+  over the row index, and, as a second figure, the lnL surface over (center, width).
 - `plot_sigmoid_anchors`  -- every fit on task time: the 1.1 running counts with each
   fit's expected count, and the rates and accuracy per session with the fitted curves.
 """
 from __future__ import annotations
 
 import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
+import pandas as pd
 from matplotlib.lines import Line2D
+from matplotlib.transforms import offset_copy
 
-from hypnose_behavior.io.save import save_figure
+from hypnose_behavior.io.save import (
+    finish_figure,
+    legend_figure,
+    legends_apart,
+    save_figure,
+    show_suffix,
+    tie,
+)
 from hypnose_behavior.modelling.ab_learning.data import session_bounds
 from hypnose_behavior.modelling.ab_learning.diagnostics import wilson_interval
 from hypnose_behavior.modelling.ab_learning.sigmoid import (
@@ -27,6 +37,7 @@ from hypnose_behavior.modelling.ab_learning.sigmoid import (
     expected_excess,
     fit_accuracy,
     fit_rate,
+    variant_test,
 )
 from hypnose_behavior.visualization.modelling.ab_learning._common import (
     BAND_ALPHA,
@@ -41,10 +52,11 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     require_data,
     save_scope,
     style_axis,
+    text_size,
 )
 from hypnose_behavior.visualization.modelling.ab_learning.cumulative import CURVE_STYLES
 
-__all__ = ["plot_accuracy_sigmoid", "plot_sigmoid_anchors"]
+__all__ = ["SHOW_FITS", "plot_accuracy_sigmoid", "plot_sigmoid_anchors"]
 
 # Rows per accuracy bin drawn behind the fits.
 _BIN = 50
@@ -57,15 +69,34 @@ _CONTOUR = -1.92
 _SURFACE_CMAP = mcolors.LinearSegmentedColormap.from_list(
     "ab_surface", ["#f4f8fd", "#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"])
 
-# The observed choices keep excess correct's colour from 1.1; the fits take blue and grey.
-_VARIANT_STYLES = {
-    "free": dict(color=SERIES, linewidth=2.2, zorder=4, label="fit, initial free"),
-    "chance": dict(color=REFERENCE, linewidth=2.0, linestyle=(0, (5, 2)), zorder=3,
-                   label="fit, initial 0.5"),
+# The observed choices keep excess correct's colour from 1.1, drawn thick; the fits run
+# over them closely dotted in a dark colour, so the data shows between the dots.
+_OBSERVED_LABEL = "Excess correct"
+_OBSERVED = dict(color=SECOND, linewidth=2.8, zorder=1)
+_DATA = dict(color=SECOND, markersize=6, zorder=1)
+_DOTTED = dict(linewidth=2.6, linestyle=(0, (1, 1.6)), dash_capstyle="round")
+_FIT_STYLES = {
+    "free": dict(color="#1c5cab", zorder=4, **_DOTTED),
+    "chance": dict(color="#4f4e4a", zorder=3, **_DOTTED),
 }
-_OTHER_OPTIMA = dict(color=SERIES, linewidth=1.2, linestyle=":", zorder=2)
-_OBSERVED = dict(color=SECOND, linewidth=1.8, zorder=1)
-_DATA = dict(color=SECOND, markersize=5, zorder=1)
+_OTHER_OPTIMA = (dict(color=SERIES, linewidth=1.4, linestyle=(0, (1, 2.5)),
+                      dash_capstyle="round", alpha=0.6, zorder=2), "other optima")
+
+# `plot_accuracy_sigmoid`'s ``show_fit``: the variant picked per animal, either one, or
+# both (None).
+SHOW_FITS = ("best", "free", "chance", None)
+
+# The ∇ marking k_s: its height as a share of the tick-label size, and its gap (points)
+# above the observed line.
+_SWITCH_SIZE = 0.7
+_SWITCH_GAP = 3.0
+
+# `plot_sigmoid_anchors`' legend labels, and its midpoint table's columns.
+_ANCHOR_LABELS = {"initiations": "Initiations", "excess": "Excess correct",
+                  "rewards": "Rewards"}
+# Its legend's sample lines, in font sizes: long enough to show two of the fit's dashes,
+# which scale with the line width, so "Sigmoid fit" reads as dashed.
+_ANCHOR_HANDLE_LENGTH = 2.5
 
 # A fit drawn over its observed count: the count's colour, dashed.
 _FITTED = dict(linewidth=2.2, linestyle=(0, (4, 2)), alpha=1.0, zorder=5)
@@ -98,62 +129,99 @@ def _binned(rows):
     return bins.assign(p=bins["c"] / bins["n"], lo=lo, hi=hi)
 
 
-def _curves(fits, subjid):
-    """``(fit, rank, style)`` for each curve to draw: every variant's best, and the free
-    fit's other optima."""
+def _fit_label(variant, fit):
+    """``fit, pᵢ = 0.5``, or ``fit, pᵢ free = 0.46`` with the animal's fitted value."""
+    if variant == "chance":
+        return "fit, pᵢ = 0.5"
+    return f"fit, pᵢ free = {fit['optima'].iloc[0]['initial']:.2f}"
+
+
+def _shown_variants(fits, subjid, show_fit):
+    """The variants to draw for one animal, the one that leads first."""
+    present = [v for v in VARIANTS if subjid in fits.get(v, {})]
+    if show_fit is None:
+        return present
+    if show_fit == "best":
+        if len(present) < 2:
+            return present
+        return [variant_test({v: {subjid: fits[v][subjid]} for v in VARIANTS})
+                ["picked"].iloc[0]]
+    return [show_fit] if show_fit in present else []
+
+
+def _curves(fits, subjid, variants):
+    """``(fit, rank, style, series)`` for each curve to draw: each variant's best, and the
+    free fit's other optima when it is drawn; ``series`` is the curve's legend label."""
     out = []
-    for variant, style in _VARIANT_STYLES.items():
-        fit = fits.get(variant, {}).get(subjid)
-        if fit is None:
-            continue
-        out.append((fit, 0, style))
+    for variant in variants:
+        fit = fits[variant][subjid]
+        out.append((fit, 0, _FIT_STYLES[variant], _fit_label(variant, fit)))
         if variant == "free":
-            out += [(fit, rank, {**_OTHER_OPTIMA, "label": "other optima" if rank == 1
-                                 else None})
-                    for rank in range(1, len(fit["optima"]))]
+            out += [(fit, rank, *_OTHER_OPTIMA) for rank in range(1, len(fit["optima"]))]
     return out
 
 
-def _headline(fits, subjid):
-    """The best free fit, the next optimum, and what fixing the initial at 0.5 costs."""
+def _headline(fits, subjid, lead):
+    """The leading fit, its next optimum, and what fixing pᵢ at 0.5 costs."""
     lines = []
-    free, chance = (fits.get(v, {}).get(subjid) for v in VARIANTS)
-    if free is not None:
-        best = free["optima"].iloc[0]
+    fit = fits.get(lead, {}).get(subjid)
+    if fit is not None:
+        best = fit["optima"].iloc[0]
         where = f"ses {best['ses']}" if best["inside"] else "outside the data"
         lines.append(f"k_s {best['center']:.0f} ({where}), "
                      + _width_text(best["width"], best["width_lo"], best["width_hi"]))
-        if len(free["optima"]) > 1:
-            second = free["optima"].iloc[1]
+        if len(fit["optima"]) > 1:
+            second = fit["optima"].iloc[1]
             lines.append(f"next optimum: k_s {second['center']:.0f}, "
                          f"ΔlnL {second['delta_lnl']:.1f}")
+    free, chance = (fits.get(v, {}).get(subjid) for v in VARIANTS)
     if free is not None and chance is not None:
-        lines.append("initial 0.5: ΔlnL "
+        lines.append("pᵢ = 0.5: ΔlnL "
                      f"{free['optima']['lnl'].iloc[0] - chance['optima']['lnl'].iloc[0]:.1f}")
-    return "\n".join(lines)
+    return lines
 
 
 def _draw_excess(ax, rows, curves):
-    """Observed excess correct over the row count, and each curve's expected excess."""
+    """Observed excess correct over the row count, and each curve's expected excess; the
+    first curve of a series carries its label, the rest are tied to it."""
     count = np.r_[0, rows["k"].to_numpy() + 1]
     observed = np.r_[0.0, np.cumsum(rows["y"].to_numpy() - 0.5)]
-    ax.plot(count, observed, drawstyle="steps-post", label="observed", **_OBSERVED)
-    for fit, rank, style in curves:
-        ax.plot(count, np.r_[0.0, expected_excess(fit, rank)], **style)
+    ax.plot(count, observed, drawstyle="steps-post", label=_OBSERVED_LABEL, **_OBSERVED)
+    labelled = set()
+    for fit, rank, style, series in curves:
+        line, = ax.plot(count, np.r_[0.0, expected_excess(fit, rank)], **style)
+        if series in labelled:
+            tie(line, series)
+        else:
+            line.set_label(series)
+            labelled.add(series)
     ax.axhline(0, **ZERO)
 
 
+def _mark_switch(ax, rows, center):
+    """A solid black ∇ at ``k_s``, sitting just above the observed excess-correct line,
+    the size of a tick label."""
+    size = text_size() * _SWITCH_SIZE
+    observed = np.cumsum(rows["y"].to_numpy() - 0.5)
+    y = np.interp(center, rows["k"].to_numpy(dtype=float) + 1, observed)
+    above = offset_copy(ax.transData, fig=ax.figure, y=size / 2 + _SWITCH_GAP, units="points")
+    marker, = ax.plot(center, y, transform=above, marker="v", markersize=size, color="black",
+                      linestyle="none", zorder=6, clip_on=False)
+    return marker
+
+
 def _draw_accuracy(ax, rows, curves):
-    """Accuracy per `_BIN` rows and each curve's p(k)."""
+    """Accuracy per `_BIN` rows and each curve's p(k), tied to their series."""
     k = rows["k"].to_numpy(dtype=float)
     bins = _binned(rows)
     spread = np.clip([bins["p"] - bins["lo"], bins["hi"] - bins["p"]], 0, None)
     ax.errorbar(bins["k"], bins["p"], yerr=spread, fmt="o", elinewidth=1, capsize=0,
-                label=f"per {_BIN}", **_DATA)
-    for fit, rank, style in curves:
+                label=_OBSERVED_LABEL, **_DATA)
+    for fit, rank, style, series in curves:
         optimum = fit["optima"].iloc[rank]
-        ax.plot(k, erf_curve(k, optimum["initial"], optimum["final"], optimum["center"],
-                             optimum["width"]), **{**style, "label": None})
+        line, = ax.plot(k, erf_curve(k, optimum["initial"], optimum["final"],
+                                     optimum["center"], optimum["width"]), **style)
+        tie(line, series)
     ax.axhline(0.5, **ZERO)
 
 
@@ -174,38 +242,56 @@ def _draw_surface(ax, fit):
         ax.annotate(str(int(optimum["rank"]) + 1), (x, y), xytext=(6, 4),
                     textcoords="offset points", fontsize=annotation_size(), zorder=7)
     ax.set_yscale("log")
+    ax.yaxis.set_major_locator(mticker.LogLocator(base=10, numticks=10))
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:g}"))
     ax.yaxis.set_minor_formatter(mticker.NullFormatter())
     ax.set_ylabel("Width")
     ax.spines[["top", "right"]].set_visible(False)
-    bar_ax = ax.inset_axes([0.72, 1.02, 0.26, 0.05])
-    bar = ax.figure.colorbar(mesh, cax=bar_ax, orientation="horizontal",
-                             ticks=[_FLOOR, _FLOOR / 2, 0])
+    # On top, right-aligned: the layout makes room for it and its label, and the axis keeps
+    # the fit figure's width, so the two line up on a slide.
+    bar = ax.figure.colorbar(mesh, ax=ax, location="top", shrink=0.25, aspect=12,
+                             anchor=(1.0, 0.0), ticks=[_FLOOR, _FLOOR / 2, 0])
     bar.ax.tick_params(labelsize=annotation_size(), length=2)
-    bar.ax.set_title("ΔlnL", fontsize=annotation_size(), loc="left")
+    bar.set_label("ΔlnL", fontsize=annotation_size())
 
 
 def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="completed",
-                          fits=None, save=False, **selectors):
-    """The accuracy sigmoid over the row index, one figure per animal.
+                          fits=None, show_fit="best", surface=True, legend=None, show=None,
+                          save=False, **selectors):
+    """The accuracy sigmoid over the row index: a fit figure and a surface figure per
+    animal.
 
         acc = {v: fit_accuracy(ab, "completed", v) for v in VARIANTS}
-        plot_accuracy_sigmoid(fits=acc)
+        figs = plot_accuracy_sigmoid(fits=acc)          # figs[60]["fit"], figs[60]["surface"]
+        plot_accuracy_sigmoid(fits=acc, show_fit=None)  # both variants
 
     ``fits`` maps a `VARIANTS` entry to its `fit_accuracy` result; without it both are
-    fitted from the selection in ``mode``. Orange is the observed choices, blue the free
-    fit, dashed grey the fit with the initial accuracy at 0.5, dotted blue the free fit's
-    other optima.
+    fitted from the selection in ``mode``. ``show_fit`` is ``"best"`` (each animal's pick
+    of `sigmoid.variant_test`), ``"free"``, ``"chance"``, or None for both; the leading fit
+    -- the one drawn, the free one when both are -- sets the shaded ``k_s +/- w``, the
+    summary and the surface. Returns ``{subjid: {"fit": Figure, "surface": Figure}}``,
+    without ``"surface"`` when ``surface=False``.
+
+    Fit figure -- the observed choices thick orange, each fit closely dotted over them
+    (dark blue pᵢ free, dark grey pᵢ = 0.5), the free fit's other optima faint dotted blue:
 
     - top: observed excess correct (every row) and each fit's expected excess,
-      ``cumsum(p(k) - 0.5)``, the running sum of the middle panel's curve; the free fit's
-      ``k_s +/- w`` shaded. Where orange leaves a fitted line, the one-change curve misses
-      the data.
-    - middle: accuracy per 50 rows (Wilson 95%) and each fit's p(k).
-    - bottom: the free fit's lnL over (center, width), relative to its best grid point,
-      with the 95% contour and the optima numbered by rank. Separate dark islands are
-      separate optima.
+      ``cumsum(p(k) - 0.5)``, the running sum of the bottom panel's curve; a black ∇ above
+      the data marks the leading fit's k_s. Where orange leaves a fitted line, the
+      one-change curve misses the data.
+    - bottom: accuracy per 50 rows (Wilson 95%) and each fit's p(k).
+
+    Surface figure: the leading fit's lnL over (center, width), relative to its best grid
+    point, with the 95% contour and the optima numbered by rank. Separate dark islands are
+    separate optima.
+
+    ``legend`` and ``show`` follow the plotter convention (`hypnose_helpers.viz.plotter`);
+    ``show`` numbers the series in legend order, observed first. The fit labels carry the
+    animal's own pᵢ, so a legend set apart is one small figure per animal, and the fit
+    summary is printed instead of drawn.
     """
+    if show_fit not in SHOW_FITS:
+        raise ValueError(f"show_fit must be one of {SHOW_FITS}, got {show_fit!r}")
     if fits is None:
         data = require_data(subjids, dates, selectors, data)
         fits = {variant: fit_accuracy(data, mode, variant) for variant in VARIANTS}
@@ -215,36 +301,56 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
     for subjid in sorted(reference):
         rows, mode = reference[subjid]["rows"], reference[subjid]["mode"]
         spans = index_bounds(rows)
-        curves = _curves(fits, subjid)
         unit = "trials" if mode == "completed" else "choice attempts"
+        variants = _shown_variants(fits, subjid, show_fit)
+        lead = variants[0] if variants else None
+        lead_fit = fits[lead][subjid] if lead else None
 
-        fig, (excess, accuracy, surface) = figure(3, width=_WIDTH, height=_HEIGHT)
-        for ax in (accuracy, surface):
-            ax.sharex(excess)
+        fig, (excess, accuracy) = figure(2, width=_WIDTH, height=_HEIGHT)
+        accuracy.sharex(excess)
+        curves = _curves(fits, subjid, variants)
         _draw_excess(excess, rows, curves)
         _draw_accuracy(accuracy, rows, curves)
-        free = fits.get("free", {}).get(subjid)
-        if free is not None:
-            best = free["optima"].iloc[0]
+        if lead_fit is not None:
+            best = lead_fit["optima"].iloc[0]
             for ax in (excess, accuracy):
-                ax.axvspan(best["center"] - best["width"], best["center"] + best["width"],
-                           color=SERIES, alpha=BAND_ALPHA / 2, linewidth=0, zorder=0)
-            _draw_surface(surface, free)
-        for ax in (excess, accuracy, surface):
+                tie(ax.axvspan(best["center"] - best["width"], best["center"] + best["width"],
+                               color=_FIT_STYLES[lead]["color"], alpha=BAND_ALPHA / 2,
+                               linewidth=0, zorder=0),
+                    _fit_label(lead, lead_fit))
+            if best["inside"]:
+                tie(_mark_switch(excess, rows, best["center"]), _fit_label(lead, lead_fit))
+        for ax in (excess, accuracy):
             for start in spans["start"].to_numpy()[1:]:
                 ax.axvline(start, **BOUNDARY)
-
         style_axis(excess, ylabel="Excess correct", ylim=None)
-        excess.text(0.01, 0.97, _headline(fits, subjid), transform=excess.transAxes,
-                    fontsize=annotation_size(), va="top", ha="left")
-        excess.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
-        excess.set_xlim(0, len(rows))
         style_axis(accuracy, ylabel="Accuracy", ylim=(0, 1.02))
-        accuracy.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
-        surface.set_xlabel(unit.capitalize())
-        _save(fig, f"ab_learning_accuracy_sigmoid_{mode}_sub-{subjid:03d}", rows, save,
-              subjid)
-        figures[int(subjid)] = fig
+        excess.set_xlim(0, len(rows))
+        accuracy.set_xlabel(unit.capitalize())
+        excess.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
+
+        headline = _headline(fits, subjid, lead)
+        if legends_apart(legend):
+            print(f"sub-{subjid:03d} | {mode}: " + " | ".join(headline))
+        else:
+            excess.text(0.01, 0.97, "\n".join(headline), transform=excess.transAxes,
+                        fontsize=annotation_size(), va="top", ha="left")
+        entries = finish_figure(fig, legend, show)
+        _save(fig, f"ab_learning_accuracy_sigmoid{show_suffix(show)}_{mode}_sub-{subjid:03d}",
+              rows, save, subjid)
+        legend_figure(entries, fontsize=annotation_size())
+        figures[int(subjid)] = {"fit": fig}
+
+        if surface and lead_fit is not None:
+            fig, (ax,) = figure(width=_WIDTH, height=_HEIGHT)
+            _draw_surface(ax, lead_fit)
+            for start in spans["start"].to_numpy()[1:]:
+                ax.axvline(start, **BOUNDARY)
+            ax.set_xlim(0, len(rows))
+            ax.set_xlabel(unit.capitalize())
+            _save(fig, f"ab_learning_accuracy_sigmoid_surface_{mode}_sub-{subjid:03d}", rows,
+                  save, subjid)
+            figures[int(subjid)]["surface"] = fig
     return figures
 
 
@@ -269,14 +375,15 @@ def _observed_and_fitted(name, fit, span):
 
 
 def _draw_counts(ax, fits, span):
-    """The scaled running counts and their fits; returns each fit's midpoint in hours."""
+    """The scaled running counts and their fits, with the figure's one legend; returns
+    each fit's midpoint in hours."""
     midpoints = {}
     for name, fit in fits.items():
         style = CURVE_STYLES[name]
         x, observed, fitted_x, fitted, (mid_x, mid_y) = _observed_and_fitted(name, fit, span)
         scale = float(np.abs(observed).max()) or 1.0
         ax.plot(x, observed / scale, drawstyle="steps-post",
-                **{**style, "label": f"{style['label']}, midpoint {mid_x:.1f} h"})
+                **{**style, "label": _ANCHOR_LABELS[name]})
         ax.plot(fitted_x, fitted / scale, color=style["color"], **_FITTED)
         ax.plot(mid_x, mid_y / scale, color=style["color"], **_MIDPOINT)
         midpoints[name] = mid_x
@@ -285,8 +392,9 @@ def _draw_counts(ax, fits, span):
     handles, labels = ax.get_legend_handles_labels()
     handles.append(Line2D([], [], color=REFERENCE, **{k: v for k, v in _FITTED.items()
                                                        if k != "zorder"}))
-    labels.append("sigmoid fit")
-    ax.legend(handles, labels, frameon=False, fontsize=annotation_size(), loc="upper left")
+    labels.append("Sigmoid fit")
+    ax.legend(handles, labels, frameon=False, fontsize=annotation_size(), loc="upper left",
+              handlelength=_ANCHOR_HANDLE_LENGTH)
     return midpoints
 
 
@@ -311,11 +419,9 @@ def _draw_rates(ax, data, spans, fits, subjid, span):
         _segments(ax, rates.assign(rate=rates[name] / hours), "rate", colour)
         best = fits[name]["optima"].iloc[0]
         ax.plot(clock, erf_curve(clock, best["initial"], best["final"], best["center"],
-                                 best["width"]), color=colour, linewidth=2.2, zorder=3,
-                label=name)
+                                 best["width"]), color=colour, linewidth=2.2, zorder=3)
     style_axis(ax, ylabel="Per hour", ylim=None)
     ax.set_ylim(bottom=0)
-    ax.legend(frameon=False, fontsize=annotation_size(), loc="upper left")
 
 
 def _draw_accuracy_on_time(ax, spans, fit):
@@ -329,14 +435,13 @@ def _draw_accuracy_on_time(ax, spans, fit):
     k = rows["k"].to_numpy(dtype=float)
     ax.plot(rows["hours"], erf_curve(k, best["initial"], best["final"], best["center"],
                                      best["width"]),
-            color=colour, linewidth=2.2, zorder=3, label="accuracy")
+            color=colour, linewidth=2.2, zorder=3)
     ax.axhline(0.5, **ZERO)
     style_axis(ax, ylabel="Accuracy", ylim=(0, 1.02))
-    ax.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
 
 
 def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
-                         engagement=None, rewards=None, save=False, **selectors):
+                         engagement=None, rewards=None, legend=None, save=False, **selectors):
     """Every sigmoid fit on task time, as running counts and as rates, one figure per
     animal.
 
@@ -357,6 +462,10 @@ def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
 
     Rewards are initiation rate times accuracy, so their midpoint says which of the two
     drove the reward rate, not a third change.
+
+    One legend, on the top panel; the colours carry down. ``legend`` follows the plotter
+    convention, and set apart it is one figure for all animals. The midpoints are printed
+    as a table, one row per animal.
     """
     data = require_data(subjids, dates, selectors, data)
     accuracy = accuracy if accuracy is not None else fit_accuracy(data)
@@ -364,7 +473,7 @@ def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
     rewards = rewards if rewards is not None else fit_rate(data, "rewards")
     bounds = session_bounds(data)
 
-    figures = {}
+    figures, entries, table = {}, [], []
     for subjid in sorted(set(accuracy) & set(engagement) & set(rewards)):
         spans = bounds[bounds["subjid"] == subjid].sort_values("session_idx")
         span = float(spans["end"].max())
@@ -384,7 +493,14 @@ def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
                            linewidth=1.2, zorder=2)
         counts.set_xlim(0, span)
         acc.set_xlabel("Task time (h)")
+        entries += finish_figure(fig, legend)
         _save(fig, f"ab_learning_sigmoid_anchors_sub-{subjid:03d}", data["sessions"], save,
               subjid)
         figures[int(subjid)] = fig
+        table.append({"subjid": int(subjid),
+                      **{_ANCHOR_LABELS[name]: hours for name, hours in midpoints.items()}})
+    with plt.rc_context({"legend.handlelength": _ANCHOR_HANDLE_LENGTH}):
+        legend_figure(entries, fontsize=annotation_size())
+    print("Sigmoid midpoints (task time, h):")
+    print(pd.DataFrame(table).to_string(index=False, float_format=lambda v: f"{v:.1f}"))
     return figures

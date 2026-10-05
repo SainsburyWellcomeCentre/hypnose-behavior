@@ -12,6 +12,8 @@ files each figure under its own animal with `io.save.save_figure`.
   against what M_a and M_c predict for the same bins.
 - `plot_session_profiles`  -- accuracy by fraction of the session, one panel per session,
   against that session's M_c line.
+
+All three take ``legend`` and ``show`` (plotter convention, `hypnose_helpers.viz.plotter`).
 """
 from __future__ import annotations
 
@@ -20,7 +22,13 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 
-from hypnose_behavior.io.save import save_figure
+from hypnose_behavior.io.save import (
+    finish_figure,
+    legend_figure,
+    save_figure,
+    show_suffix,
+    tie,
+)
 from hypnose_behavior.modelling.ab_learning.log_regression import (
     MIN_TRIALS,
     fit_session_models,
@@ -44,6 +52,7 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     SESSION_SPAN,
     annotation_size,
     figure,
+    in_order,
     line_with_band,
     require_data,
     save_scope,
@@ -57,13 +66,20 @@ __all__ = ["plot_edge_gains", "plot_position_profile", "plot_session_profiles"]
 # Slot 1 inside a session, slot 2 across the night after it.
 _WITHIN = SERIES
 _ACROSS = SECOND
+_WITHIN_LABEL = "within session"
+_ACROSS_LABEL = "across sessions"
+_GAP_LABEL = "spans an unfitted session"
 # Each group of gains: the component, the colour, whether the marker is hollow, the label.
 # Hollow marks a boundary with an unfitted session inside it.
 _GAIN_GROUPS = (
-    ("within", _WITHIN, False, "within session"),
-    ("across", _ACROSS, False, "across sessions"),
-    ("across_gap", _ACROSS, True, "spans an unfitted session"),
+    ("within", _WITHIN, False, _WITHIN_LABEL),
+    ("across", _ACROSS, False, _ACROSS_LABEL),
+    ("across_gap", _ACROSS, True, _GAP_LABEL),
 )
+# Legend orders, which number ``show``; a series present only for some animals goes last.
+_EDGE_ORDER = (_WITHIN_LABEL, _ACROSS_LABEL, "within, running total", "across, running total",
+               _GAP_LABEL)
+_PROFILE_ORDER = ("observed", "M_c fit", "M_a fit")
 
 # Same frame as the regression figure: two stacked panels of per-session detail.
 _WIDTH = 10.0
@@ -91,17 +107,20 @@ def _fits(subjids, dates, data, fits, mode, min_trials, selectors) -> dict:
     return fits
 
 
-def _save(fig, name, fit, save):
+def _save(fig, name, fit, save, titles=True):
+    """``titles=False`` leaves the titles out of the file; the displayed figure keeps them."""
     if not save:
         return
-    save_figure(fig, name, **save_scope(fit["sessions"], fit["subjid"]))
+    save_figure(fig, name, titles=titles, **save_scope(fit["sessions"], fit["subjid"]))
 
 
 def _plot_windows(ax, windows):
     """First- and last-window accuracy per session: a segment inside, a step across.
 
     A session whose two windows overlap is joined by a dotted segment rather than a solid
-    one, since its within gain is left undefined.
+    one, since its within gain is left undefined. Segments, windows and their intervals
+    are tied to the within series and the steps to the across one, so ``show`` builds
+    both panels up together.
     """
     start_x = windows["session_idx"].to_numpy()
     end_x = start_x + SESSION_SPAN
@@ -109,14 +128,17 @@ def _plot_windows(ax, windows):
 
     for x, lo, hi in ((start_x, windows["first_lo"], windows["first_hi"]),
                       (end_x, windows["last_lo"], windows["last_hi"])):
-        ax.vlines(x, lo, hi, color=_WITHIN, linewidth=3.5, alpha=BAND_ALPHA)
+        tie(ax.vlines(x, lo, hi, color=_WITHIN, linewidth=3.5, alpha=BAND_ALPHA),
+            _WITHIN_LABEL)
     for x0, x1, y0, y1, disjoint in zip(start_x, end_x, first, last, windows["disjoint"]):
-        ax.plot([x0, x1], [y0, y1], color=_WITHIN, linewidth=2, solid_capstyle="round",
-                linestyle="-" if disjoint else ":")
+        tie(ax.plot([x0, x1], [y0, y1], color=_WITHIN, linewidth=2, solid_capstyle="round",
+                    linestyle="-" if disjoint else ":")[0], _WITHIN_LABEL)
     for x0, x1, y0, y1 in zip(end_x[:-1], start_x[1:], last[:-1], first[1:]):
-        ax.plot([x0, x1], [y0, y1], color=_ACROSS, linewidth=1.6, linestyle=(0, (2, 1.5)))
-    ax.plot(np.r_[start_x, end_x], np.r_[first, last], linestyle="none", marker="o",
-            markersize=5.5, color=_WITHIN, markeredgecolor="white", markeredgewidth=1)
+        tie(ax.plot([x0, x1], [y0, y1], color=_ACROSS, linewidth=1.6,
+                    linestyle=(0, (2, 1.5)))[0], _ACROSS_LABEL)
+    tie(ax.plot(np.r_[start_x, end_x], np.r_[first, last], linestyle="none", marker="o",
+                markersize=5.5, color=_WITHIN, markeredgecolor="white",
+                markeredgewidth=1)[0], _WITHIN_LABEL)
     ax.axhline(0.5, **ZERO)
 
 
@@ -166,7 +188,8 @@ def _headline(summary, n: int, unit: str) -> str:
 
 
 def plot_edge_gains(subjids=None, dates=None, *, data=None, fits=None, mode="completed",
-                    min_trials=MIN_TRIALS, n=N_WINDOW, save=False, **selectors):
+                    min_trials=MIN_TRIALS, n=N_WINDOW, legend=None, show=None, save=False,
+                    **selectors):
     """Accuracy over the first and last ``n`` choices of each session, and the gains.
 
         plot_edge_gains(fits=fits)
@@ -179,13 +202,18 @@ def plot_edge_gains(subjids=None, dates=None, *, data=None, fits=None, mode="com
     Bottom: the within gain (last minus first) at each session and the across gain (next
     first minus last) at each boundary, with Newcombe 95% intervals, and a thin running
     total through each component. The text above the panels is each component's mean
-    over the animal's sessions, with the number of gains averaged.
+    over the animal's sessions, with the number of gains averaged; it is shown, not saved
+    (the same numbers are in `gain_summary`).
+
+    ``show`` numbers: 1 within session, 2 across sessions, 3 and 4 the within and across
+    running totals, 5 spans an unfitted session (only where one exists). Within and across
+    take the top panel's segments and steps with them.
     """
     fits = _fits(subjids, dates, data, fits, mode, min_trials, selectors)
     windows, gains = edge_windows(fits, n), edge_gains(fits, n)
     summary = gain_summary(gains).set_index(["subjid", "component"])
 
-    figures = {}
+    figures, entries = {}, []
     for subjid in sorted(fits):
         fit = fits[subjid]
         unit = _unit(fit["mode"])
@@ -204,10 +232,13 @@ def plot_edge_gains(subjids=None, dates=None, *, data=None, fits=None, mode="com
                         animal["session_idx"].max() + SESSION_SPAN + 0.4)
         top.set_title(_headline(summary.loc[subjid], n, unit), loc="left",
                       fontsize=annotation_size(), color=REFERENCE)
-        fig.legend(*bottom.get_legend_handles_labels(), loc="outside lower center", ncols=3,
+        fig.legend(*in_order(bottom, _EDGE_ORDER), loc="outside lower center", ncols=3,
                    frameon=False, fontsize=annotation_size())
-        _save(fig, f"ab_learning_edge_gains_sub-{subjid:03d}", fit, save)
+        entries += finish_figure(fig, legend, show)
+        _save(fig, f"ab_learning_edge_gains{show_suffix(show)}_sub-{subjid:03d}", fit, save,
+              titles=False)
         figures[subjid] = fig
+    legend_figure(entries, fontsize=annotation_size())
     return figures
 
 
@@ -224,7 +255,8 @@ def _plot_profile(ax, profile):
 
 def plot_position_profile(subjids=None, dates=None, *, data=None, fits=None,
                           mode="completed", min_trials=MIN_TRIALS, bins=10, bin_width=10,
-                          min_sessions=_MIN_SESSIONS, save=False, **selectors):
+                          min_sessions=_MIN_SESSIONS, legend=None, show=None, save=False,
+                          **selectors):
     """Accuracy by position in the session, pooled over each animal's fitted sessions.
 
         plot_position_profile(fits=fits)
@@ -239,12 +271,14 @@ def plot_position_profile(subjids=None, dates=None, *, data=None, fits=None,
     the top panel is what the changing mix of sessions alone produces, and M_c (a
     straight line in log-odds per session), which is what the per-session slopes add up
     to once pooled. The grey horizontal is chance.
+
+    ``show`` numbers: 1 observed (with its band), 2 M_c fit, 3 M_a fit, in both panels.
     """
     fits = _fits(subjids, dates, data, fits, mode, min_trials, selectors)
     by_choice = position_profile(fits, "choices", bin_width=bin_width)
     by_fraction = position_profile(fits, "fraction", bins=bins)
 
-    figures = {}
+    figures, entries = {}, []
     for subjid in sorted(fits):
         fit = fits[subjid]
         unit = _unit(fit["mode"])
@@ -259,16 +293,19 @@ def plot_position_profile(subjids=None, dates=None, *, data=None, fits=None,
         top.set_xlabel(f"{unit.capitalize()} in session")
         bottom.set_xlabel("Fraction of session")
         bottom.set_xlim(0, 1)
-        fig.legend(*bottom.get_legend_handles_labels(), loc="outside lower center", ncols=3,
+        fig.legend(*in_order(bottom, _PROFILE_ORDER), loc="outside lower center", ncols=3,
                    frameon=False, fontsize=annotation_size())
-        _save(fig, f"ab_learning_position_profile_sub-{subjid:03d}", fit, save)
+        entries += finish_figure(fig, legend, show)
+        _save(fig, f"ab_learning_position_profile{show_suffix(show)}_sub-{subjid:03d}", fit,
+              save)
         figures[subjid] = fig
+    legend_figure(entries, fontsize=annotation_size())
     return figures
 
 
 def plot_session_profiles(subjids=None, dates=None, *, data=None, fits=None,
-                          mode="completed", min_trials=MIN_TRIALS, bins=5, save=False,
-                          **selectors):
+                          mode="completed", min_trials=MIN_TRIALS, bins=5, legend=None,
+                          show=None, save=False, **selectors):
     """Accuracy by fraction of the session, one panel per fitted session.
 
         plot_session_profiles(fits=fits)
@@ -278,6 +315,8 @@ def plot_session_profiles(subjids=None, dates=None, *, data=None, fits=None,
     gentle curve here. Each panel is titled with the session and its W_s, M_c's gain
     across the session in log-odds. A profile that rises and then falls, or climbs only in
     its first bins, is one the line describes poorly. The grey horizontal is chance.
+
+    ``show`` numbers: 1 observed, 2 M_c fit, in every panel.
     """
     fits = _fits(subjids, dates, data, fits, mode, min_trials, selectors)
     profiles = session_profile(fits, bins=bins)
@@ -285,7 +324,7 @@ def plot_session_profiles(subjids=None, dates=None, *, data=None, fits=None,
     gains = gain_decomposition(fits)
     within = gains[gains["component"] == "within"].set_index(["subjid", "session_idx"])
 
-    figures = {}
+    figures, entries = {}, []
     for subjid in sorted(fits):
         fit = fits[subjid]
         sessions = fit["sessions"][fit["sessions"]["kept"]].sort_values("session_idx")
@@ -320,8 +359,11 @@ def plot_session_profiles(subjids=None, dates=None, *, data=None, fits=None,
             axes.flat[index - columns].tick_params(labelbottom=True)
         fig.supxlabel("Fraction of session", fontsize=text_size())
         fig.supylabel("Accuracy", fontsize=text_size())
-        fig.legend(*axes.flat[0].get_legend_handles_labels(), loc="outside upper right",
+        fig.legend(*in_order(axes.flat[0], _PROFILE_ORDER), loc="outside upper right",
                    ncols=2, frameon=False, fontsize=annotation_size())
-        _save(fig, f"ab_learning_session_profiles_sub-{subjid:03d}", fit, save)
+        entries += finish_figure(fig, legend, show)
+        _save(fig, f"ab_learning_session_profiles{show_suffix(show)}_sub-{subjid:03d}", fit,
+              save)
         figures[subjid] = fig
+    legend_figure(entries, fontsize=annotation_size())
     return figures
