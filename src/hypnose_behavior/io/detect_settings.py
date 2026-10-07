@@ -67,6 +67,7 @@ def detect_settings(root):
     completionRequiresEngagement = None
     responseTime = None
     sampleOffsetTime = None
+    skipSampling = None
     sequences_obj = None
 
     if not hasattr(metadata, 'sequences') or (hasattr(metadata, 'sequences') and not metadata.sequences):
@@ -85,6 +86,7 @@ def detect_settings(root):
             completionRequiresEngagement = first_segment.get('completionRequiresEngagement')
             responseTime = first_segment.get('responseTime')
             sampleOffsetTime = first_segment.get('sampleOffsetTime')
+            skipSampling = first_segment.get('skipSampling')
     except:
         pass
 
@@ -186,7 +188,12 @@ def detect_settings(root):
     schema_settings['finalPositionIndex'] = (
         (sequence_length - 1) if isinstance(sequence_length, int) and sequence_length >= 1 else None
     )
-    
+    # Odour discrimination (A/B, G/E, ...) presents one odour per sequence, so it is read off
+    # the sequence length rather than the protocol's name or its odours.
+    schema_settings['isOdourDiscriminationProtocol'] = sequence_length == 1
+    # True on odour-discrimination stage 1: lights and reward pokes, no odour sampled.
+    schema_settings['skipSampling'] = skipSampling is True
+
     schema_settings['minimumSamplingTime_by_odor'] = minimumSamplingTime_by_odor
     schema_settings['sampleOffsetTime'] = sampleOffsetTime
     schema_settings['completionRequiresEngagement'] = completionRequiresEngagement

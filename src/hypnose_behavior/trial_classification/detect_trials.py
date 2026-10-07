@@ -14,30 +14,11 @@ from collections.abc import Mapping
 
 import pandas as pd
 
-import hypnose_behavior.io.detect_stage as detect_stage_module
 import hypnose_behavior.trial_classification.windows as windows
-from hypnose_behavior.trial_classification.params import _sampling_parameters_ms
+from hypnose_behavior.trial_classification.params import (
+    _odour_discrimination_info, _sampling_parameters_ms,
+)
 from hypnose_behavior.utils.helpers import vprint
-
-
-def _detect_stage_name(stage, root) -> str | None:
-    """Stage name for protocol detection: the passed-in stage first, re-detection second."""
-    stage_name = None
-    if stage is not None:
-        if isinstance(stage, Mapping):
-            stage_name = stage.get('stage_name') or stage.get('name')
-        else:
-            stage_name = getattr(stage, 'stage_name', None) or getattr(stage, 'name', None)
-            if stage_name is None:
-                stage_name = str(stage)
-
-    if not stage_name:
-        try:
-            stage_detected = detect_stage_module.detect_stage(root)
-            stage_name = stage_detected.get('stage_name') if isinstance(stage_detected, Mapping) else None
-        except Exception:
-            stage_name = None
-    return stage_name
 
 
 def _valve_attempt_windows(valve_events, initiation_time, next_initiation_time, poke_periods):
@@ -331,7 +312,7 @@ def _run_await_reward_attempts(attempt_events, poke_periods, cue_pokes, initiati
     return winner, failed_attempts
 
 
-def detect_trials(data, events, root, odor_map, verbose=True, stage=None):
+def detect_trials(data, events, root, odor_map, verbose=True):
     """Detect initiated trials from cue-poke and valve streams.
 
     One *attempt* is one valve opening between consecutive InitiationSequence events, from the
@@ -358,8 +339,7 @@ def detect_trials(data, events, root, odor_map, verbose=True, stage=None):
         odor_key = str(odor_name) if odor_name is not None else None
         return minimum_sampling_time_ms_by_odor.get(odor_key, default_minimum_sampling_time_ms)
 
-    protocol_name = (_detect_stage_name(stage, root) or "").lower()
-    is_odour_discrimination = "odourdiscrimination" in protocol_name
+    is_odour_discrimination, _skips_sampling = _odour_discrimination_info(root)
 
     valve_events = windows.valve_windows_dropping_unclosed(
         (odor_map or {}).get('olfactometer_valves', {}) if odor_map is not None else {},

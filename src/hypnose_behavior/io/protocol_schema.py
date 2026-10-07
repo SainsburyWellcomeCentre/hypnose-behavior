@@ -66,8 +66,8 @@ MODES = (STANDARD, SINGLE_REWARD, ODOUR_DISCRIMINATION)
 def resolve_mode(*, is_odour_discrimination: bool, is_single_reward: bool) -> str:
     """Which of `MODES` this run follows. Raises `ConflictingProtocolError` on the impossible one.
 
-    The two flags come from independent sources -- `is_odour_discrimination` from the
-    detected stage's protocol name, `is_single_reward` from the schema's
+    The two flags are read independently from the schema -- `is_odour_discrimination` from
+    `isOdourDiscriminationProtocol` (one-odour sequences), `is_single_reward` from
     `isSingleRewardProtocol`. Nothing in the code makes them exclusive; the experiment
     does, by construction, so both being true is a structural fault in the session as
     it was run.
@@ -81,7 +81,7 @@ def resolve_mode(*, is_odour_discrimination: bool, is_single_reward: bool) -> st
             "impossible by design: odour discrimination presents a sequence of length 1 "
             "and the single-reward protocol requires at least 2 positions."
             "'This is a structural fault in the session as it "
-            "was run -- fix the task schema or the stage name before analysing it; the "
+            "was run -- fix the task schema before analysing it; the "
             "saved schema is undefined while both hold."
         )
     if is_odour_discrimination:

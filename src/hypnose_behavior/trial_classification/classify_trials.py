@@ -720,8 +720,7 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
 
     hidden_rule_indices, sequence_name, schema_settings, schema_err = \
         _hidden_rule_indices_from_stage_or_schema(stage, root)
-    protocol_name = (sequence_name or str(stage) or "").lower()
-    is_odour_discrimination = "odourdiscrimination" in protocol_name
+    is_odour_discrimination = bool(schema_settings.get('isOdourDiscriminationProtocol'))
 
     seq_len = schema_settings.get('sequenceLength')
     max_positions = int(seq_len) if seq_len is not None else None

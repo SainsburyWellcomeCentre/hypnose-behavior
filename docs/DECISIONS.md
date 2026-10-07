@@ -1110,11 +1110,16 @@ reader checks against the right field set instead of guessing from the columns p
 
 ### `ConflictingProtocolError` raises, and that is the safe choice
 
-The two flags come from **independent sources** — `is_odour_discrimination` from the stage's
-protocol name, `is_single_reward` from the schema's `isSingleRewardProtocol`
-(`trial_classification/params.py`). Nothing in the code makes them exclusive; the experiment
-does, by construction: odour discrimination presents a sequence of length 1, single-reward
-needs ≥2 positions for a sequence to be rewarded-or-not at its end.
+The two flags are read **independently** from the schema (`io/detect_settings.py`) —
+`is_odour_discrimination` from `isOdourDiscriminationProtocol`, `is_single_reward` from
+`isSingleRewardProtocol`. Nothing in the code makes them exclusive; the experiment does, by
+construction: odour discrimination presents a sequence of length 1, single-reward needs ≥2
+positions for a sequence to be rewarded-or-not at its end.
+
+Odour discrimination is the sequence length, not the protocol's name: a name match misses
+`ge-discrimination-stage1`, the same task with odours G/E, and scores it as `standard`. Its
+stage 1 (`skipSampling`: lights and reward pokes, no odour) is not classified at all;
+`analyze_session_multi_run_by_id_date` skips those runs and prints why.
 
 > Raising beats warning **because `batch_analyze_sessions` already catches per session**. The
 > broken session names itself, writes no derivative, and the batch completes. A warning does
