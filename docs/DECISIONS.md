@@ -1305,11 +1305,12 @@ reader could not have returned those, so the fallback is not dead code.
 The `.schema.json` sidecar follows the **CSV**, not the parquet: it records which object
 columns were JSON-encoded to survive flat text, which parquet does not need.
 
-### Every QC entry point asks for CSV explicitly
+### Every QC entry point passes `save_csv` explicitly
 
-`qc/_common.fingerprint_session`, `verify_scripts` (for both `run_trial_classification.py` and
-`batch_process.py`, via `--save-csv`) and `outcome_agreement.py` all pass it, because all three
-read `trial_data.csv` directly -- `_common` fingerprints the *canonical CSV*.
+`qc/_common.fingerprint_session` passes `save_csv=False`: it fingerprints every table from its
+parquet (section 26). `verify_scripts` passes `--save-csv` to `run_trial_classification.py` and
+`batch_process.py`, which keeps that flag's wiring exercised. `outcome_agreement.py` passes
+`save_csv=True` because it reads `trial_data.csv`.
 
 > **Never rely on the default in the harness.** The gate would then change meaning whenever
 > the default did, and the failure is not a mismatch but a `FileNotFoundError` on a file
@@ -1484,7 +1485,7 @@ three `poke_durations` consumers exercised; `verify_scripts` GREEN, covering the
 
 | key | what it covers |
 |---|---|
-| `trial_data` | the canonical CSV -- unchanged |
+| `trial_data` | the table **as written** (`trial_data.parquet`) |
 | `metrics` | the reported metrics dict (`run.REPORT`, 25 entries) -- unchanged |
 | `position_data` | the side-table, **as written** |
 | `metrics_by_trial` | the per-trial metric table, **as written** |
@@ -1563,6 +1564,25 @@ after. Final compare **54/54 green**, 9/9 on each of the six keys.
 > Also: `Bash(timeout=)` is capped at 600000 ms and **silently clamps**, so a longer value
 > reads as a 10-minute kill on a job that needs more. Run the long gates in the background
 > instead.
+
+### Every fingerprint is platform-independent *(2026-10-07)*
+
+A fingerprint hashes a table's values, read back from its parquet and rendered with
+`to_csv(lineterminator="\n")` (`_common._csv`). Two things made the same session hash
+differently on macOS and Windows, although the pipeline output is identical there
+(`sub-053 20260520`: the Mac- and PC-written `trial_data.parquet` pass
+`assert_frame_equal(check_exact=True)`):
+
+1. **Line endings.** `to_csv`'s default is `os.linesep`, which is `\r\n` on Windows. Every
+   CSV-rendered md5 went RED, and only the JSON-hashed `metrics` stayed green.
+2. **`read_csv` float parsing.** `trial_data` was fingerprinted by reading back the CSV the
+   pipeline wrote, and pandas' default float parser turns long decimals
+   (`796.8960000000001`) into different doubles on each platform. With LF forced, the
+   long-decimal `*_ms` columns were all that still differed, in all nine sessions. The side
+   tables, rendered from parquet, matched byte for byte, float columns included.
+
+Reading `trial_data` from the parquet, like the side tables, removes the second cause and
+makes the gate stricter: dtypes survive, and a CSV round trip could hide a dtype change.
 
 ---
 

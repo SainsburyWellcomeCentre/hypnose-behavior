@@ -393,7 +393,7 @@ The `qc` package holds tools to run **after major changes** to confirm the analy
 
 - **`validate.py`** — `validate_subject()`: pre-flight check that rawdata exists for a subject/date; flags missing dates in a range without aborting. Used by the terminal scripts.
 
-- **`regression.py`** — golden-master value regression. For a fixed set of coverage sessions (`sessions.yml`) it fingerprints `trial_data` (canonical CSV) and the metrics dict and md5-compares against stored baselines in `fixtures/`. It reads the read-only rawdata and writes only to a temp dir (never the server).
+- **`regression.py`** — golden-master value regression. For a fixed set of coverage sessions (`sessions.yml`) it fingerprints `trial_data` (its values, read back from the parquet; identical on macOS and Windows) and the metrics dict and md5-compares against stored baselines in `fixtures/`. It reads the read-only rawdata and writes only to a temp dir (never the server).
   ```
   python src/hypnose_behavior/qc/regression.py            # compare against fixtures (exit 0 = GREEN)
   python src/hypnose_behavior/qc/regression.py --generate # regenerate baselines (only when a change is intended)

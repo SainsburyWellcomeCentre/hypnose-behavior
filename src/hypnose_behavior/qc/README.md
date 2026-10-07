@@ -26,8 +26,11 @@ read-only `rawdata` and redirect all derivatives I/O to a throwaway temp dir
 For each session in [`sessions.yml`](sessions.yml) it fingerprints the two
 outputs that must not change:
 
-- **`trial_data`** — md5 of the canonical CSV (sorted columns, no index; not
-  parquet bytes, not the manifest/summary with their timestamps).
+- **`trial_data`** — md5 of its values: the written parquet read back, sorted
+  columns, no index, rendered with `\n` line endings. Not the parquet bytes, not
+  a CSV re-parsed with `read_csv` (platform-dependent floats), not the
+  manifest/summary with their timestamps. The same session fingerprints
+  identically on macOS and Windows.
 - **metrics** — md5 of the metrics dict returned by `run_all_metrics`.
 
 Each fixture also stores a **per-column** md5 (trial_data) and a **per-metric-key**

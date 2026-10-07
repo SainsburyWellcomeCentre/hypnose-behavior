@@ -77,8 +77,8 @@ def _n_sessions_written(deriv: Path) -> int:
 
 
 def _trial_data_md5(deriv: Path, date: str):
-    m = list(deriv.glob(f"**/ses-*_date-{date}/{layout.RESULTS_DIRNAME}/**/trial_data.csv"))
-    return _common._md5(_common._canonical_trial_data(m[0])) if m else None
+    m = list(deriv.glob(f"**/ses-*_date-{date}/{layout.RESULTS_DIRNAME}/**/trial_data.parquet"))
+    return _common._table_fingerprint(m[0])[0] if m else None
 
 
 def _metrics_md5_from_derivatives(subjid: str, date: str, deriv: Path):
