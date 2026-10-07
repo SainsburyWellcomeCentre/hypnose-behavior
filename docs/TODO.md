@@ -78,3 +78,35 @@ Every gate but `check_qlearning.py` needs the server mount. `frames.py` (533 lin
 is the one rule three call sites depend on (`DECISIONS.md` section 14). `qc/check_layering.py`
 is the first gate here that runs with no mount; a `tests/` directory is the natural next
 step.
+
+---
+
+## Odours A and B are hardcoded downstream of classification
+
+Classification detects odour discrimination from the schema, so G/E sessions (subjects 63
+and 66 from 2026-09-29) classify as `odour_discrimination`. Much of what reads them still
+assumes the two rewarded odours are A and B, or names the reward ports after them. Measured on
+`main`, 2026-10-07:
+
+- **Port letters stored as odour identities.** `classify_trials.py:429,438` tag port 1 `'A'`
+  and port 2 `'B'`, and that letter is what `first_supply_odor_identity` /
+  `first_reward_poke_odor_identity` hold: a G trial paid at port 1 reads `'A'`.
+  `metric_analysis/metrics/false_alarm.py:489`, `metric_analysis/sing_rew_metrics.py:111` and
+  `visualization/movement/sing_rew_movement.py:83` map ports to letters the same way.
+- **Plotters keyed on A/B.** `visualization/choice.py:241-262` (`plot_choice_history`:
+  colour and up/down direction per letter), `accuracy.py:197-200`, `sampling.py:925`,
+  `prep.py:645-650`, `false_alarm.py:1158` (`rewarded_odors = ['OdorA', 'OdorB']`),
+  `pred_seq_utils.py:113-125,314,1002-1007`, `sing_rew.py:324-520`,
+  `movement/speed.py:524-643`, `movement/traces.py:461-1250`,
+  `modelling/switchpoint/plots.py:65`, and `metric_analysis/metrics/hidden_rule.py:387`.
+- **`ab_learning`** (branch `ab-learning-detection`). `data.py` keeps runs whose stage name
+  matches `odourdiscrimination…stageN` and scores `correct_port = port == odor` through
+  `PORT_LETTERS = {1: "A", 2: "B"}`. G/E runs are therefore never loaded, and would score
+  every port visit wrong if they were. It becomes an odour-agnostic module that selects runs
+  on `protocol_mode == "odour_discrimination"`.
+
+The schema already says what replaces the hardcoding: a rewarded odour's
+`rewardConditions[i].position` is its reward port, 0 → port 1 and 1 → port 2. This was checked
+on every 63/66 G/E session and on sub-061's A/B. A per-session `{odour: port}` map, read
+in `detect_settings` and saved with the session, lets plotters colour by port and label by
+odour: "the last two rewarded odours", whichever they are.
