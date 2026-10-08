@@ -31,7 +31,8 @@ from hypnose_behavior.io.protocol_schema import (
 from hypnose_behavior.frames import build_position_data, odor_letter
 
 __all__ = ["SessionResults", "load_non_initiated_attempts", "load_position_data",
-           "load_results_dir", "load_session_results", "reward_port_of", "reward_ports", "reward_ports_by_run"]
+           "load_results_dir", "load_session_results", "reward_port_of", "reward_ports", "reward_ports_by_letter",
+           "reward_ports_by_run"]
 
 _UNBUILT = object()
 
@@ -316,3 +317,16 @@ def reward_port_of(ports_by_run, run_id, odor):
         return None
     letter = odor_letter(odor)
     return next((p for name, p in ports.items() if odor_letter(name) == letter), None)
+
+
+def reward_ports_by_letter(ports_by_run) -> dict:
+    """``{odor letter: port}`` over every run of a session, e.g. ``{"A": 1, "B": 2}``.
+
+    - ``ports_by_run``: from `reward_ports_by_run`.
+    - An odour two runs pay at different ports is left out.
+    """
+    seen = {}
+    for ports in ports_by_run.values():
+        for odor, port in ports.items():
+            seen.setdefault(odor_letter(odor), set()).add(port)
+    return {letter: next(iter(p)) for letter, p in seen.items() if len(p) == 1}

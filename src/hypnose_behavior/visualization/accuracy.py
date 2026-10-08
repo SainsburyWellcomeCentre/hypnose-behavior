@@ -20,6 +20,7 @@ from hypnose_behavior.metric_analysis.metrics.accuracy import (
 from hypnose_behavior.metric_analysis.metrics.hidden_rule import hidden_rule_mask
 from hypnose_behavior.metric_analysis.resolvers import by_group
 from hypnose_behavior.io import layout
+from hypnose_behavior.io.load_results import reward_ports_by_letter, reward_ports_by_run
 from hypnose_behavior.io.layout import (
     _iter_subject_dirs,
     derivatives,
@@ -62,10 +63,13 @@ def plot_decision_accuracy_by_odor(
     verbose=True,
 ):
     """
-    Plot decision accuracy by odor (A, B) and total over dates.
+    Plot decision accuracy by rewarded odour and total over dates.
     Optionally include global choice accuracy as a separate line.
     Fast version using pre-computed metrics with existing helper functions.
-    
+
+    - One line per reward port, coloured by port and labelled with the odours it pays
+      (``A``; ``A/G`` across sessions that switch odours).
+
     Parameters:
     -----------
     subjid : int
@@ -77,7 +81,7 @@ def plot_decision_accuracy_by_odor(
     plot_choice_acc : bool, optional
         If True, also plot global choice accuracy as a dark grey line (default: False)
     plot_AB : bool, optional
-        If True, plot odor-specific accuracies for A and B (default: True). If False, omit A/B lines.
+        If True, plot the rewarded odours' accuracies (default: True). If False, omit them.
     clean_graph : bool, optional
         If True, print and clear title/labels/ticks/legend for external editing.
     
@@ -161,8 +165,12 @@ def plot_decision_accuracy_by_odor(
                 continue
 
             # Add odor-specific accuracies (supports legacy flat dict and new nested schema)
-            rows.extend(_collect_odor_acc_rows(
-                _computed_metric(results_dir, "decision_accuracy_by_odor") or {}, int(date_str)))
+            odor_rows = _collect_odor_acc_rows(
+                _computed_metric(results_dir, "decision_accuracy_by_odor") or {}, int(date_str))
+            odor_ports = reward_ports_by_letter(reward_ports_by_run(results_dir)) if plot_AB else {}
+            for r in odor_rows:
+                r["port"] = odor_ports.get(r["odor"])
+            rows.extend(odor_rows)
 
             # Add total accuracy
             acc_total = decision_accuracy(td)[2]
@@ -194,36 +202,36 @@ def plot_decision_accuracy_by_odor(
     
     fig, ax = plt.subplots(figsize=figsize)
     
-    colors = {'A': '#FF6B6B', 'B': '#4ECDC4', 'Total': 'black', 'Global Choice Accuracy': 'darkgreen'}
-    linewidths = {'A': 1.5, 'B': 1.5, 'Total': 4, 'Global Choice Accuracy': 3.5}
-    markers = {'A': 'o', 'B': 'o', 'Total': 's', 'Global Choice Accuracy': '^'}
-    linestyles = {'A': '-', 'B': '-', 'Total': '-', 'Global Choice Accuracy': '--'}
-    
-    # Determine which odors to plot (restricted set)
-    unique_odors = set(df["odor"].unique())
-    odors_to_plot = []
-    if plot_AB:
-        for base in ["A", "B"]:
-            if base in unique_odors:
-                odors_to_plot.append(base)
-    if "Total" in unique_odors:
-        odors_to_plot.append("Total")
-    if plot_choice_acc and "Global Choice Accuracy" in unique_odors:
-        odors_to_plot.append("Global Choice Accuracy")
-    
-    for odor in odors_to_plot:
-        subset = df[df["odor"] == odor]
-        if subset.empty:
-            continue
-        ax.plot(subset["x"].values, subset["accuracy"].values, 
-                label=odor,
-                color=colors.get(odor, '#999999'),
-                linewidth=linewidths.get(odor, 1.5),
-                linestyle=linestyles.get(odor, '-'),
-                marker=markers.get(odor, 'o'),
-                markersize=4 if odor not in ('Total', 'Global Choice Accuracy') else 6,
-                alpha=0.7 if odor not in ('Total', 'Global Choice Accuracy') else 0.8,
-                zorder=10 if odor in ('Total', 'Global Choice Accuracy') else 1)
+    port_colors = {1: '#FF6B6B', 2: '#4ECDC4'}
+    colors = {'Total': 'black', 'Global Choice Accuracy': 'darkgreen'}
+    linewidths = {'Total': 4, 'Global Choice Accuracy': 3.5}
+    markers = {'Total': 's', 'Global Choice Accuracy': '^'}
+    linestyles = {'Total': '-', 'Global Choice Accuracy': '--'}
+
+    # (label, rows, colour): one series per reward port, then the totals.
+    series = []
+    if plot_AB and "port" in df.columns:
+        for port in (1, 2):
+            subset = df[df["port"] == port]
+            if not subset.empty:
+                series.append(("/".join(sorted(subset["odor"].unique())), subset, port_colors[port]))
+    totals = ["Total"] + (["Global Choice Accuracy"] if plot_choice_acc else [])
+    for key in totals:
+        subset = df[df["odor"] == key]
+        if not subset.empty:
+            series.append((key, subset, colors[key]))
+
+    for label, subset, color in series:
+        is_total = label in ('Total', 'Global Choice Accuracy')
+        ax.plot(subset["x"].values, subset["accuracy"].values,
+                label=label,
+                color=color,
+                linewidth=linewidths.get(label, 1.5),
+                linestyle=linestyles.get(label, '-'),
+                marker=markers.get(label, 'o'),
+                markersize=6 if is_total else 4,
+                alpha=0.8 if is_total else 0.7,
+                zorder=10 if is_total else 1)
     
     ax.set_xlabel('Day')
     ax.set_ylabel('Accuracy')

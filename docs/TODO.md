@@ -93,7 +93,7 @@ assumes the two rewarded odours are A and B, or names the reward ports after the
   `first_reward_poke_odor_identity` hold: a G trial paid at port 1 reads `'A'`.
   `metric_analysis/metrics/false_alarm.py:489`, `metric_analysis/sing_rew_metrics.py:111` and
   `visualization/movement/sing_rew_movement.py:83` map ports to letters the same way.
-- **Plotters keyed on A/B.** `visualization/accuracy.py:197-200`, `sampling.py:925`,
+- **Plotters keyed on A/B.** `visualization/sampling.py:925`,
   `prep.py:645-650`, `false_alarm.py:1158` (`rewarded_odors = ['OdorA', 'OdorB']`),
   `pred_seq_utils.py:113-125,314,1002-1007`, `sing_rew.py:324-520`,
   `movement/speed.py:524-643`, `movement/traces.py:461-1250`, `movement/tortuosity.py:145,158`,
@@ -113,7 +113,8 @@ against the supply data on the A/B and G/E sessions. `io.load_results.reward_por
 run_id=None)` and `Session.reward_ports()` read it. They raise for a session saved before it
 existed, so re-run trial classification first. `reward_ports_by_run` gives every run's map
 and `reward_port_of(ports_by_run, run_id, odor)` one trial's port, since a session can mix
-protocols. The migration, one step at a time:
+protocols; `reward_ports_by_letter` collapses the runs to `{odor letter: port}`. The
+migration, one step at a time:
 
 1. **Choice and correctness in port terms.** The choice is already a port number
    (`first_supply_port`, `first_reward_poke_port`, `fa_port`). The correct port is
@@ -123,7 +124,8 @@ protocols. The migration, one step at a time:
    (`plot_choice_history`), port positions are uniform in the movement plots, and each port
    keeps one colour, so A and G (both port 1) share it. Labels use the odour name; no plot
    needs "(port 1)" in a label.
-3. **The plotters and metrics listed above**, on `main`. Done: `plot_choice_history`.
+3. **The plotters and metrics listed above**, on `main`. Done: `plot_choice_history`,
+   `plot_decision_accuracy_by_odor`.
 4. **`ab_learning`**, on its branch after merging `main`. It selects runs on the per-run
    `protocol_mode == "odour_discrimination"`. The stage regex can go, because stage-1
    (`skipSampling`) runs are no longer analysed. `correct_port` comes from `reward_ports()`.

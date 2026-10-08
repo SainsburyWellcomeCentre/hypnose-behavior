@@ -35,7 +35,7 @@ from hypnose_behavior.accessors import (
 from hypnose_behavior.io.layout import SessionRef, derivatives, rawdata, session_selectors
 from hypnose_behavior.io.load_results import (
     SessionResults, load_position_data, load_results_dir, reward_port_of, reward_ports,
-    reward_ports_by_run,
+    reward_ports_by_letter, reward_ports_by_run,
 )
 from hypnose_behavior.io.parquet_peek import peek
 from hypnose_behavior.io.protocol_schema import (
@@ -81,6 +81,7 @@ __all__ = [
     "reward_ports",             # {odor: reward port} of a loaded session (`results`)
     "reward_ports_by_run",      # {run_id: {odor: reward port}}; `results` or a results dir
     "reward_port_of",           # one trial's port: (ports_by_run, run_id, odor) -> 1 | 2 | None
+    "reward_ports_by_letter",   # {odor letter: port} over a session's runs
 
     # -- the metric registry -----------------------------------------------------------
     # `metric_value(spec, results)` is the one expression a consumer evaluates a metric
