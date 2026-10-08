@@ -671,6 +671,19 @@ def _next_after(sorted_series, ts):
     return later.iloc[0] if not later.empty else None
 
 
+def initiation_events_sorted(events) -> pd.Series:
+    """Every InitiationSequence the rig logged, sorted, whether or not a trial followed it.
+
+    The rig logs one at the reset into the next trial, so the one after a run's last trial
+    has no trial of its own. It still ends that trial, which is why the odour-discrimination
+    reward window looks the next initiation up here rather than among detected trials.
+    """
+    df = events.get('combined_initiation_sequence_df') if hasattr(events, 'get') else None
+    if not isinstance(df, pd.DataFrame) or 'Time' not in df.columns:
+        return pd.Series(dtype='datetime64[ns]')
+    return pd.to_datetime(df['Time'], errors='coerce').dropna().sort_values().reset_index(drop=True)
+
+
 def _recording_end(initiation_starts_sorted, cue_poke_starts_sorted, supply_port1_times,
                    supply_port2_times, port1_pokes, port2_pokes, trial_end):
     """Latest timestamp any stream reaches, used to bound a reward window with no next trial.
@@ -696,14 +709,16 @@ def _odourdisc_reward_window_end(next_init, next_cue_after_next_init, await_time
 
     These sessions have no fixed response window: the animal may collect at any point before it
     re-engages, so the window runs to the later of the next initiation and the first cue poke
-    after it. With no next initiation it runs to the next cue poke, or to the end of the
-    recording. Never earlier than ``await_time``.
+    after it. The supply pulse lands a few ms *after* that next initiation, so with no cue poke
+    after it (the run's last trial) the window runs to the end of the recording. With no next
+    initiation at all it runs to the next cue poke, or to the end of the recording. Never
+    earlier than ``await_time``.
 
     Returns ``(reward_window_end, next_cue_poke)``.
     """
     if next_init is not None:
-        candidates = [c for c in (next_init, next_cue_after_next_init) if c is not None]
-        reward_window_end = max(candidates) if candidates else next_init
+        tail = next_cue_after_next_init if next_cue_after_next_init is not None else recording_end
+        reward_window_end = max(next_init, tail) if tail is not None else next_init
         next_cue_poke = next_cue_after_next_init
     else:
         next_cue_poke = _next_after(cue_poke_starts_sorted, await_time)

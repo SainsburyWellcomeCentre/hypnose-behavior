@@ -75,9 +75,31 @@ def _drop_pre_poke_openings(valve_events, cue_pokes, initiation_times):
     return kept, len(windows_hit)
 
 
+def _initiation_windows(initiation_times, cue_pokes, valve_events):
+    """Window starts, one per trial cycle: ``(starts, first_is_inferred)``.
+
+    - The rig logs InitiationSequence at the reset into the *next* trial, so a run's first
+      trial has none before it.
+    - Its window opens at the run's first cue poke instead, provided an odor valve opened
+      between that poke and the first InitiationSequence. The start-of-run valve cleaning
+      comes before that poke and is already dropped (`_drop_pre_poke_openings`).
+    - Every other window opens at an InitiationSequence.
+    """
+    starts = [pd.Timestamp(t) for t in initiation_times]
+    rises = windows.rising_edges(cue_pokes)
+    if not rises:
+        return starts, False
+    first_poke = rises[0]
+    first_init = starts[0] if starts else cue_pokes.index[-1]
+    if first_poke < first_init and any(first_poke <= ev['start_time'] < first_init
+                                       for ev in valve_events):
+        return [first_poke] + starts, True
+    return starts, False
+
+
 def _record_detected_trial(trials, initiated_sequences, *, initiation_time, start, end,
                            duration_ms, attempt_number, required_min_ms, odor_name,
-                           fallback_reason=None):
+                           initiation_inferred, fallback_reason=None):
     """Append the matching ``trials`` and ``initiated_sequences`` rows for one detected trial.
 
     The two rows carry the same facts under different names (``trial_start`` vs
@@ -95,6 +117,7 @@ def _record_detected_trial(trials, initiated_sequences, *, initiation_time, star
         'attempt_number': attempt_number,
         'required_min_sampling_time_ms': required_min_ms,
         'odor_name': odor_name,
+        'initiation_inferred': initiation_inferred,
     }
     initiated_sequence_entry = {
         'initiation_sequence_time': initiation_time,
@@ -106,6 +129,7 @@ def _record_detected_trial(trials, initiated_sequences, *, initiation_time, star
         'timestamp': start,
         'required_min_sampling_time_ms': required_min_ms,
         'odor_name': odor_name,
+        'initiation_inferred': initiation_inferred,
     }
     if fallback_reason is not None:
         trial_entry['fallback_reason'] = fallback_reason
@@ -316,7 +340,9 @@ def detect_trials(data, events, root, odor_map, verbose=True):
     """Detect initiated trials from cue-poke and valve streams.
 
     One *attempt* is one valve opening between consecutive InitiationSequence events, from the
-    run's first cue-port poke onwards (`_drop_pre_poke_openings`). Its
+    run's first cue-port poke onwards (`_drop_pre_poke_openings`). The run's first trial has
+    no InitiationSequence before it, so its window opens at that first poke and the trial
+    carries ``initiation_inferred`` (`_initiation_windows`). An attempt's
     sampling time is the animal's cue-port poke inside the valve window, where pokes
     separated by gaps shorter than ``sampleOffsetTime`` count as one continuous sample.
 
@@ -383,16 +409,23 @@ def detect_trials(data, events, root, odor_map, verbose=True):
     initiated_sequences = []
     non_initiated_sequences = []
 
-    for idx, initiation_row in initiation_events.iterrows():
-        initiation_time = initiation_row['Time']
-        if idx + 1 < len(initiation_events):
-            next_initiation_time = initiation_events.iloc[idx + 1]['Time']
+    window_starts, first_is_inferred = _initiation_windows(
+        initiation_events['Time'], cue_pokes, valve_events)
+
+    for idx, initiation_time in enumerate(window_starts):
+        inferred = first_is_inferred and idx == 0
+        if idx + 1 < len(window_starts):
+            next_initiation_time = window_starts[idx + 1]
         else:
             next_initiation_time = cue_pokes.index[-1]
 
-        vprint(verbose, f"\nInitiationSequence {idx}: {initiation_time}")
+        vprint(verbose, f"\n{'First cue poke (no InitiationSequence before it)' if inferred else 'InitiationSequence'}"
+                        f" {idx}: {initiation_time}")
 
-        period_pokes = cue_pokes[(cue_pokes.index > initiation_time) & (cue_pokes.index <= next_initiation_time)]
+        # An inferred window opens *on* a poke, so that poke is in it; an InitiationSequence
+        # is not a poke.
+        after_start = (cue_pokes.index >= initiation_time) if inferred else (cue_pokes.index > initiation_time)
+        period_pokes = cue_pokes[after_start & (cue_pokes.index <= next_initiation_time)]
         if period_pokes.empty:
             vprint(verbose, "  No pokes found")
             continue
@@ -434,6 +467,7 @@ def detect_trials(data, events, root, odor_map, verbose=True):
                 attempt_number=winner['attempt_number'],
                 required_min_ms=winner['required_min_ms'],
                 odor_name=winner['odor_name'],
+                initiation_inferred=inferred,
                 fallback_reason=winner.get('fallback_reason'),
             )
 

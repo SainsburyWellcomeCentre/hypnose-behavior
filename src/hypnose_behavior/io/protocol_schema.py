@@ -110,7 +110,7 @@ def resolve_mode(*, is_odour_discrimination: bool, is_single_reward: bool) -> st
 class _TrialRecordBase:
     """Fields every protocol writes. Never instantiated directly -- use `record_class_for`.
 
-    The first ten come from `detect_trials._record_detected_trial`; the rest are written
+    The first eleven come from `detect_trials._record_detected_trial`; the rest are written
     by `classify_trials` on every path.
 
     **Do not declare `run_id`, `is_aborted` or `global_trial_id` here**, though all three
@@ -130,6 +130,9 @@ class _TrialRecordBase:
     timestamp: object = None
     required_min_sampling_time_ms: float | None = None
     odor_name: str | None = None
+    # True on a run's first trial: the rig logs no InitiationSequence before it, so
+    # `initiation_sequence_time` is the run's first cue poke.
+    initiation_inferred: bool | None = None
     # Written only when a trial came from the pending-attempt fallback, so it is null on
     # most sessions.
     fallback_reason: str | None = None
