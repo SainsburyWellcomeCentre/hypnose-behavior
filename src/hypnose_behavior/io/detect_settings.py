@@ -353,6 +353,32 @@ def detect_settings(root):
     schema_settings['allSequences'] = all_sequences
     schema_settings['isSingleRewardProtocol'] = bool(all_sequences) and (len(rewarded_sequences) < len(all_sequences))
 
+    # --- Which reward port each final rewarded odor pays out at ---
+    # A reward condition's `position` is its port, 0-based, in every protocol: 0 -> port 1
+    # (A, G), 1 -> port 2 (B, E). An odor rewarded at both ports has no single port and is
+    # left out.
+    reward_port_by_odor = {}
+    conflicting = set()
+    try:
+        for block in sequences_obj or []:
+            for seg in (block if isinstance(block, list) else [block]):
+                for rc in (_ci_get(seg, "rewardConditions") or []) if isinstance(seg, dict) else []:
+                    definition = _ci_get(rc, "definition")
+                    position = _ci_get(rc, "position")
+                    if (not isinstance(definition, list) or not definition
+                            or isinstance(position, bool) or not isinstance(position, (int, float))):
+                        continue
+                    final = definition[-1]
+                    for it in (_flatten_list(final) if isinstance(final, list) else [final]):
+                        name = _command_name(it)
+                        if name and _is_rewarded(it):
+                            if reward_port_by_odor.setdefault(name, int(position) + 1) != int(position) + 1:
+                                conflicting.add(name)
+    except Exception:
+        reward_port_by_odor = {}
+    schema_settings['rewardPortByOdor'] = {k: v for k, v in reward_port_by_odor.items()
+                                           if k not in conflicting}
+
     return session_settings, schema_settings
 
 if __name__ == "__main__":

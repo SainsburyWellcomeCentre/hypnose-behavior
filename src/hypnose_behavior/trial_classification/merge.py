@@ -110,6 +110,7 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
             'minimum_sampling_time_ms_by_odor': cls.get('minimum_sampling_time_ms_by_odor'),
             'response_time_window_sec': cls.get('response_time_window_sec'),
             'protocol_mode': cls.get('protocol_mode'),
+            'reward_port_by_odor': cls.get('reward_port_by_odor'),
             'hidden_rule_location': cls.get('hidden_rule_location'),
             'hidden_rule_position': cls.get('hidden_rule_position'),
             'hidden_rule_locations': cls.get('hidden_rule_locations'),

@@ -102,11 +102,28 @@ assumes the two rewarded odours are A and B, or names the reward ports after the
 - **`ab_learning`** (branch `ab-learning-detection`). `data.py` keeps runs whose stage name
   matches `odourdiscrimination…stageN` and scores `correct_port = port == odor` through
   `PORT_LETTERS = {1: "A", 2: "B"}`. G/E runs are therefore never loaded, and would score
-  every port visit wrong if they were. It becomes an odour-agnostic module that selects runs
-  on `protocol_mode == "odour_discrimination"`.
+  every port visit wrong if they were.
 
-The schema already says what replaces the hardcoding: a rewarded odour's
-`rewardConditions[i].position` is its reward port, 0 → port 1 and 1 → port 2. This was checked
-on every 63/66 G/E session and on sub-061's A/B. A per-session `{odour: port}` map, read
-in `detect_settings` and saved with the session, lets plotters colour by port and label by
-odour: "the last two rewarded odours", whichever they are.
+### What replaces it
+
+Every run saves `reward_port_by_odor` in its `parameters` (`manifest.json` and `summary.json`,
+`session.runs[]`), e.g. `{"OdorG": 1, "OdorE": 2}`. It comes from the schema: a reward
+condition's `position` is its port, 0 → port 1 and 1 → port 2, in every protocol, checked
+against the supply data on the A/B and G/E sessions. `io.load_results.reward_ports(results,
+run_id=None)` and `Session.reward_ports()` read it. They raise for a session saved before it
+existed, so re-run trial classification first. The migration, one step at a time:
+
+1. **Choice and correctness in port terms.** The choice is already a port number
+   (`first_supply_port`, `first_reward_poke_port`, `fa_port`). The correct port is
+   `reward_ports()[odor_name]`. Nothing new should read the `*_odor_identity` letter columns;
+   they stay for now as stale duplicates of `*_port`.
+2. **The port decides position-dependent layout only.** Port 1 always goes up and port 2 always
+   goes down (`plot_choice_history`), and port positions are uniform in the movement plots.
+   Colours and labels use the odour name; no plot needs "(port 1)" in a label.
+3. **The plotters and metrics listed above**, on `main`.
+4. **`ab_learning`**, on its branch after merging `main`. It selects runs on the per-run
+   `protocol_mode == "odour_discrimination"`. The stage regex can go, because stage-1
+   (`skipSampling`) runs are no longer analysed. `correct_port` comes from `reward_ports()`.
+
+Hidden-rule odours also have a port (the A or B segment they are rewarded in). The hidden-rule
+plots infer it from rewards today; the schema could give it the same way, later and separately.

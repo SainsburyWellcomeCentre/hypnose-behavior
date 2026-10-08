@@ -48,7 +48,9 @@ from hypnose_behavior.io.layout import (
     parse_subject_dirname,
     session_selectors,
 )
-from hypnose_behavior.io.load_results import load_non_initiated_attempts, load_results_dir
+from hypnose_behavior.io.load_results import (
+    load_non_initiated_attempts, load_results_dir, reward_ports,
+)
 from hypnose_behavior.io.parquet_peek import DEFAULT_ROWS, peek
 from hypnose_behavior.io.protocol_schema import (
     mode_independent_columns, trial_data_columns,
@@ -269,6 +271,11 @@ class Session:
         loader's schema check falls back to `mode_independent_columns()`.
         """
         return self.manifest().get("protocol_mode")
+
+    def reward_ports(self, run_id: Optional[int] = None) -> dict:
+        """``{odor: reward port}``, e.g. ``{"OdorG": 1, "OdorE": 2}``; see
+        `io.load_results.reward_ports`."""
+        return reward_ports(self.results(), run_id=run_id)
 
     # -- the measured tables -----------------------------------------------------------
 

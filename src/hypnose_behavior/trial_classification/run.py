@@ -137,6 +137,9 @@ def classify_and_analyze_with_response_times(data, events, trial_counts, odor_ma
     classification['hidden_rule_position'] = hidden_rule_pos
     classification['hidden_rule_locations'] = list(hidden_rule_indices)
     classification['hidden_rule_positions'] = list(hidden_rule_positions)
+    # Saved per run (merge -> manifest/summary `runs[].parameters`) and read back by
+    # `load_results.reward_ports`.
+    classification['reward_port_by_odor'] = dict(schema_settings.get('rewardPortByOdor') or {})
     classification.update(params)
     classification['response_time_analysis'] = rt_summary
     

@@ -31,7 +31,7 @@ from hypnose_behavior.io.protocol_schema import (
 from hypnose_behavior.frames import build_position_data
 
 __all__ = ["SessionResults", "load_non_initiated_attempts", "load_position_data",
-           "load_results_dir", "load_session_results"]
+           "load_results_dir", "load_session_results", "reward_ports"]
 
 _UNBUILT = object()
 
@@ -259,3 +259,30 @@ def load_results_dir(results_dir):
     results["results_dir"] = str(results_dir)
 
     return results
+
+
+def reward_ports(results, run_id=None) -> dict:
+    """``{odor: reward port}``: the port (1 or 2, as in the ``*_port`` columns) each final
+    rewarded odor pays out at, e.g. ``{"OdorG": 1, "OdorE": 2}``.
+
+    - Read from the run's saved ``parameters.reward_port_by_odor``.
+    - Raises for a session saved before that field existed: re-run trial classification.
+    - ``run_id=None`` takes every run and raises if they disagree; a session can mix
+      protocols, so pass ``run_id`` then.
+    """
+    manifest = results.get("manifest") or {}
+    label = _session_label(results.get("results_dir"), manifest)
+    runs = (manifest.get("session") or {}).get("runs") or []
+    if run_id is not None:
+        runs = [r for r in runs if r.get("run_id") == run_id]
+        if not runs:
+            raise KeyError(f"{label}: no run {run_id!r}")
+    saved = {r.get("run_id"): (r.get("parameters") or {}).get("reward_port_by_odor") for r in runs}
+    if not saved or any(v is None for v in saved.values()):
+        raise ValueError(f"{label}: saved before reward_port_by_odor existed -- re-run trial "
+                         f"classification.")
+
+    by_run = {rid: {str(k): int(v) for k, v in ports.items()} for rid, ports in saved.items()}
+    if len({tuple(sorted(m.items())) for m in by_run.values()}) > 1:
+        raise ValueError(f"{label}: runs disagree on reward ports {by_run}; pass run_id=.")
+    return next(iter(by_run.values()))
