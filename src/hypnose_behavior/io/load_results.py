@@ -28,10 +28,10 @@ from hypnose_behavior.io.layout import derivatives
 from hypnose_behavior.io.protocol_schema import (
     mode_independent_columns, trial_data_columns,
 )
-from hypnose_behavior.frames import build_position_data
+from hypnose_behavior.frames import build_position_data, odor_letter
 
 __all__ = ["SessionResults", "load_non_initiated_attempts", "load_position_data",
-           "load_results_dir", "load_session_results", "reward_ports"]
+           "load_results_dir", "load_session_results", "reward_port_of", "reward_ports", "reward_ports_by_run"]
 
 _UNBUILT = object()
 
@@ -261,6 +261,26 @@ def load_results_dir(results_dir):
     return results
 
 
+def reward_ports_by_run(results) -> dict:
+    """``{run_id: {odor: reward port}}``, one map per run; see `reward_ports`.
+
+    - ``results``: the results mapping, or a ``saved_analysis_results`` path (only its
+      ``manifest.json`` is read).
+    - Raises for a session saved before ``reward_port_by_odor`` existed.
+    """
+    if isinstance(results, (str, Path)):
+        results = {"manifest": json.load(open(layout.table_path(results, "manifest.json"))),
+                   "results_dir": str(results)}
+    manifest = results.get("manifest") or {}
+    label = _session_label(results.get("results_dir"), manifest)
+    runs = (manifest.get("session") or {}).get("runs") or []
+    saved = {r.get("run_id"): (r.get("parameters") or {}).get("reward_port_by_odor") for r in runs}
+    if not saved or any(v is None for v in saved.values()):
+        raise ValueError(f"{label}: saved before reward_port_by_odor existed -- re-run trial "
+                         f"classification.")
+    return {rid: {str(k): int(v) for k, v in ports.items()} for rid, ports in saved.items()}
+
+
 def reward_ports(results, run_id=None) -> dict:
     """``{odor: reward port}``: the port (1 or 2, as in the ``*_port`` columns) each final
     rewarded odor pays out at, e.g. ``{"OdorG": 1, "OdorE": 2}``.
@@ -268,21 +288,31 @@ def reward_ports(results, run_id=None) -> dict:
     - Read from the run's saved ``parameters.reward_port_by_odor``.
     - Raises for a session saved before that field existed: re-run trial classification.
     - ``run_id=None`` takes every run and raises if they disagree; a session can mix
-      protocols, so pass ``run_id`` then.
+      protocols, so pass ``run_id`` then, or use `reward_ports_by_run`.
     """
-    manifest = results.get("manifest") or {}
-    label = _session_label(results.get("results_dir"), manifest)
-    runs = (manifest.get("session") or {}).get("runs") or []
+    by_run = reward_ports_by_run(results)
+    label = _session_label(results.get("results_dir"), results.get("manifest") or {})
     if run_id is not None:
-        runs = [r for r in runs if r.get("run_id") == run_id]
-        if not runs:
+        if run_id not in by_run:
             raise KeyError(f"{label}: no run {run_id!r}")
-    saved = {r.get("run_id"): (r.get("parameters") or {}).get("reward_port_by_odor") for r in runs}
-    if not saved or any(v is None for v in saved.values()):
-        raise ValueError(f"{label}: saved before reward_port_by_odor existed -- re-run trial "
-                         f"classification.")
-
-    by_run = {rid: {str(k): int(v) for k, v in ports.items()} for rid, ports in saved.items()}
+        return by_run[run_id]
     if len({tuple(sorted(m.items())) for m in by_run.values()}) > 1:
         raise ValueError(f"{label}: runs disagree on reward ports {by_run}; pass run_id=.")
     return next(iter(by_run.values()))
+
+
+def reward_port_of(ports_by_run, run_id, odor):
+    """The port (1 or 2) ``odor`` pays at in run ``run_id``; None if that run pays it nowhere.
+
+    - ``ports_by_run``: from `reward_ports_by_run`. ``odor``: any spelling `odor_letter` reads.
+    - ``run_id`` missing: the session's map when every run agrees, else None.
+    """
+    if run_id is not None and not pd.isna(run_id):
+        ports = ports_by_run.get(int(run_id))
+    else:
+        distinct = {tuple(sorted(m.items())) for m in ports_by_run.values()}
+        ports = dict(distinct.pop()) if len(distinct) == 1 else None
+    if not ports or odor is None or (not isinstance(odor, str) and pd.isna(odor)):
+        return None
+    letter = odor_letter(odor)
+    return next((p for name, p in ports.items() if odor_letter(name) == letter), None)
