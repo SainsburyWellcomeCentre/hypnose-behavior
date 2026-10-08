@@ -16,7 +16,8 @@ from hypnose_behavior.io.layout import (
     _iter_subject_dirs,
     session_selectors,
 )
-from hypnose_behavior.frames import position_entries_by_trial
+from hypnose_behavior.frames import odor_letter, position_entries_by_trial
+from hypnose_behavior.io.load_results import PortOdors, reward_ports_by_letter
 from hypnose_behavior.io.loaders import _load_position_data
 from hypnose_behavior.visualization.prep import (
 	_collect_sessions,
@@ -36,7 +37,7 @@ from hypnose_behavior.visualization.primitives import mean_sem, rolling_windows
 from hypnose_behavior.metric_analysis.metrics.accuracy import decision_accuracy
 from hypnose_behavior.metric_analysis.metrics.false_alarm import (
     fa_latency_from_pokeout,
-    fa_port_label,
+    fa_port_number,
 )
 from hypnose_behavior.metric_analysis.metrics.sampling import (
     trial_poke_span,
@@ -867,11 +868,14 @@ def fa_analysis(
 	"""
 	FA trial analysis for aborted trials by last odor and FA port.
 
+	- Only odours no port pays are analysed.
+	- A port is named after the odours it pays (``A``; ``A/G`` across an odour switch).
+
 	Three cross-date summary plots are added (daily mean per session, or rolling
 	within session if ``moving_avg=True``):
 	  - FA poke time by odor.
-	  - FA response time, FA→A, by odor.
-	  - FA response time, FA→B, by odor.
+	  - FA response time to port 1's odour, by odor.
+	  - FA response time to port 2's odour, by odor.
 
 	``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
 	selection further; they intersect with ``dates`` and with each other, and ``index``
@@ -882,11 +886,11 @@ def fa_analysis(
 		ses_range=ses_range, index_range=index_range,
 	)
 	figs = []
-	odor_whitelist = {"OdorC", "OdorD", "OdorE", "OdorF", "OdorG"}
 	fa_labels = {"FA_time_in", "FA_time_out"}
 	if fa_types is not None:
 		fa_labels = set(fa_types)
 	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
+		port_odors = PortOdors()
 		poke_groups = {}
 		poke_session_records = []
 		# Raw FA response-time records per session: list of (trial_idx, odor, port, value).
@@ -904,11 +908,12 @@ def fa_analysis(
 				continue
 			n_trials = len(df)
 			session_n_trials.append(n_trials)
+			odor_ports = reward_ports_by_letter(port_odors.add(results_dir))
 			aborted = df[df.get("is_aborted") == True]
 			fa_df = aborted[aborted.get("fa_label").isin(fa_labels)]
 			# Raw latencies; the 10x-group-mean rule below is a display filter.
 			fa_latencies = fa_latency_from_pokeout(df)
-			port_labels = fa_port_label(fa_df)
+			fa_ports = fa_port_number(fa_df)
 			pokes_by_trial = position_entries_by_trial(
 				_load_position_data(results_dir, df), "in_poke_times")
 
@@ -916,7 +921,7 @@ def fa_analysis(
 			session_resp_raw = []
 			for _, row in fa_df.iterrows():
 				last_odor = _normalize_odor_name(row.get("last_odor"))
-				if last_odor not in odor_whitelist:
+				if last_odor is None or odor_letter(last_odor) in odor_ports:
 					continue
 
 				ordered_entries = pokes_by_trial.get(row.get("global_trial_id"))
@@ -955,13 +960,13 @@ def fa_analysis(
 				if rt_ms is None or pd.isna(rt_ms):
 					continue
 
-				port_label = port_labels.get(row.name)
-				if port_label is None or pd.isna(port_label):
+				port = fa_ports.get(row.name)
+				if port is None or pd.isna(port):
 					continue
 
 				rt_val = float(rt_ms)
 				trial_idx = int(row["_trial_idx"])
-				session_resp_raw.append((trial_idx, last_odor, port_label, rt_val))
+				session_resp_raw.append((trial_idx, last_odor, int(port), rt_val))
 
 			poke_session_records.append({"n_trials": n_trials, "groups": session_poke})
 			resp_raw_per_session.append(session_resp_raw)
@@ -970,8 +975,8 @@ def fa_analysis(
 		# any sample > 10 × group mean. Report exclusions.
 		group_values = {}
 		for sess_records in resp_raw_per_session:
-			for _, odor, port_label, v in sess_records:
-				group_values.setdefault((odor, port_label), []).append(v)
+			for _, odor, port, v in sess_records:
+				group_values.setdefault((odor, port), []).append(v)
 		thresholds = {
 			key: 10.0 * float(np.mean(vs)) for key, vs in group_values.items() if vs
 		}
@@ -981,9 +986,9 @@ def fa_analysis(
 			date_tag = date_vals[sess_idx] if sess_idx < len(date_vals) else "?"
 			filtered = []
 			for rec in sess_records:
-				_, odor, port_label, v = rec
-				if v > thresholds.get((odor, port_label), np.inf):
-					excluded_log.append((odor, port_label, date_tag, v))
+				_, odor, port, v = rec
+				if v > thresholds.get((odor, port), np.inf):
+					excluded_log.append((odor, port, date_tag, v))
 					continue
 				filtered.append(rec)
 			resp_raw_per_session[sess_idx] = filtered
@@ -993,21 +998,21 @@ def fa_analysis(
 				f"[fa_analysis] Subjid {subjid}: excluded {len(excluded_log)} FA "
 				f"response-time sample(s) > 10x group mean:"
 			)
-			for odor, port_label, date_tag, v in excluded_log:
-				print(f"  {odor}→{port_label}: 1 sample ({v:.1f} ms) from {date_tag}")
+			for odor, port, date_tag, v in excluded_log:
+				print(f"  {odor}→{port_odors.name(port)}: 1 sample ({v:.1f} ms) from {date_tag}")
 
 		# Rebuild resp_groups (pooled per-odor, per-port lists) and resp_session_records
 		# (per-session per-port per-odor (trial_idx, value) lists) from filtered records.
 		resp_groups = {}
-		resp_session_records = {"A": [], "B": []}
+		resp_session_records = {1: [], 2: []}
 		for sess_idx, sess_records in enumerate(resp_raw_per_session):
 			n_trials = session_n_trials[sess_idx]
-			session_resp = {"A": {}, "B": {}}
-			for trial_idx, odor, port_label, v in sess_records:
-				resp_groups.setdefault(odor, {"A": [], "B": []})[port_label].append(v)
-				session_resp[port_label].setdefault(odor, []).append((trial_idx, v))
-			resp_session_records["A"].append({"n_trials": n_trials, "groups": session_resp["A"]})
-			resp_session_records["B"].append({"n_trials": n_trials, "groups": session_resp["B"]})
+			session_resp = {1: {}, 2: {}}
+			for trial_idx, odor, port, v in sess_records:
+				resp_groups.setdefault(odor, {1: [], 2: []})[port].append(v)
+				session_resp[port].setdefault(odor, []).append((trial_idx, v))
+			resp_session_records[1].append({"n_trials": n_trials, "groups": session_resp[1]})
+			resp_session_records[2].append({"n_trials": n_trials, "groups": session_resp[2]})
 
 		if poke_groups:
 			fig, ax = plt.subplots(figsize=(10, 5))
@@ -1035,15 +1040,15 @@ def fa_analysis(
 
 			for i, odor in enumerate(ordered_odors, start=1):
 				odor_groups = resp_groups[odor]
-				count_a = len(odor_groups.get("A", []))
-				count_b = len(odor_groups.get("B", []))
-				labels.append(f"{odor}\nRatio A/B: {count_a}/{count_b}")
+				count_1 = len(odor_groups.get(1, []))
+				count_2 = len(odor_groups.get(2, []))
+				labels.append(f"{odor}\nRatio {port_odors.name(1)}/{port_odors.name(2)}: {count_1}/{count_2}")
 
-				for port_label, color, offset in (
-					("A", "red", -point_offset),
-					("B", "green", point_offset),
+				for port, color, offset in (
+					(1, "red", -point_offset),
+					(2, "green", point_offset),
 				):
-					values = odor_groups.get(port_label, [])
+					values = odor_groups.get(port, [])
 					if not values:
 						continue
 					has_any = True
@@ -1094,8 +1099,8 @@ def fa_analysis(
 				ax.set_title(f"Subjid {subjid} FA response time by port")
 				ax.legend(
 					handles=[
-						Patch(facecolor="red", edgecolor="black", label="FA to port A"),
-						Patch(facecolor="green", edgecolor="black", label="FA to port B"),
+						Patch(facecolor="red", edgecolor="black", label=f"FA to port {port_odors.name(1)}"),
+						Patch(facecolor="green", edgecolor="black", label=f"FA to port {port_odors.name(2)}"),
 					],
 					loc="upper right",
 				)
@@ -1132,13 +1137,13 @@ def fa_analysis(
 						dates=date_vals,
 					)
 
-			for port_label in ("A", "B"):
+			for port in (1, 2):
 				resp_summary_fig = _plot_summary(
-					resp_session_records[port_label],
+					resp_session_records[port],
 					color_map=ODOR_COLORS,
 					group_order=ODOR_ORDER,
 					ylabel="FA Response Time (ms)",
-					title=f"Subjid {subjid} FA response time (FA→{port_label}) by odor ({mode_label})",
+					title=f"Subjid {subjid} FA response time (FA→{port_odors.name(port)}) by odor ({mode_label})",
 					moving_avg=moving_avg,
 					window_size=window_size,
 					step_size=step_size,
@@ -1149,7 +1154,8 @@ def fa_analysis(
 					if save:
 						suffix = _summary_save_suffix(moving_avg, window_size, step_size)
 						resp_summary_save_specs.append(
-							(resp_summary_fig, f"fa_response_time_port{port_label}_summary_{suffix}")
+							(resp_summary_fig,
+							 f"fa_response_time_port{port_odors.name(port).replace('/', '')}_summary_{suffix}")
 						)
 
 		_apply_shared_ylim(resp_summary_figs)

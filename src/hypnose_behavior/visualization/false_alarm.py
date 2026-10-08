@@ -18,6 +18,7 @@ from hypnose_behavior.metric_analysis.metrics.false_alarm import (
     fa_port_share_a,
     fa_rate_by_position,
 )
+from hypnose_behavior.frames import odor_letter
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _iter_subject_dirs,
@@ -25,6 +26,7 @@ from hypnose_behavior.io.layout import (
     normalize_subjid,
     session_selectors,
 )
+from hypnose_behavior.io.load_results import PortOdors
 from hypnose_behavior.io.paths import (
     get_rawdata_root,
     get_derivatives_root,
@@ -130,7 +132,8 @@ def plot_abortion_and_fa_rates(
     
     rows = []
     fa_port_rows = []
-    
+    port_odors = PortOdors()
+
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_recs = iter_sessions(subj_dir, dates, **select)
         for rec in ses_recs:
@@ -138,7 +141,8 @@ def plot_abortion_and_fa_rates(
             results_dir = rec.results_dir
             if not rec.analysed:
                 continue
-            
+            port_odors.add(results_dir)
+
             # Computed through the registry rather than read from metrics_*.json.
             # This plotter was the trap in `docs/DECISIONS.md` section 5: 4b made
             # `fa_abortion_stats` numeric, but every saved file still holds the
@@ -420,7 +424,8 @@ def plot_abortion_and_fa_rates(
     ax.legend(loc='best')
 
     
-    # ============ PLOT 5: FA Ratio (A-B) / (A+B) per Odor (full width) ============
+    # ============ PLOT 5: FA port ratio per Odor (full width) ============
+    p1, p2 = port_odors.name(1), port_odors.name(2)
     ax = ax5
     if not df_port.empty:
         panel_has_data[4] = True
@@ -445,8 +450,8 @@ def plot_abortion_and_fa_rates(
         ax.set_xticklabels(odors)
     
     ax.set_xlabel('Odor')
-    ax.set_ylabel('FA Ratio (A-B)/(A+B)')
-    ax.set_title(f'FA Ratio (A-B)/(A+B) per Odor\n(Subject {str(subjid).zfill(3)})')
+    ax.set_ylabel(f'FA Ratio ({p1}-{p2})/({p1}+{p2})')
+    ax.set_title(f'FA Ratio ({p1}-{p2})/({p1}+{p2}) per Odor\n(Subject {str(subjid).zfill(3)})')
     ax.set_ylim([-1.1, 1.1])
     ax.axhline(y=0, color='gray', linestyle='--', linewidth=1, alpha=0.7)
     ax.legend(loc='best')
@@ -517,9 +522,9 @@ def plot_fa_ratio_a_over_sessions(
     index_range=None,
 ):
     """
-    Plot FA Ratio A/(A+B) over sessions for each odor (OPTIMIZED).
-    
-    Parameters similar to original, but now loads only necessary data.
+    Plot port 1's share of FAs, port 1 / (port 1 + port 2), over sessions for each odor.
+
+    - Labels name each port after the odours it pays.
 
     ``ses`` / ``index`` / ``date_range`` / ``ses_range`` / ``index_range`` narrow the
     selection further; they intersect with ``dates`` and with each other, and ``index``
@@ -534,16 +539,18 @@ def plot_fa_ratio_a_over_sessions(
     derivatives_dir = get_derivatives_root()
     
     fa_data = {}  # {odor: [(session_num, ratio, n_a, n_b, n_total), ...]}
-    
+    port_odors = PortOdors()
+
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_recs = iter_sessions(subj_dir, dates, **select)
-        
+
         for session_num, rec in enumerate(ses_recs, start=1):
             date_str = rec.date_str
             results_dir = rec.results_dir
             if not rec.analysed:
                 continue
-            
+            port_odors.add(results_dir)
+
             views = rec.views
             ab_det = views["aborted_fa"]
             if not ab_det.empty:
@@ -593,6 +600,7 @@ def plot_fa_ratio_a_over_sessions(
     # Create one figure per odor
     figs = {}
     odor_list = sorted(fa_data.keys())
+    p1, p2 = port_odors.name(1), port_odors.name(2)
     
     for odor in odor_list:
         data = fa_data[odor]
@@ -623,7 +631,7 @@ def plot_fa_ratio_a_over_sessions(
         ax.set_xticklabels([str(sn) for sn in session_nums])
         
         ax.set_xlabel('Session Number', fontsize=12, fontweight='bold')
-        ax.set_ylabel('FA Ratio A / (A+B)', fontsize=12, fontweight='bold')
+        ax.set_ylabel(f'FA Ratio {p1} / ({p1}+{p2})', fontsize=12, fontweight='bold')
         ax.set_title(f'FA Ratio Odor {odor}\n(Subject {str(subjid).zfill(3)})',
                     fontsize=13, fontweight='bold')
         ax.set_ylim([0, 1.0])
@@ -902,8 +910,11 @@ def plot_fa_ratio_by_abort_odor(
     index_range=None,
 ):
     """
-    Plot FA Ratio (A-B)/(A+B) by abortion odor, comparing HR and non-HR aborted sequences.
-    
+    Plot the FA port ratio, (port 1 - port 2)/(port 1 + port 2), by abortion odor, comparing
+    HR and non-HR aborted sequences.
+
+    - Labels name each port after the odours it pays; rewarded odours are not plotted.
+
     For each odor where abortion occurred, compares:
     1. Aborted HR trials where abortion happens AFTER the HR odor (not on the HR)
     2. Aborted non-HR trials (no HR present in sequence)
@@ -952,7 +963,8 @@ def plot_fa_ratio_by_abort_odor(
         fa_filter_fn = lambda fa_label: True
     
     rows = []  # {date, odor, hr_odor, category, port_a, port_b, total, ratio}
-    
+    port_odors = PortOdors()
+
     # Statistics tracking
     stats = {
         'total_no_hr': 0,
@@ -960,20 +972,21 @@ def plot_fa_ratio_by_abort_odor(
         'total_hr': 0,
         'total_hr_fa': 0
     }
-    
+
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_recs = iter_sessions(subj_dir, dates, **select)
-        
+
         for session_num, rec in enumerate(ses_recs, 1):
             date_str = rec.date_str
             results_dir = rec.results_dir
-            
+
             if not rec.analysed:
                 continue
-            
+
             summary_path = layout.table_path(results_dir, "summary.json")
             if not summary_path.exists():
                 continue
+            port_odors.add(results_dir)
 
             try:
                 with open(summary_path) as f:
@@ -1153,10 +1166,12 @@ def plot_fa_ratio_by_abort_odor(
     
     df = pd.DataFrame(rows)
     
-    # Get unique odors and filter out rewarded odors (OdorA, OdorB)
+    # Get unique odors and filter out the rewarded ones
     all_unique_odors = sorted(df["odor"].unique())
-    rewarded_odors = ['OdorA', 'OdorB']
-    unique_odors = [odor for odor in all_unique_odors if odor not in rewarded_odors]
+    rewarded_odors = port_odors.odors()
+    rewarded_letters = {odor_letter(o) for o in rewarded_odors}
+    unique_odors = [odor for odor in all_unique_odors if odor_letter(odor) not in rewarded_letters]
+    p1, p2 = port_odors.name(1), port_odors.name(2)
     
     # Still print stats for all odors including rewarded ones
     n_odors = len(unique_odors)
@@ -1245,7 +1260,7 @@ def plot_fa_ratio_by_abort_odor(
         
         ax.set_xticks(range(len(categories_with_data)))
         ax.set_xticklabels(categories_with_data, fontsize=10, fontweight='bold', rotation=0)
-        ax.set_ylabel('FA Ratio (A-B)/(A+B)', fontsize=11, fontweight='bold')
+        ax.set_ylabel(f'FA Ratio ({p1}-{p2})/({p1}+{p2})', fontsize=11, fontweight='bold')
         ax.set_ylim([-1.1, 1.1])
         ax.axhline(y=0, color='gray', linestyle='--', linewidth=1, alpha=0.7)
         ax.set_title(f'{odor}', fontsize=12, fontweight='bold')
@@ -1295,12 +1310,12 @@ def plot_fa_ratio_by_abort_odor(
     print(f"  Missing HR trials in breakdown: {stats['total_hr_fa'] - hr_breakdown_count}")
     
     print(f"\n" + "-"*100)
-    print("BREAKDOWN BY ODOR AND CATEGORY (including rewarded odors OdorA, OdorB in stats):")
+    print(f"BREAKDOWN BY ODOR AND CATEGORY (including rewarded odors {', '.join(rewarded_odors)} in stats):")
     print("-"*100)
-    
+
     # Group by odor and show per-date breakdown for ALL odors
     for odor in all_unique_odors:
-        is_rewarded = odor in rewarded_odors
+        is_rewarded = odor_letter(odor) in rewarded_letters
         odor_label = f"{odor}" + (" [REWARDED - not plotted]" if is_rewarded else "")
         print(f"\n{odor_label}:")
         df_odor = df[df["odor"] == odor]
@@ -1319,13 +1334,13 @@ def plot_fa_ratio_by_abort_odor(
                 ratio_agg = fa_port_ratio(port_a_total, port_b_total)
                 
                 ratio_str = f"{ratio_agg:+.3f}" if not pd.isna(ratio_agg) else "N/A"
-                print(f"  {category:<12} - Ratio: {ratio_str}  Port A: {int(port_a_total)}, Port B: {int(port_b_total)}, Total: {int(total_trials)}")
+                print(f"  {category:<12} - Ratio: {ratio_str}  Port {p1}: {int(port_a_total)}, Port {p2}: {int(port_b_total)}, Total: {int(total_trials)}")
                 
                 # Show per-date breakdown
                 for idx, row in df_cat.iterrows():
                     date_val = int(row['date'])
                     ratio_str_date = f"{row['ratio']:+.3f}" if not pd.isna(row['ratio']) else "N/A"
-                    print(f"      → {date_val}: Port A: {int(row['port_a'])}, Port B: {int(row['port_b'])}, Total: {int(row['total'])}")
+                    print(f"      → {date_val}: Port {p1}: {int(row['port_a'])}, Port {p2}: {int(row['port_b'])}, Total: {int(row['total'])}")
             else:
                 print(f"  {category:<12} - No data")
     

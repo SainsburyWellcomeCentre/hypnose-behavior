@@ -30,7 +30,7 @@ from hypnose_behavior.io.protocol_schema import (
 )
 from hypnose_behavior.frames import build_position_data, odor_letter
 
-__all__ = ["SessionResults", "load_non_initiated_attempts", "load_position_data",
+__all__ = ["PortOdors", "SessionResults", "load_non_initiated_attempts", "load_position_data",
            "load_results_dir", "load_session_results", "reward_port_of", "reward_ports", "reward_ports_by_letter",
            "reward_ports_by_run"]
 
@@ -330,3 +330,30 @@ def reward_ports_by_letter(ports_by_run) -> dict:
         for odor, port in ports.items():
             seen.setdefault(odor_letter(odor), set()).add(port)
     return {letter: next(iter(p)) for letter, p in seen.items() if len(p) == 1}
+
+
+class PortOdors:
+    """The odours each reward port pays, over the sessions a figure reads.
+
+    - ``add(results)``: one session (results mapping or results dir); returns its
+      `reward_ports_by_run`, and raises as that does.
+    - ``name(port)``: the odour letters joined by "/" (``"A"``; ``"A/G"`` across a switch);
+      ``""`` when no session added pays at that port.
+    - ``odors()``: every rewarded odour name added, sorted.
+    """
+
+    def __init__(self):
+        self._odors = {}
+
+    def add(self, results) -> dict:
+        by_run = reward_ports_by_run(results)
+        for ports in by_run.values():
+            for odor, port in ports.items():
+                self._odors.setdefault(port, set()).add(odor)
+        return by_run
+
+    def name(self, port) -> str:
+        return "/".join(sorted({odor_letter(o) for o in self._odors.get(port, ())}))
+
+    def odors(self) -> list:
+        return sorted(set().union(*self._odors.values()))

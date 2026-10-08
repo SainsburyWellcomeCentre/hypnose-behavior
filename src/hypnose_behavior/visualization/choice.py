@@ -8,11 +8,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from hypnose_behavior.io.load_results import (
+    PortOdors,
     load_session_results,
     reward_port_of,
-    reward_ports_by_run,
 )
-from hypnose_behavior.frames import odor_letter
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import derivatives, session_selectors
 from hypnose_behavior.io.paths import (
@@ -113,7 +112,7 @@ def plot_choice_history(
     
     # Collect all trials across sessions
     all_trials = []
-    port_odors = {1: set(), 2: set()}  # odour letters each port pays, for the labels
+    port_odors = PortOdors()
 
     for session_idx, rec in enumerate(ses_recs):
         date_str = rec.date_str
@@ -121,10 +120,7 @@ def plot_choice_history(
         if not rec.analysed:
             continue
 
-        ports_by_run = reward_ports_by_run(results_dir)
-        for ports in ports_by_run.values():
-            for odor, port in ports.items():
-                port_odors.setdefault(port, set()).add(odor_letter(odor))
+        ports_by_run = port_odors.add(results_dir)
 
         # Prefer trial_data views (new schema); fallback to legacy load_session_results tables
         views = rec.views
@@ -262,7 +258,7 @@ def plot_choice_history(
     }
     hr_color = '#FFD700'     # Gold/yellow
     port_direction = {1: 1, 2: -1}  # port 1 goes up, port 2 goes down
-    port_labels = {p: '/'.join(sorted(port_odors.get(p, ()))) for p in (1, 2)}
+    port_labels = {p: port_odors.name(p) for p in (1, 2)}
 
     # Plot each trial
     for idx, trial in trials_df.iterrows():

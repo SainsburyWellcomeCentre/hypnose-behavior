@@ -29,6 +29,7 @@ from hypnose_behavior.io.layout import (
     normalize_subjid,
     session_selectors,
 )
+from hypnose_behavior.io.load_results import PortOdors
 from hypnose_behavior.io.paths import (
     get_rawdata_root,
     get_derivatives_root,
@@ -451,8 +452,9 @@ def plot_fa_ratio_by_hr_position(
     index_range=None,
 ):
     """
-    Plot FA Ratio (A-B)/(A+B) by hidden rule odor position across sessions.
-    
+    Plot the FA port ratio, (port 1 - port 2)/(port 1 + port 2), by hidden rule odor position
+    across sessions; labels name each port after the odours it pays.
+
     For each session and each HR odor, calculates:
     1. FA on HR Odor at HR position
     2. FA at the next odor in sequence (position-independent)
@@ -508,20 +510,22 @@ def plot_fa_ratio_by_hr_position(
         fa_filter_fn = lambda fa_label: True
     
     rows = []  # {date, session_num, odor_num, hr_odor, category, port_a, port_b, total, ratio}
-    
+    port_odors = PortOdors()
+
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_recs = iter_sessions(subj_dir, dates, **select)
-        
+
         for session_num, rec in enumerate(ses_recs, 1):
             date_str = rec.date_str
             results_dir = rec.results_dir
-            
+
             if not rec.analysed:
                 continue
-            
+
             summary_path = layout.table_path(results_dir, "summary.json")
             if not summary_path.exists():
                 continue
+            port_odors.add(results_dir)
 
             try:
                 with open(summary_path) as f:
@@ -729,6 +733,7 @@ def plot_fa_ratio_by_hr_position(
     
     # Get unique HR odors and create subplots: 2 rows (scatter + line) per odor
     unique_odors = sorted(df["hr_odor"].unique())
+    p1, p2 = port_odors.name(1), port_odors.name(2)
     n_odors = len(unique_odors)
     
     fig, axes = plt.subplots(2, n_odors, figsize=(figsize[0], figsize[1] * 1.5))
@@ -757,7 +762,7 @@ def plot_fa_ratio_by_hr_position(
         
         ax_scatter.set_xticks(range(len(categories)))
         ax_scatter.set_xticklabels(categories, fontsize=10, fontweight='bold')
-        ax_scatter.set_ylabel('FA Ratio (A-B)/(A+B)', fontsize=11, fontweight='bold')
+        ax_scatter.set_ylabel(f'FA Ratio ({p1}-{p2})/({p1}+{p2})', fontsize=11, fontweight='bold')
         ax_scatter.set_ylim([-1.1, 1.1])
         ax_scatter.axhline(y=0, color='gray', linestyle='--', linewidth=1, alpha=0.7)
         ax_scatter.set_title(f'HR Odor: {hr_odor} - By Category\n(Subject {str(subjid).zfill(3)})', 
@@ -807,7 +812,7 @@ def plot_fa_ratio_by_hr_position(
                                 alpha=0.7)
         
         ax_line.set_xlabel('Session Number', fontsize=11, fontweight='bold')
-        ax_line.set_ylabel('FA Ratio (A-B)/(A+B)', fontsize=11, fontweight='bold')
+        ax_line.set_ylabel(f'FA Ratio ({p1}-{p2})/({p1}+{p2})', fontsize=11, fontweight='bold')
         ax_line.set_ylim([-1.1, 1.1])
         ax_line.axhline(y=0, color='gray', linestyle='--', linewidth=1, alpha=0.7)
         
