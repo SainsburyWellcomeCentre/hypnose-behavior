@@ -7,7 +7,11 @@ from __future__ import annotations
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from hypnose_behavior.io.load_results import load_session_results
+from hypnose_behavior.io.load_results import (
+    PortOdors,
+    load_session_results,
+    reward_port_of,
+)
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import derivatives, session_selectors
 from hypnose_behavior.io.paths import (
@@ -43,8 +47,9 @@ def plot_choice_history(
 ):
     """
     Plot choice history over time for one or more sessions.
-    
-    - Y-axis: Choice direction (A=red up, B=blue down)
+
+    - Y-axis: the reward port of the trial's odour: port 1 up (red), port 2 down (teal);
+      ticks name the odours each port pays
     - X-axis: Time
     - Rewarded trials: solid line with circle marker at end
     - Completed unrewarded trials: dotted line, no marker
@@ -107,12 +112,15 @@ def plot_choice_history(
     
     # Collect all trials across sessions
     all_trials = []
-    
+    port_odors = PortOdors()
+
     for session_idx, rec in enumerate(ses_recs):
         date_str = rec.date_str
         results_dir = rec.results_dir
         if not rec.analysed:
             continue
+
+        ports_by_run = port_odors.add(results_dir)
 
         # Prefer trial_data views (new schema); fallback to legacy load_session_results tables
         views = rec.views
@@ -130,6 +138,7 @@ def plot_choice_history(
                 all_trials.append({
                     "sequence_start": pd.to_datetime(r["sequence_start"]),
                     "last_odor": _get_odor(r),
+                    "port": reward_port_of(ports_by_run, r.get("run_id"), _get_odor(r)),
                     "trial_type": trial_type,
                     "is_hr": is_hr,
                     "date_str": date_str,
@@ -238,47 +247,33 @@ def plot_choice_history(
         axis=1
     )
     
-    # Extract odor letter (e.g., 'OdorA' -> 'A')
-    def extract_odor_letter(odor_str):
-        if pd.isna(odor_str):
-            return 'Unknown'
-        odor_str = str(odor_str)
-        if odor_str.startswith('Odor'):
-            return odor_str.replace('Odor', '')
-        return odor_str
-    
-    trials_df['odor_letter'] = trials_df['last_odor'].apply(extract_odor_letter)
-    
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
-    
-    # Define colors
-    odor_colors = {
-        'A': '#E53935',      # Bright red
-        'B': '#00796B',      # Darker teal
-        'HR': '#FFD700'      # Gold/yellow
+
+    # The reward port of the trial's odour decides colour and direction; an odour no
+    # port pays is grey and goes up.
+    port_colors = {
+        1: '#E53935',        # Bright red
+        2: '#00796B',        # Darker teal
     }
-    
-    odor_direction = {'A': 1, 'B': -1}  # A goes up, B goes down
-    
+    hr_color = '#FFD700'     # Gold/yellow
+    port_direction = {1: 1, 2: -1}  # port 1 goes up, port 2 goes down
+    port_labels = {p: port_odors.name(p) for p in (1, 2)}
+
     # Plot each trial
     for idx, trial in trials_df.iterrows():
         x = trial['time_in_plot']
-        odor = trial['odor_letter']
+        port = trial['port']
         trial_type = trial['trial_type']
         is_hr = trial['is_hr']
-        
-        if odor not in odor_colors and odor != 'Unknown':
-            odor = 'Unknown'
-        
+
         # Determine color based on trial type
         if is_hr:
-            color = odor_colors['HR']
+            color = hr_color
         else:
-            color = odor_colors.get(odor, '#999999')
-        
-        # Determine direction from odor
-        direction = odor_direction.get(odor, 1)
+            color = port_colors.get(port, '#999999')
+
+        direction = port_direction.get(port, 1)
         
         # Determine line style and marker based on reward status
         if trial_type == 'rewarded' or trial_type == 'hr_rewarded':
@@ -383,7 +378,7 @@ def plot_choice_history(
         ax.set_xlim(xlim)
     
     ax.set_yticks([-1, 1])
-    ax.set_yticklabels(['B', 'A'])
+    ax.set_yticklabels([port_labels[2], port_labels[1]])
 
     ax.set_xlabel('Time (seconds)')
     ax.set_ylabel('Choice')
@@ -396,9 +391,11 @@ def plot_choice_history(
     if show_legend:
         from matplotlib.lines import Line2D
         legend_elements = [
-            Line2D([0], [0], color='#E53935', lw=2.5, linestyle='-', label='Odor A (regular)'),
-            Line2D([0], [0], color='#00796B', lw=2.5, linestyle='-', label='Odor B (regular)'),
-            Line2D([0], [0], color='#FFD700', lw=2.5, linestyle='-', label='Hidden Rule (HR)'),
+            Line2D([0], [0], color=port_colors[p], lw=2.5, linestyle='-',
+                   label=f'Odor {port_labels[p]} (regular)')
+            for p in (1, 2) if port_labels[p]
+        ] + [
+            Line2D([0], [0], color=hr_color, lw=2.5, linestyle='-', label='Hidden Rule (HR)'),
             Line2D([0], [0], color='black', lw=2, linestyle='-', label='Rewarded (solid)'),
             Line2D([0], [0], color='black', lw=2, linestyle=':', label='Unrewarded/Missed (dotted)'),
             Line2D([0], [0], marker='o', color='w', markerfacecolor='black',

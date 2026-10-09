@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 from IPython.display import display
 
+from hypnose_behavior.io.load_results import PortOdors
 from hypnose_behavior.io.loaders import iter_sessions
 from hypnose_behavior.io.paths import get_derivatives_root
 from hypnose_behavior.frames import (
@@ -54,7 +55,7 @@ __all__ = [
     "FA_avg_response_times", "FA_avg_response_times_session",
     "fa_abortion_stats", "fa_abortion_stats_session",
     "fa_port_ratio_by_odor", "fa_port_ratio_by_odor_session",
-    "fa_port_label", "fa_port_counts", "fa_port_ratio", "fa_port_share_a",
+    "fa_port_number", "fa_port_counts", "fa_port_ratio", "fa_port_share_a",
     "get_fa_ratio_a_stats",
     "fa_rate_by_odor", "fa_rate_by_position",
     "fa_latency_from_pokeout",
@@ -417,9 +418,9 @@ def _fa_type_mask(trials, fa_type):
 
 @metric(frame="trials", title="FA Port Ratio by Odor", adapter=_fa_port_payload)
 def fa_port_ratio_by_odor(trials, *, fa_type="FA_time_in"):
-    """Signed FA port bias per odor: `(port A - port B) / (port A + port B)`.
+    """Signed FA port bias per odor: `(port 1 - port 2) / (port 1 + port 2)`.
 
-    0 is no preference, positive a bias towards port A.
+    0 is no preference, positive a bias towards port 1.
 
     `fa_type` takes a single label, `"all"` for every `FA_*`, or a set/list of
     labels; the set form is what lets the plotters' `fa_types` filters call this
@@ -477,21 +478,21 @@ def _fa_filter_mask(frame, fa_types=None):
     return lower.isin({str(s).strip().lower() for s in fa_types})
 
 
-def fa_port_label(frame):
-    """`fa_port` as `"A"` / `"B"` / None, one entry per row.
+def fa_port_number(frame):
+    """`fa_port` as 1 / 2 / NaN, one entry per row.
 
-**The one statement of the 1-is-A, 2-is-B mapping.** `fa_port_counts` counts
-    these labels and `pred_seq_utils.fa_analysis` buckets its latencies by them.
+    - `pred_seq_utils.fa_analysis` buckets its latencies by it; the odour a port pays
+      comes from `io.load_results.reward_ports_by_run`.
     """
     if frame is None or len(frame) == 0 or "fa_port" not in frame.columns:
-        return pd.Series(dtype=object, index=getattr(frame, "index", None))
+        return pd.Series(dtype=float, index=getattr(frame, "index", None))
     port = pd.to_numeric(frame["fa_port"], errors="coerce")
-    return port.map({1: "A", 2: "B"}).where(port.isin([1, 2]))
+    return port.where(port.isin([1, 2]))
 
 
 @metric(frame="trials")
 def fa_port_counts(frame):
-    """`(n_port_a, n_port_b)` over `fa_port` -- 1 is port A, 2 is port B.
+    """`(n_port_a, n_port_b)` over `fa_port`: the counts at port 1 and port 2.
 
 **The one place this count is made.** It takes an already-sliced frame, so
     the slicing stays with the caller (or goes through `by_group`) rather than
@@ -504,27 +505,27 @@ def fa_port_counts(frame):
 
 
 def fa_port_ratio(n_a, n_b):
-    """Signed port bias `(A - B) / (A + B)`; NaN when neither port fired.
+    """Signed port bias `(n_a - n_b) / (n_a + n_b)`; NaN when neither port fired.
 
-    0 is no preference, positive is a bias towards port A.
+    0 is no preference, positive is a bias towards port 1.
     """
     total = n_a + n_b
     return (n_a - n_b) / total if total > 0 else np.nan
 
 
 def fa_port_share_a(n_a, n_b):
-    """Port A's share of false alarms, on 0..1 rather than -1..1.
+    """Port 1's share of false alarms, on 0..1 rather than -1..1.
 
-    **Derived from `fa_port_ratio`, never recounted**: `A/(A+B) == (r+1)/2` exactly,
+    **Derived from `fa_port_ratio`, never recounted**: `n_a/(n_a+n_b) == (r+1)/2` exactly,
     and recounting from `fa_port` reintroduces a duplicate implementation. (The rescale
-    can land a ULP away from a direct `A/(A+B)`; these values are plotted, never
+    can land a ULP away from a direct `n_a/(n_a+n_b)`; these values are plotted, never
     fingerprinted.)
     """
     return (fa_port_ratio(n_a, n_b) + 1.0) / 2.0
 
 
 def get_fa_ratio_a_stats(subjid, dates=None, odors=['C', 'F']):
-    """Per-odor `A/(A+B)` false-alarm port share, one row per session per odor.
+    """Per-odor false-alarm share at port 1, one row per session per odor.
 
 Its FA filter is every `FA_*` label, wider than `plot_fa_ratio_a_over_sessions`'
     single `fa_type`. The share is rescaled from `fa_port_ratio`, never recounted.
@@ -539,6 +540,7 @@ Its FA filter is every `FA_*` label, wider than `plot_fa_ratio_a_over_sessions`'
     derivatives_dir = get_derivatives_root()
 
     rows = []
+    port_odors = PortOdors()
 
     for sid, subj_dir in _iter_subject_dirs(derivatives_dir, [subjid]):
         ses_recs = iter_sessions(subj_dir, dates)
@@ -549,6 +551,7 @@ Its FA filter is every `FA_*` label, wider than `plot_fa_ratio_a_over_sessions`'
 
             if not rec.analysed:
                 continue
+            port_odors.add(results_dir)
 
             ab_det = rec.views["aborted_fa"]
             if not ab_det.empty:
@@ -587,7 +590,8 @@ Its FA filter is every `FA_*` label, wider than `plot_fa_ratio_a_over_sessions`'
     df = pd.DataFrame(rows)
 
     print(f"\n{'='*70}")
-    print(f"FA Ratio A/(A+B) Summary - Subject {str(subjid).zfill(3)}")
+    p1, p2 = port_odors.name(1), port_odors.name(2)
+    print(f"FA Ratio {p1}/({p1}+{p2}) Summary - Subject {str(subjid).zfill(3)}")
     print(f"{'='*70}")
     print(df.to_string(index=False))
     print(f"{'='*70}\n")

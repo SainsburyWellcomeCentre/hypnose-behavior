@@ -66,8 +66,8 @@ MODES = (STANDARD, SINGLE_REWARD, ODOUR_DISCRIMINATION)
 def resolve_mode(*, is_odour_discrimination: bool, is_single_reward: bool) -> str:
     """Which of `MODES` this run follows. Raises `ConflictingProtocolError` on the impossible one.
 
-    The two flags come from independent sources -- `is_odour_discrimination` from the
-    detected stage's protocol name, `is_single_reward` from the schema's
+    The two flags are read independently from the schema -- `is_odour_discrimination` from
+    `isOdourDiscriminationProtocol` (one-odour sequences), `is_single_reward` from
     `isSingleRewardProtocol`. Nothing in the code makes them exclusive; the experiment
     does, by construction, so both being true is a structural fault in the session as
     it was run.
@@ -81,7 +81,7 @@ def resolve_mode(*, is_odour_discrimination: bool, is_single_reward: bool) -> st
             "impossible by design: odour discrimination presents a sequence of length 1 "
             "and the single-reward protocol requires at least 2 positions."
             "'This is a structural fault in the session as it "
-            "was run -- fix the task schema or the stage name before analysing it; the "
+            "was run -- fix the task schema before analysing it; the "
             "saved schema is undefined while both hold."
         )
     if is_odour_discrimination:
@@ -110,7 +110,7 @@ def resolve_mode(*, is_odour_discrimination: bool, is_single_reward: bool) -> st
 class _TrialRecordBase:
     """Fields every protocol writes. Never instantiated directly -- use `record_class_for`.
 
-    The first ten come from `detect_trials._record_detected_trial`; the rest are written
+    The first eleven come from `detect_trials._record_detected_trial`; the rest are written
     by `classify_trials` on every path.
 
     **Do not declare `run_id`, `is_aborted` or `global_trial_id` here**, though all three
@@ -130,6 +130,9 @@ class _TrialRecordBase:
     timestamp: object = None
     required_min_sampling_time_ms: float | None = None
     odor_name: str | None = None
+    # True on a run's first trial: the rig logs no InitiationSequence before it, so
+    # `initiation_sequence_time` is the run's first cue poke.
+    initiation_inferred: bool | None = None
     # Written only when a trial came from the pending-attempt fallback, so it is null on
     # most sessions.
     fallback_reason: str | None = None

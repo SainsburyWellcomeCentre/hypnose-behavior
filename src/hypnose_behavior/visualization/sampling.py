@@ -31,8 +31,9 @@ from hypnose_behavior.io.loaders import (
     _load_position_data,
     iter_sessions,
 )
+from hypnose_behavior.io.load_results import PortOdors, reward_ports_by_letter
 from hypnose_behavior.visualization.prep import (
-    _ODOR_A_COLOR,
+    _PORT_COLORS,
     _build_odor_colors,
 )
 
@@ -686,13 +687,14 @@ def plot_poke_duration_by_odor(
     title : str | None
     show_mean : bool
         If True (default):
-        - When both ``"A"`` and ``"B"`` are in ``odors``, their poke durations
-          are pooled into a single "A+B" line instead of two separate lines.
+        - When every rewarded odour of a session is in ``odors``, their poke
+          durations are pooled into one line, labelled after the ports' odours
+          (e.g. "Odor A+B"), instead of one line each.
         - On any session flagged as a hidden-rule session (its two hidden-rule
           odors, from ``summary.json``, both present in ``odors``), those two
           odors' poke durations are pooled into a single "Hidden Rule" line for
-          that session, and every *other* requested odor (excluding "A"/"B")
-          is pooled into a single "Other Odors" line for that session — instead
+          that session, and every *other* requested odor (excluding the rewarded
+          ones) is pooled into a single "Other Odors" line for that session — instead
           of each contributing to its own individual odor line. On sessions
           that aren't hidden-rule sessions, every requested odor still gets its
           own individual line.
@@ -701,7 +703,8 @@ def plot_poke_duration_by_odor(
         Only used when ``show_mean`` is True. If True, overlays the individual
         odors that make up each mean as thin dashed low-alpha lines in their own
         colour (e.g. D/E/G under the "Other Odors" mean, the two hidden-rule
-        odors under the "Hidden Rule" mean, A/B under the "A+B" mean).
+        odors under the "Hidden Rule" mean, the rewarded odours, dashed by port,
+        under theirs).
     pool_subjids : bool
         If False (default), each subject gets its own line per series (odor,
         "A+B", or "Hidden Rule"), day-aligned to that subject's own day 1. If
@@ -759,7 +762,8 @@ def plot_poke_duration_by_odor(
 
     odors_list = [odor_letter(o) for o in odors]
     odors_set = set(odors_list)
-    ab_grouped = show_mean and "A" in odors_set and "B" in odors_set
+    rewarded_grouped = False  # any session pooled its rewarded odours into one series
+    port_odors = PortOdors()
 
     def _session_hr_odors(results_dir):
         """Hidden-rule odor letters for a session (from summary.json), or [] if
@@ -785,8 +789,8 @@ def plot_poke_duration_by_odor(
 
         Reads the canonical ``poke_durations``; **do not walk ``presentations`` with a
         ``poke_ms > 0`` filter instead**, which averages in the synthetic grace entries.
-        Pooling these raw samples into the A+B / Hidden Rule / Other series below is a
-        display grouping and stays here.
+        Pooling these raw samples into the rewarded / Hidden Rule / Other series below
+        is a display grouping and stays here.
         """
         out: dict = {}
         pokes = poke_durations(_load_position_data(results_dir, td), aborted=False)
@@ -845,20 +849,23 @@ def plot_poke_duration_by_odor(
                     continue  # sessions before the first with data don't count
                 started = True
 
+            rewarded = set(reward_ports_by_letter(port_odors.add(results_dir)))
+            session_grouped = show_mean and bool(rewarded) and rewarded <= odors_set
+            rewarded_grouped = rewarded_grouped or session_grouped
             hr_letters = [l for l in _session_hr_odors(results_dir) if l in odors_set]
-            observed_hr_letters.update(l for l in hr_letters if l not in ("A", "B"))
+            observed_hr_letters.update(l for l in hr_letters if l not in rewarded)
             session_is_hr = show_mean and len(hr_letters) >= 2
             if session_is_hr:
                 hr_active_overall = True
 
             series: dict = {}
             for letter, vals in raw.items():
-                if letter in ("A", "B"):
-                    key = "AB" if ab_grouped else letter
+                if letter in rewarded:
+                    key = "REWARDED" if session_grouped else letter
                 elif session_is_hr and letter in hr_letters:
                     key = "HR"
                 elif session_is_hr:
-                    # Non-A/B, non-HR-pair odor on a hidden-rule session -> pooled.
+                    # Non-rewarded, non-HR-pair odor on a hidden-rule session -> pooled.
                     key = "OTHER"
                 else:
                     key = letter
@@ -880,14 +887,14 @@ def plot_poke_duration_by_odor(
 
     max_day = max(max(day_map.keys()) for day_map in per_subject_days.values())
 
-    # Series order: requested odors in their given order (A/B collapsed to a
-    # single "AB" entry when grouped), then "HR" and "OTHER" if any session used them.
+    # Series order: requested odors in their given order (the rewarded ones collapsed
+    # to a single "REWARDED" entry when grouped), then "HR" and "OTHER" if any session
+    # used them.
+    letter_port = {odor_letter(o): p for p in (1, 2) for o in port_odors.odors(p)}
+    rewarded_all = set(letter_port)
     series_order = []
     for o in odors_list:
-        if o in ("A", "B"):
-            key = "AB" if ab_grouped else o
-        else:
-            key = o
+        key = "REWARDED" if (rewarded_grouped and o in rewarded_all) else o
         if key not in series_order:
             series_order.append(key)
     if hr_active_overall:
@@ -897,12 +904,12 @@ def plot_poke_duration_by_odor(
     fig, ax = plt.subplots(figsize=figsize)
     # Local style for the grouped view: pooled means are solid; individual odors
     # shown via show_lines are dashed in the color of their group.
-    odor_colors, _ = _build_odor_colors(used_subj_dirs, odors_list)
-    pooled_red = _ODOR_A_COLOR
+    odor_colors, _ = _build_odor_colors(used_subj_dirs, odors_list, port_odors)
+    pooled_red = _PORT_COLORS[1]  # the rewarded pool, whichever port
     pooled_green = "#2E7D32"
     series_color = {
         s: (
-            pooled_red if s == "AB"
+            pooled_red if s == "REWARDED"
             else "black" if s == "HR"
             else pooled_green if s == "OTHER"
             else odor_colors.get(s, "#000000")
@@ -911,7 +918,7 @@ def plot_poke_duration_by_odor(
     }
 
     def _series_color(s):
-        if s == "AB" or s in ("A", "B"):
+        if s == "REWARDED" or s in rewarded_all:
             return pooled_red
         if s == "HR" or s in observed_hr_letters:
             return "black"
@@ -921,10 +928,8 @@ def plot_poke_duration_by_odor(
             return pooled_green if observed_hr_letters else odor_colors.get(s, "#000000")
         return series_color.get(s, odor_colors.get(s, "#000000"))
 
-    red_dash_by_letter = {
-        "A": (0, (7, 3)),
-        "B": (0, (2, 2)),
-    }
+    port_dash = {1: (0, (7, 3)), 2: (0, (2, 2))}
+    red_dash_by_letter = {letter: port_dash[port] for letter, port in letter_port.items()}
     hr_dash_cycle = [(0, (8, 3)), (0, (3, 2)), (0, (6, 2, 1, 2))]
     other_dash_cycle = [
         (0, (6, 2)),
@@ -939,7 +944,7 @@ def plot_poke_duration_by_odor(
     }
     other_letters = [
         letter for letter in odors_list
-        if letter not in observed_hr_letters and letter not in ("A", "B")
+        if letter not in observed_hr_letters and letter not in rewarded_all
     ]
     other_dash_by_letter = {
         letter: other_dash_cycle[i % len(other_dash_cycle)]
@@ -947,9 +952,9 @@ def plot_poke_duration_by_odor(
     }
 
     def _series_linestyle(s):
-        if s in ("AB", "HR", "OTHER"):
+        if s in ("REWARDED", "HR", "OTHER"):
             return "-"
-        if s in ("A", "B"):
+        if s in rewarded_all:
             return red_dash_by_letter.get(s, "--")
         if s in observed_hr_letters:
             return hr_dash_by_letter.get(s, "--")
@@ -960,8 +965,8 @@ def plot_poke_duration_by_odor(
     x = np.arange(1, max_day + 1)
 
     def _series_label(s):
-        if s == "AB":
-            return "Odor A+B"
+        if s == "REWARDED":
+            return f"Odor {port_odors.name(1)}+{port_odors.name(2)}"
         if s == "HR":
             return "Hidden Rule"
         if s == "OTHER":
@@ -1052,7 +1057,7 @@ def plot_poke_duration_by_odor(
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
 
     # Legend: the pooled/individual series in series_order, plus any individual
-    # odors split out by show_lines that series_order collapsed (A/B into "AB"),
+    # odors split out by show_lines that series_order collapsed (rewarded into "REWARDED"),
     # each with its own scheme colour.
     legend_series = [s for s in series_order if s in plotted]
     legend_series += [l for l in odors_list if l in plotted and l not in legend_series]

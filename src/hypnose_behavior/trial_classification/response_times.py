@@ -169,13 +169,11 @@ def analyze_response_times(data, trial_counts, events, odor_map, stage, root, ve
     initiated_trials = trial_counts['initiated_sequences']
     await_reward_times = events['combined_await_reward_df']['Time'].tolist() if 'combined_await_reward_df' in events else []
 
-    protocol_name = (sequence_name or str(stage) or "").lower()
-    is_odour_discrimination = "odourdiscrimination" in protocol_name
+    is_odour_discrimination = bool(schema_settings.get('isOdourDiscriminationProtocol'))
 
-    # A run without trials has a column-less `initiated_sequences`.
-    init_series_raw = initiated_trials.get('initiation_sequence_time',
-                                           pd.Series(dtype='datetime64[ns]'))
-    initiation_starts_sorted = pd.to_datetime(init_series_raw, errors='coerce').dropna().sort_values().reset_index(drop=True)
+    # The odour-discrimination reward window ends at the rig's next initiation, including the
+    # one after a run's last trial, which no detected trial carries.
+    initiation_starts_sorted = windows.initiation_events_sorted(events)
 
     poke_series_full = data['digital_input_data'].get('DIPort0', pd.Series(dtype=bool)).astype(bool)
     poke_series_full = poke_series_full.sort_index()

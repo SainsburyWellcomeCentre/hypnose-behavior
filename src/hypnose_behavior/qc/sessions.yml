@@ -4,8 +4,8 @@
 #                          (_get_single_reward_info -> True) + sing_rew_metrics
 #   - standard           : every candidate sequence rewarded at its final position
 #                          -> false-response logic never entered
-#   - odourdiscrimination: stage name contains "odourdiscrimination" -> special-case
-#                          path in detect_trials
+#   - odourdiscrimination: schema sequences are one odour long
+#                          (isOdourDiscriminationProtocol) -> special-case path in detect_trials
 #   - multi_run          : >1 run for the date -> exercises merge_classifications
 #   - hidden_rule        : hiddenrule / location-suffixed protocol -> hidden-rule
 #                          detection, incl. _drop_final_hidden_rule_index

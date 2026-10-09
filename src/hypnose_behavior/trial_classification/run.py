@@ -24,17 +24,18 @@ from hypnose_behavior.io.loaders import (
 )
 from hypnose_behavior.io.save_results import save_session_analysis_results
 from hypnose_behavior.io.layout import rawdata, session_selectors
-from hypnose_behavior.io.protocol_schema import ConflictingProtocolError
+from hypnose_behavior.io.protocol_schema import ConflictingProtocolError, resolve_mode
 from hypnose_behavior.trial_classification.aborted_trials import (
     abortion_classification, classify_noninitiated_FA,
 )
 from hypnose_behavior.trial_classification.classify_trials import classify_trials
 from hypnose_behavior.trial_classification.detect_trials import detect_trials
 from hypnose_behavior.trial_classification.hidden_rule import (
-    _drop_final_hidden_rule_index, _ensure_int_list, _resolve_hidden_rule_from_stage,
+    _drop_final_hidden_rule_index, _ensure_int_list, _hidden_rule_indices_from_stage_or_schema,
+    _resolve_hidden_rule_from_stage,
 )
 from hypnose_behavior.trial_classification.params import (
-    _get_single_reward_info, get_experiment_parameters,
+    _get_single_reward_info, _odour_discrimination_info, get_experiment_parameters,
 )
 from hypnose_behavior.trial_classification.response_times import analyze_response_times
 from hypnose_behavior.trial_classification.merge import merge_classifications
@@ -111,7 +112,7 @@ def classify_and_analyze_with_response_times(data, events, trial_counts, odor_ma
     classification['aborted_sequences_detailed'] = aborted_detailed
 
     # 4) Hidden rule position from stage name/index
-    hidden_rule_indices, sequence_name = _resolve_hidden_rule_from_stage(stage)
+    hidden_rule_indices, _sequence_name = _resolve_hidden_rule_from_stage(stage)
     schema_settings = {}
     try:
         _, schema_settings = detect_settings.detect_settings(root)
@@ -131,29 +132,14 @@ def classify_and_analyze_with_response_times(data, events, trial_counts, odor_ma
     hidden_rule_location = hidden_rule_indices[0] if hidden_rule_indices else None
     hidden_rule_pos = hidden_rule_positions[0] if hidden_rule_positions else None
 
-    if hidden_rule_positions:
-        if len(hidden_rule_positions) > 1:
-            pos_str = ", ".join(str(pos) for pos in hidden_rule_positions)
-            idx_str = ", ".join(str(idx) for idx in hidden_rule_indices)
-            print(f"Hidden rule locations extracted: Positions {pos_str} (indices {idx_str})")
-        else:
-            print(f"Hidden rule location extracted: Location{hidden_rule_location} (index {hidden_rule_location}, position {hidden_rule_pos})")
-    else:
-        seq_label = sequence_name or str(stage)
-        print(f"No Hidden Rule Location found in sequence name: {seq_label}. Proceeding without Hidden Rule analysis.")
-
-    # Single-reward protocol status (always printed, like the hidden-rule message above)
-    if single_reward_info[0]:
-        print(f"Single-reward protocol detected: {len(single_reward_info[1])} rewarded sequence(s); "
-              f"non-rewarded completions classified as false_response.")
-    else:
-        print("Single-reward protocol: not detected (all sequences rewarded at final position; standard analysis).")
-
 # 5) Attach params and RT summary to classification
     classification['hidden_rule_location'] = hidden_rule_location
     classification['hidden_rule_position'] = hidden_rule_pos
     classification['hidden_rule_locations'] = list(hidden_rule_indices)
     classification['hidden_rule_positions'] = list(hidden_rule_positions)
+    # Saved per run (merge -> manifest/summary `runs[].parameters`) and read back by
+    # `load_results.reward_ports`.
+    classification['reward_port_by_odor'] = dict(schema_settings.get('rewardPortByOdor') or {})
     classification.update(params)
     classification['response_time_analysis'] = rt_summary
     
@@ -191,6 +177,48 @@ def classify_and_analyze_with_response_times(data, events, trial_counts, odor_ma
         'response_time_analysis': rt_summary,
         'completed_sequences_with_response_times': completed_with_rt,
     }
+
+
+def _print_protocol_summary(stage, root):
+    """Print the protocol a run is analysed as, and the three schema checks that decide it.
+
+    - Uses the classifiers' own helpers, so it states what they will do.
+    - Printed whatever `verbose`, so every run of a batch shows it before its results.
+    - Says `unknown` when the schema cannot be read; the run then fails in classification.
+    - Raises `ConflictingProtocolError` where `classify_trials` would.
+    """
+    hidden_rule_indices, _name, schema_settings, schema_err = \
+        _hidden_rule_indices_from_stage_or_schema(stage, root)
+    if schema_err is not None:
+        print(f"Protocol: unknown -- the schema could not be read ({type(schema_err).__name__}: {schema_err})")
+        return
+    is_single_reward, rewarded_sequences, all_sequences = _get_single_reward_info(root)
+    is_odour_discrimination = bool(schema_settings.get('isOdourDiscriminationProtocol'))
+    mode = resolve_mode(is_odour_discrimination=is_odour_discrimination,
+                        is_single_reward=is_single_reward)
+    hidden_rule_indices = _drop_final_hidden_rule_index(hidden_rule_indices, schema_settings,
+                                                        is_single_reward)
+
+    if is_odour_discrimination:
+        odours = sorted({odour for seq in schema_settings.get('allSequences') or [] for odour in seq})
+        od = f"yes (one-odour sequences: {', '.join(odours)})"
+    else:
+        od = f"no (sequence length {schema_settings.get('sequenceLength')})"
+    if is_single_reward:
+        sr = (f"yes ({len(rewarded_sequences)} of {len(all_sequences)} sequences rewarded; "
+              f"completed non-rewarded ones are false responses)")
+    else:
+        sr = "no (every sequence rewarded at its final position)"
+    if hidden_rule_indices:
+        hr_odours = ", ".join(schema_settings.get('hiddenRuleOdorsInferred') or [])
+        hr = f"position(s) {', '.join(str(idx + 1) for idx in hidden_rule_indices)}"
+        hr += f" (odours {hr_odours})" if hr_odours else ""
+    else:
+        hr = "none"
+    print(f"Protocol: {mode}\n"
+          f"  - odour discrimination: {od}\n"
+          f"  - single reward: {sr}\n"
+          f"  - hidden rule: {hr}")
 
 
 def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verbose: bool = True, max_runs: int = 32, save: bool = True, print_summary: bool = True, save_csv: bool = False):
@@ -249,6 +277,7 @@ def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verb
     merge_inputs = []
     roots: list[Optional[Path]] = []
     stages = []
+    n_stage1 = 0
 
     def extract_run_end_time(data, events):
         """Extract the latest timestamp from data and events for a single run"""
@@ -281,26 +310,24 @@ def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verb
             except Exception:
                 stage = {'stage_name': str(root)}
 
-            # Single-reward protocol status — always printed, alongside the stage/hidden-rule
-            # info above, so it shows even in non-verbose runs. When verbose, the per-run wrapper
-            # prints this instead (this guard avoids a duplicate line).
-            if not verbose:
-                try:
-                    _sri = _get_single_reward_info(root)
-                    if _sri[0]:
-                        print(f"Single-reward protocol detected: {len(_sri[1])} rewarded sequence(s); "
-                              f"non-rewarded completions classified as false_response.")
-                    else:
-                        print("Single-reward protocol: not detected (all sequences rewarded at final position; standard analysis).")
-                except Exception:
-                    pass
+            # Odour-discrimination stage 1 samples no odour (lights and reward pokes only), so
+            # there is nothing to classify. Printed regardless of `verbose`, so a batch says why.
+            is_odour_discrimination, skips_sampling = _odour_discrimination_info(root)
+            if is_odour_discrimination and skips_sampling:
+                stage_name = stage.get('stage_name') if isinstance(stage, dict) else stage
+                print(f"[analyze_session_multi_run] Run index {i} ({stage_name}): "
+                      f"odour-discrimination stage 1 (skipSampling), not analysed.")
+                n_stage1 += 1
+                continue
+
+            _print_protocol_summary(stage, root)
 
             # Run pipeline
             data = _maybe_silent(load_all_streams, root, verbose=verbose)
             events = _maybe_silent(load_experiment_events, root, verbose=verbose)
             run_end_time = extract_run_end_time(data, events)
             odor_map = _maybe_silent(load_odor_mapping, root, data=data, verbose=verbose)
-            trial_counts = detect_trials(data, events, root, odor_map, verbose=verbose, stage=stage)
+            trial_counts = detect_trials(data, events, root, odor_map, verbose=verbose)
 
             out = _maybe_silent(
                 classify_and_analyze_with_response_times,
@@ -385,7 +412,8 @@ def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verb
             continue
 
     if not per_run:
-        raise RuntimeError(f"No runs analyzed for subject={subject_id} date={date_str}")
+        stage1 = f" ({n_stage1} odour-discrimination stage 1 run(s), skipSampling)" if n_stage1 else ""
+        raise RuntimeError(f"No runs analyzed for subject={subject_id} date={date_str}{stage1}")
 
     # Merge classifications (now preserves per-run params)
     merged = merge_classifications(merge_inputs, verbose=verbose)

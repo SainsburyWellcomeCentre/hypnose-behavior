@@ -10,9 +10,10 @@ Examples
   hypnose-batch-process -sub 053,058 -date-range 20260501-20260531
   hypnose-batch-process -s 53 -ses 20
   hypnose-batch-process -s 63 64 --ses-range 1-10
+  hypnose-batch-process --sub-range 60-66 -d 20260921      # subjects without that date are skipped
   hypnose-batch-process                                  # all subjects, all dates
 
-Subjects: -s / --sub / --subs / --subj / --subject(s) / --subjid(s). Dates: -d / --date(s),
+Subjects: -s / --sub / --subs / --subj / --subject(s) / --subjid(s), or --sub-range. Dates: -d / --date(s),
 --date-range. Sessions: --ses / --session(s), --ses-range / --session-range. Every long
 flag also works with one dash; the selectors intersect. See
 `hypnose_helpers.cli.selector_args`.

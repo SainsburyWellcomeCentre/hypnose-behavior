@@ -37,6 +37,12 @@ from hypnose_behavior.io.layout import (
     normalize_subjid,
     session_selectors,
 )
+from hypnose_behavior.io.load_results import (
+    PortOdors,
+    reward_port_of,
+    reward_ports_by_letter,
+    reward_ports_by_run,
+)
 from hypnose_behavior.io.loaders import (
     _load_position_data,
     iter_sessions,
@@ -53,6 +59,19 @@ import re
 import numpy as np
 import json
 from hypnose_behavior.io.save import MOVEMENT_FIGURES_SUBDIR
+
+
+# A trace takes the colour of the port its last odour pays.
+_LAST_ODOR_PORT_COLORS = {1: 'red', 2: 'blue'}
+
+
+def _last_odor_port_colors(results, odors) -> dict:
+    """``{odor: colour}`` for `odors` by the reward port each pays, plus ``'other'``."""
+    ports = reward_ports_by_letter(reward_ports_by_run(results))
+    colors = {o: _LAST_ODOR_PORT_COLORS[ports[odor_letter(o)]]
+              for o in odors if odor_letter(o) in ports}
+    colors['other'] = 'lightgray'
+    return colors
 
 
 
@@ -302,14 +321,15 @@ def plot_movement_with_behavior(
     trial_windows=None,           # list of (start, end). negatives allowed, e.g. (-20, None) = last 20..last
     smooth_window=10, linewidth=1, alpha=0.6,
     figsize=(10, 10), xlim=None, ylim=None, invert_y=True,
-    last_odor_colors=None,        # {'A':'red','B':'blue','other':'gray'}
+    last_odor_colors=None,        # {odor: colour, 'other': colour}; default by reward port
     title=None, save_path=None, show=True
 ):
     """
     Minimal modes:
       - simple: baseline trace
       - trial_state: in-trial vs outside-trial
-      - last_odor: within-trial colored by last odor (A vs B)
+      - by_odor / by_odor_rew / by_odor_outcome: within-trial colored by the reward port of
+        the last odor (port 1 red, port 2 blue) unless `last_odor_colors` is given
       - time_windows: plot only movement within provided clock-time windows (can be multiple)
       - trial_windows: plot only trials in provided windows; supports negatives from the end
     Also auto-creates per-condition facet plots when multiple categories/windows exist.
@@ -458,7 +478,7 @@ def plot_movement_with_behavior(
             raise ValueError("The 'last_odor' column is missing in completed_sequences.")
         
         if last_odor_colors is None:
-            last_odor_colors = {'OdorA': 'red', 'OdorB': 'blue', 'other': 'lightgray'}
+            last_odor_colors = _last_odor_port_colors(behavior, comps['last_odor'].astype(str).unique())
 
         # Map each tracking frame to its odor category
         t_time = tracking['time']
@@ -520,7 +540,7 @@ def plot_movement_with_behavior(
                 raise ValueError("No rewarded/outcome column found in completed_sequences and cannot infer from completed_sequence_rewarded.")
 
         if last_odor_colors is None:
-            last_odor_colors = {'OdorA': 'red', 'OdorB': 'blue', 'other': 'lightgray'}
+            last_odor_colors = _last_odor_port_colors(behavior, comps['last_odor'].astype(str).unique())
 
         # Map each tracking frame to its odor and outcome category
         t_time = tracking['time']
@@ -780,13 +800,13 @@ def plot_trial_traces_by_mode(
     highlight_hr : bool
         Applies to rewarded/all_trials: recolor HR trials with HR palette; ignored elsewhere unless specified.
     color_by_index : bool
-        Debug: ignore A/B colors and instead color each trace by normalized sample index (start→end) using a gradient.
+        Debug: ignore port colors and instead color each trace by normalized sample index (start→end) using a gradient.
     color_by_speed : bool
         If True, color each line segment by speed bins from speed_analysis.parquet (per-trial, per-bin). Segments
         with no speed data are grey. Overrides color_by_index when enabled.
     color_by_trial_id : bool
         If True (modes: rewarded, rewarded_hr, fa_by_response, fa_by_odor, hr_only), color by normalized
-        trial order per reward port (A/B) using a dark→light blue gradient. Overrides color_by_index/speed.
+        trial order per reward port using a dark→light blue gradient. Overrides color_by_index/speed.
     figsize : tuple
         Figure size.
     smooth_window : int
@@ -868,6 +888,13 @@ def plot_trial_traces_by_mode(
     if not ses_recs:
         raise FileNotFoundError(f"No sessions found for subject {subjid} with given dates")
 
+    # Every session's reward ports up front: the per-port panels and labels are named
+    # after the odours each port pays over all of them.
+    port_odors = PortOdors()
+    ports_by_dir = {rec.results_dir: port_odors.add(rec.results_dir)
+                    for rec in ses_recs if rec.analysed}
+    port_name = port_odors.name
+
     def _odor_letter(val):
         """Canonical odor-token normaliser, plus this figure's label for a missing
         odor. The relabelling is a display choice and stays in the plotter."""
@@ -893,29 +920,26 @@ def plot_trial_traces_by_mode(
                         continue
         return None
 
-    def _hr_port_from_identity(val):
-        if pd.isna(val):
-            return None
-        s = str(val).strip().upper()
-        if s in {"A", "ODORA", "1"}:
-            return 1
-        if s in {"B", "ODORB", "2"}:
-            return 2
-        return None
-
     def _port_from_first_supply(row):
-        return _hr_port_from_identity(row.get("first_supply_odor_identity"))
+        val = row.get("first_supply_port")
+        try:
+            return int(val) if pd.notna(val) else None
+        except (TypeError, ValueError):
+            return None
 
-    def _category_from_row(row):
-        # Priority: explicit first_supply_odor_identity -> inferred port -> odor letter fallback
+    def _panel_port(row, ports_by_run):
+        """``(panel port, response port or None)``.
+
+        - The panel is the supply port, else the inferred response port, else the port
+          the trial's odour pays, else port 2.
+        """
         port = _port_from_first_supply(row)
         if port is None:
             port = _infer_port_from_response(row)
         if port in {1, 2}:
-            return ("A" if port == 1 else "B"), port
-        odor = _odor_letter(row.get("last_odor_name") or row.get("last_odor"))
-        category = "A" if odor in {"A", "OdorA"} else "B"
-        return category, port
+            return port, port
+        odor = row.get("last_odor_name") or row.get("last_odor")
+        return reward_port_of(ports_by_run, row.get("run_id"), odor) or 2, port
 
     def _extract_segment(tracking_df, start, end):
         if pd.isna(start) or pd.isna(end):
@@ -1044,6 +1068,7 @@ def plot_trial_traces_by_mode(
                 speed_vals_global.extend([v for v in finite_speeds if np.isfinite(v)])
         speed_analysis_cache[date_str] = speed_bins_map
 
+        ports_by_run = ports_by_dir[results_dir]
         views = rec.views
         td = views.get("trial_data", pd.DataFrame()).copy()
         if not td.empty:
@@ -1124,11 +1149,12 @@ def plot_trial_traces_by_mode(
                 port = None
                 if hr_flag and bool(row.get(hr_flag, False)):
                     port = _port_from_first_supply(row) or _infer_port_from_response(row)
-                category, port_fallback = _category_from_row(row)
+                cat_port, port_fallback = _panel_port(row, ports_by_run)
+                category = port_name(cat_port)
                 if port is None:
                     port = port_fallback
                 color_map = port_colors_hr if (highlight_hr and hr_flag and bool(row.get(hr_flag, False))) else port_colors
-                color = color_map.get(port, port_colors[1 if category == "A" else 2])
+                color = color_map.get(port, port_colors[cat_port])
                 if color_by_trial_id:
                     tid = row.get("global_trial_id")
                     try:
@@ -1147,10 +1173,11 @@ def plot_trial_traces_by_mode(
         elif mode == "completed":
             trials = td[td.get("is_aborted") == False]
             for idx_row, row, seg, t_zero, speed_bins in iter_trials(trials):
-                category, port = _category_from_row(row)
+                cat_port, port = _panel_port(row, ports_by_run)
+                category = port_name(cat_port)
                 rtc = str(row.get("response_time_category", "")).lower()
                 if rtc == "rewarded":
-                    color = port_colors.get(port, port_colors[1 if category == "A" else 2])
+                    color = port_colors.get(port, port_colors[cat_port])
                 elif rtc == "timeout_delayed":
                     color = timeout_color
                 elif rtc == "unrewarded":
@@ -1167,14 +1194,15 @@ def plot_trial_traces_by_mode(
         elif mode == "all_trials":
             trials = td.copy()
             for idx_row, row, seg, t_zero, speed_bins in iter_trials(trials):
-                category, port = _category_from_row(row)
+                cat_port, port = _panel_port(row, ports_by_run)
+                category = port_name(cat_port)
                 if row.get("is_aborted"):
                     color = aborted_color
                     if highlight_hr and hr_flag and bool(row.get(hr_flag, False)):
                         color = "#000000"
                 else:
                     color_map = port_colors_hr if (highlight_hr and hr_flag and bool(row.get(hr_flag, False))) else port_colors
-                    color = color_map.get(port, port_colors[1 if category == "A" else 2])
+                    color = color_map.get(port, port_colors[cat_port])
                 _add_segment(segments, "combined", category, color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
                 # Only include completed trials in the averages for all_trials
                 if not row.get("is_aborted"):
@@ -1209,7 +1237,7 @@ def plot_trial_traces_by_mode(
                 port = row.get("fa_port") if pd.notna(row.get("fa_port")) else _infer_port_from_response(row)
                 if port not in {1, 2}:
                     continue
-                category = "A" if port == 1 else "B"
+                category = port_name(port)
                 color = port_colors_fa.get(port, port_colors_fa[1])
                 if color_by_trial_id:
                     tid = row.get("global_trial_id")
@@ -1247,7 +1275,8 @@ def plot_trial_traces_by_mode(
             for idx_row, row, seg, t_zero, speed_bins in iter_trials(fa_df):
                 odor_name = row.get("last_odor_name") or row.get("last_odor")
                 odor = _odor_letter(odor_name)
-                if odor in {"A", "B", "OdorA", "OdorB"}:
+                # False alarms on the odours no port pays only.
+                if reward_port_of(ports_by_run, row.get("run_id"), odor_name) is not None:
                     continue
                 port = row.get("fa_port") if pd.notna(row.get("fa_port")) else _infer_port_from_response(row)
                 color = port_colors_fa.get(port, port_colors_fa[1])
@@ -1259,7 +1288,7 @@ def plot_trial_traces_by_mode(
                         tid = None
                     if port in {1, 2} and tid is not None:
                         color = trial_color_map.get((port, tid), color)
-                label = "FA to A" if port == 1 else ("FA to B" if port == 2 else "FA")
+                label = f"FA to {port_name(port)}" if port in (1, 2) else "FA"
                 _add_segment(segments, odor, label, color, seg[0], seg[1], time=seg[2], t_zero=t_zero, speed_bins=speed_bins)
                 resampled = resample_trace(seg[0], seg[1])
                 if resampled is not None:
@@ -1309,7 +1338,7 @@ def plot_trial_traces_by_mode(
             trial_color_map = {}
             if color_by_trial_id:
                 def _port_trial(row):
-                    p = _hr_port_from_identity(row.get("first_supply_odor_identity"))
+                    p = _port_from_first_supply(row)
                     if p is None:
                         p = _infer_port_from_response(row)
                     return p
@@ -1327,7 +1356,7 @@ def plot_trial_traces_by_mode(
                     odor_match = _odor_letter(row.get("last_odor_name") or row.get("last_odor"))
                 hr_odors_seen.add(odor_match)
 
-                port = _hr_port_from_identity(row.get("first_supply_odor_identity"))
+                port = _port_from_first_supply(row)
                 if port is None:
                     port = _infer_port_from_response(row)
                 rtc = str(row.get("response_time_category", "")).lower()
@@ -1602,7 +1631,8 @@ def plot_trial_traces_by_mode(
 
     # Layout by mode (separate figure per axis)
     if mode in {"rewarded", "rewarded_hr", "completed", "fa_by_response"}:
-        for axis_key, title in zip(["combined", "A", "B"], ["Combined", "Odor A / Port 1", "Odor B / Port 2"]):
+        for axis_key, title in [("combined", "Combined")] + [
+                (port_name(p), f"Odor {port_name(p)}") for p in (1, 2)]:
             _make_fig(axis_key, title)
     elif mode == "all_trials":
         _make_fig("combined", "All trials")

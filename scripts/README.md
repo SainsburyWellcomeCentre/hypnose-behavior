@@ -28,6 +28,7 @@ Each has several spellings, and every long flag also works with a single dash
 | Argument | Meaning |
 | --- | --- |
 | `-s`, `--sub`, `--subs`, `--subj`, `--subject(s)`, `--subjid(s)` | Subject id(s). Omit to run **all** subjects found in rawdata. |
+| `--sub-range`, `--subj-range`, `--subject-range`, `--subjid-range`, … | Inclusive subject range; adds to `-s`. Ids with no data are skipped. |
 | `-d`, `--date`, `--dates` | Specific date(s) `YYYYMMDD`. |
 | `--date-range`, `--dates-range` | Inclusive date range. |
 | `--ses`, `--session`, `--sessions` | Session number(s) as written in `ses-NNN`. |

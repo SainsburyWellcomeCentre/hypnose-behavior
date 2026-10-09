@@ -14,6 +14,7 @@ from hypnose_behavior.io.layout import (
     normalize_subjid,
     session_selectors,
 )
+from hypnose_behavior.io.load_results import PortOdors, reward_port_of
 from hypnose_behavior.io.loaders import iter_sessions
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
 from hypnose_behavior.io.save import save_figure
@@ -45,7 +46,9 @@ def plot_tortuosity_lines_overlay(
     """Plot traces by condition with both data-derived tortuosity lines and fixed lines overlaid.
 
     Uses speed_analysis.parquet to align start/end times per trial. For each trial, draws the trajectory,
-    a line from start→goal derived from tracking, and a fixed start→goal line (A/B) using provided coordinates.
+    a line from start→goal derived from tracking, and a fixed start→goal line to the trial's reward port
+    (``fixed_goal_a_xy`` is port 1, ``fixed_goal_b_xy`` port 2). Traces are coloured by port and the
+    legend names each port after the odours it pays.
     Returns a dict of figures keyed by (date, condition). When save=True, PDFs are written into
     movement_figures via save_figure(), and return_paths controls whether saved paths are returned.
 
@@ -118,17 +121,17 @@ def plot_tortuosity_lines_overlay(
     data_line_color = "#424242"
     fixed_line_color = "#9C27B0"
 
-    def _port_from_identity(val):
+    def _port_number(val):
+        """A port column's value as 1 / 2, or None."""
         if pd.isna(val):
             return None
-        s = str(val).strip().lower()
-        if s in {"a", "odora", "odor_a", "1", "porta", "port_a"}:
-            return 1
-        if s in {"b", "odorb", "odor_b", "2", "portb", "port_b"}:
-            return 2
-        return None
+        try:
+            port = int(float(val))
+        except (TypeError, ValueError):
+            return None
+        return port if port in (1, 2) else None
 
-    def _infer_port_with_supply_identity(row):
+    def _infer_port_with_odor(row, ports_by_run):
         for col in [
             "response_port", "rewarded_port", "reward_port", "supply_port",
             "choice_port", "port", "fa_port", "first_supply_port",
@@ -142,25 +145,26 @@ def plot_tortuosity_lines_overlay(
                         return int(float(row[col]))
                     except Exception:
                         continue
-        for col in ["first_supply_odor_identity", "last_odor_name", "last_odor", "odor_name", "odor"]:
+        # The port the trial's odour pays.
+        for col in ["last_odor_name", "last_odor", "odor_name", "odor"]:
             if col in row:
-                port = _port_from_identity(row.get(col))
+                port = reward_port_of(ports_by_run, row.get("run_id"), row.get(col))
                 if port is not None:
                     return port
         return None
 
-    def _port_for_coloring(row, cond):
+    def _port_for_coloring(row, cond, ports_by_run):
         if cond == "fa":
             preferred_cols = ["fa_port"]
         elif cond == "unrewarded":
             preferred_cols = ["first_reward_poke_port", "response_port", "choice_port"]
         else:
-            preferred_cols = ["first_supply_port", "first_supply_odor_identity", "rewarded_port", "reward_port"]
+            preferred_cols = ["first_supply_port", "rewarded_port", "reward_port"]
 
         for col in preferred_cols:
             if col not in row or pd.isna(row[col]):
                 continue
-            port = _port_from_identity(row[col])
+            port = _port_number(row[col])
             if port is not None:
                 return port
             try:
@@ -170,7 +174,7 @@ def plot_tortuosity_lines_overlay(
                     return int(float(row[col]))
                 except Exception:
                     continue
-        return _infer_port_with_supply_identity(row)
+        return _infer_port_with_odor(row, ports_by_run)
 
     def _condition_label(row):
         rtc = str(row.get("response_time_category", "")).lower()
@@ -191,6 +195,8 @@ def plot_tortuosity_lines_overlay(
         results_dir = rec.results_dir
         if not rec.analysed:
             continue
+        port_odors = PortOdors()
+        ports_by_run = port_odors.add(results_dir)
 
         views = rec.views
         trial_data = views.get("trial_data", pd.DataFrame()).copy()
@@ -268,7 +274,7 @@ def plot_tortuosity_lines_overlay(
             start_xy = seg.iloc[start_idx][["X", "Y"]].to_numpy(dtype=float)
             end_xy = seg.iloc[end_idx][["X", "Y"]].to_numpy(dtype=float)
 
-            port = _port_for_coloring(row, cond)
+            port = _port_for_coloring(row, cond, ports_by_run)
             fixed_start = np.asarray(fixed_start_xy, dtype=float)
             fixed_goal = np.asarray(fixed_goal_b_xy if port == 2 else fixed_goal_a_xy, dtype=float)
 
@@ -286,7 +292,7 @@ def plot_tortuosity_lines_overlay(
                 ax.plot(x_arr, y_arr, color=trace_color)
                 ax.plot([sxy[0], gxy[0]], [sxy[1], gxy[1]], color=data_line_color, linestyle="--")
                 ax.plot([fsxy[0], fgxy[0]], [fsxy[1], fgxy[1]], color=fixed_line_color)
-            # Always show a reference fixed B line for visual comparison
+            # Always show a reference fixed port-2 line for visual comparison
             ax.plot(
                 [fixed_start_xy[0], fixed_goal_b_xy[0]],
                 [fixed_start_xy[1], fixed_goal_b_xy[1]],
@@ -300,8 +306,8 @@ def plot_tortuosity_lines_overlay(
             if cond in {"rewarded", "unrewarded"}:
                 from matplotlib.lines import Line2D
                 legend_handles = [
-                    Line2D([0], [0], color=port_colors[1], lw=2, label="A / port 1 trace"),
-                    Line2D([0], [0], color=port_colors[2], lw=2, label="B / port 2 trace"),
+                    Line2D([0], [0], color=port_colors[1], lw=2, label=f"{port_odors.name(1)} trace"),
+                    Line2D([0], [0], color=port_colors[2], lw=2, label=f"{port_odors.name(2)} trace"),
                     Line2D([0], [0], color=data_line_color, lw=2, linestyle="--", label="data start-end"),
                     Line2D([0], [0], color=fixed_line_color, lw=2, label="fixed start-goal"),
                 ]

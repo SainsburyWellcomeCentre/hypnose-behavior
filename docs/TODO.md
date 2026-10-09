@@ -78,3 +78,81 @@ Every gate but `check_qlearning.py` needs the server mount. `frames.py` (533 lin
 is the one rule three call sites depend on (`DECISIONS.md` section 14). `qc/check_layering.py`
 is the first gate here that runs with no mount; a `tests/` directory is the natural next
 step.
+
+---
+
+## Odours A and B are hardcoded downstream of classification
+
+Classification detects odour discrimination from the schema, so G/E sessions (subjects 63
+and 66 from 2026-09-29) classify as `odour_discrimination`. Much of what reads them still
+assumes the two rewarded odours are A and B, or names the reward ports after them. Measured on
+`main`, 2026-10-07:
+
+- **Port letters stored as odour identities.** `classify_trials.py:429,438` tag port 1 `'A'`
+  and port 2 `'B'`, and that letter is what `first_supply_odor_identity` /
+  `first_reward_poke_odor_identity` hold: a G trial paid at port 1 reads `'A'`.
+- **Still keyed on A/B.** `metric_analysis/metrics/hidden_rule.py:387`
+  (`hr_odor_associations`, below).
+- **The metrics report's FA port line.** `metric_analysis/metrics/false_alarm.py`,
+  `fa_port_ratio_by_odor_session`, prints `OdorC: A=4, B=0, Bias ratio: 1.000`, naming the
+  ports A/B. It only matters once a protocol with false alarms on non-rewarded odours (hidden
+  rule, sequences) runs with G/E; odour discrimination has none, and no such protocol is planned.
+  If one is: name the ports from `PortOdors` when the session has `reward_port_by_odor` saved,
+  and keep `A=`/`B=` otherwise, because this printer runs inside the metrics pipeline, where a
+  raise fails the whole session's metrics run (and pooled multi-session results may carry no
+  runs). It changes `metric_analysis/`, so gate it with `qc/regression.py`.
+- **`ab_learning`** (branch `ab-learning-detection`). `data.py` keeps runs whose stage name
+  matches `odourdiscrimination…stageN` and scores `correct_port = port == odor` through
+  `PORT_LETTERS = {1: "A", 2: "B"}`. G/E runs are therefore never loaded, and would score
+  every port visit wrong if they were.
+
+### What replaces it
+
+Every run saves `reward_port_by_odor` in its `parameters` (`manifest.json` and `summary.json`,
+`session.runs[]`), e.g. `{"OdorG": 1, "OdorE": 2}`. It comes from the schema: a reward
+condition's `position` is its port, 0 → port 1 and 1 → port 2, in every protocol, checked
+against the supply data on the A/B and G/E sessions. `io.load_results.reward_ports(results,
+run_id=None)` and `Session.reward_ports()` read it. They raise for a session saved before it
+existed, so re-run trial classification first. `reward_ports_by_run` gives every run's map
+and `reward_port_of(ports_by_run, run_id, odor)` one trial's port, since a session can mix
+protocols; `reward_ports_by_letter` collapses the runs to `{odor letter: port}`, and
+`PortOdors` collects the odours each port pays over a figure's sessions for its labels. The
+migration, one step at a time:
+
+1. **Choice and correctness in port terms.** The choice is already a port number
+   (`first_supply_port`, `first_reward_poke_port`, `fa_port`). The correct port is
+   `reward_ports()[odor_name]`. Nothing new should read the `*_odor_identity` letter columns;
+   they stay for now as stale duplicates of `*_port`.
+2. **The port decides layout and colour.** Port 1 always goes up and port 2 always goes down
+   (`plot_choice_history`), port positions are uniform in the movement plots, and each port
+   keeps one colour, so A and G (both port 1) share it. Labels name a port after the odours it
+   pays (`FA Ratio (G-E)/(G+E)`, `FA to port G`); no plot needs "(port 1)" in a label.
+3. **The plotters and metrics listed above**, on `main`. Done: `plot_choice_history`,
+   `plot_decision_accuracy_by_odor`, and the false-alarm family (`fa_port_number`,
+   `fa_analysis`, the FA-ratio plotters in `false_alarm.py` and `hidden_rule.py`,
+   `get_fa_ratio_a_stats`), the shared colour builder `prep._build_odor_colors`, sampling's
+   `plot_poke_duration_by_odor`, `hidden_rule_and_false_alarm`, and the odour colours, order and
+   rewarded-odour filter in `pred_seq_utils`. The predictive-sequence protocol's own sequence
+   names and colours (`SEQUENCE_COLORS`, the G-C / G-F split) stay. The movement plotters
+   (`movement/traces.py`, `speed.py`, `tortuosity.py`) are migrated in code only, never run.
+
+   **Skipped: the single-reward protocol**, which is not in use and is unlikely to get a G/E
+   variant. If it does, its A/B code is: `metric_analysis/sing_rew_metrics.py:90-111`
+   (`_odor_to_identity` / `_port_to_identity`, the anticipatory hit compares the final odour's
+   letter with `fa_port` mapped 1 → A, 2 → B), `visualization/sing_rew.py:69-79,320-530`
+   (`_port_label`, the `split_AB` boxplots, "Port A"/"Port B" legend), and
+   `visualization/movement/sing_rew_movement.py:70-130,249-268` (`GROUP_*` keyed A/B,
+   `_port_letter`, `_ab_letter`, which also reads the `*_odor_identity` columns).
+
+   **Skipped for now: the hidden-rule switch-point model.** `modelling/switchpoint/data.py:80-98`
+   (`_ab_label`: each trial's "reward identity" from `first_supply_odor_identity`, falling back
+   to `last_odor`, kept only if `"A"`/`"B"`; `AB_LETTERS`, `subset_by_ab`) and
+   `visualization/modelling/switchpoint/plots.py:64-66,126-135,242-250` (`_AB_COLORS`,
+   "reward A" labels). The migration would key trials on `first_supply_port` (else the port
+   of the last odour), colour by port and label with `PortOdors`.
+4. **`ab_learning`**, on its branch after merging `main`. It selects runs on the per-run
+   `protocol_mode == "odour_discrimination"`. The stage regex can go, because stage-1
+   (`skipSampling`) runs are no longer analysed. `correct_port` comes from `reward_ports()`.
+
+Hidden-rule odours also have a port (the A or B segment they are rewarded in). The hidden-rule
+plots infer it from rewards today; the schema could give it the same way, later and separately.

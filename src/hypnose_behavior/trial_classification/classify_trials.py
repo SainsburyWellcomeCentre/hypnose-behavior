@@ -720,8 +720,7 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
 
     hidden_rule_indices, sequence_name, schema_settings, schema_err = \
         _hidden_rule_indices_from_stage_or_schema(stage, root)
-    protocol_name = (sequence_name or str(stage) or "").lower()
-    is_odour_discrimination = "odourdiscrimination" in protocol_name
+    is_odour_discrimination = bool(schema_settings.get('isOdourDiscriminationProtocol'))
 
     seq_len = schema_settings.get('sequenceLength')
     max_positions = int(seq_len) if seq_len is not None else None
@@ -742,6 +741,9 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
     init_series_raw = initiated_trials.get('initiation_sequence_time',
                                            pd.Series(dtype='datetime64[ns]'))
     initiation_starts_sorted = pd.to_datetime(init_series_raw, errors='coerce').dropna().sort_values().reset_index(drop=True)
+    # The odour-discrimination reward window ends at the rig's next initiation, including the
+    # one after a run's last trial, which no detected trial carries.
+    all_initiations_sorted = windows.initiation_events_sorted(events)
 
     await_reward_times = events['combined_await_reward_df']['Time'].tolist() if 'combined_await_reward_df' in events else []
 
@@ -854,7 +856,7 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
             odourdisc_ctx = _odourdisc_await_window(
                 trial, trial_start=trial_start, trial_end=trial_end,
                 valve_activations=valve_activations, await_reward_times=await_reward_times,
-                initiation_starts_sorted=initiation_starts_sorted,
+                initiation_starts_sorted=all_initiations_sorted,
                 cue_poke_starts_sorted=cue_poke_starts_sorted,
                 supply_port1_times=supply_port1_times, supply_port2_times=supply_port2_times,
                 port1_pokes=port1_pokes, port2_pokes=port2_pokes)

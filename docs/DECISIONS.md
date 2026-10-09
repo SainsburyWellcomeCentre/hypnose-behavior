@@ -1028,6 +1028,37 @@ cell-level diff, invisible to an md5.
 returned interchangeably. A latent off-by-one that never fired, because `last_odor_position` is
 a column on every session this pipeline writes.
 
+### A run's first and last trial *(2026-10-08)*
+
+**Intended output change: one trial per run, fixtures regenerated 2026-10-08.**
+
+The rig logs `InitiationSequence` at the reset into the *next* trial, together with
+`ChooseRandomSequence` and `SampleRewardCondition`. Two trials per run sit at the edge of that:
+
+- **The first trial has no `InitiationSequence` before it.** `detect_trials._initiation_windows`
+  opens its window at the run's first cue poke, if an odor valve opened between that poke and the
+  first `InitiationSequence`. The start-of-run valve cleaning precedes that poke and is already
+  dropped by `_drop_pre_poke_openings`. The trial carries `initiation_inferred=True`, and its
+  `initiation_sequence_time` is that poke. It is decided like every other window: by AwaitReward
+  on odour discrimination, by sampling elsewhere. So it can also end as a failed attempt, as in
+  `sub-048 20260306` run 1, where the poke ended before the valve opened.
+- **The last odour-discrimination trial ends at an `InitiationSequence` no trial follows.** Its
+  reward window ends at the rig's next initiation, and the supply pulse lands about 10 ms after
+  it. `classify_trials` and `response_times` therefore look the next initiation up among *all*
+  events (`windows.initiation_events_sorted`), and with no cue poke after it the window runs to
+  the end of the recording (`_odourdisc_reward_window_end`). The single-reward false-response
+  window still uses detected trials.
+
+Measured with a row-level diff on the nine fixture sessions plus three G/E sessions (12 sessions,
+15 runs):
+- Every run gains exactly one inferred trial, and no trial disappears.
+- On odour discrimination the inferred trial is rewarded by the supply pulse that matched no
+  trial. On the other protocols it is mostly aborted.
+- No existing trial changes except odour-discrimination last trials, which gain
+  `next_initiation_time`. One of them, `sub-066 20260929` at 17:06:25, collects the supply pulse
+  at 17:06:56 and is `rewarded` rather than `timeout_delayed`.
+- `non_initiated_attempts` gains the first window's failed attempts.
+
 ---
 
 ## 19. The manifest provenance stamp is for audit, and lives in the manifest only *(Phase 7a, 2026-08-12)*
@@ -1110,11 +1141,16 @@ reader checks against the right field set instead of guessing from the columns p
 
 ### `ConflictingProtocolError` raises, and that is the safe choice
 
-The two flags come from **independent sources** — `is_odour_discrimination` from the stage's
-protocol name, `is_single_reward` from the schema's `isSingleRewardProtocol`
-(`trial_classification/params.py`). Nothing in the code makes them exclusive; the experiment
-does, by construction: odour discrimination presents a sequence of length 1, single-reward
-needs ≥2 positions for a sequence to be rewarded-or-not at its end.
+The two flags are read **independently** from the schema (`io/detect_settings.py`) —
+`is_odour_discrimination` from `isOdourDiscriminationProtocol`, `is_single_reward` from
+`isSingleRewardProtocol`. Nothing in the code makes them exclusive; the experiment does, by
+construction: odour discrimination presents a sequence of length 1, single-reward needs ≥2
+positions for a sequence to be rewarded-or-not at its end.
+
+Odour discrimination is the sequence length, not the protocol's name: a name match misses
+`ge-discrimination-stage1`, the same task with odours G/E, and scores it as `standard`. Its
+stage 1 (`skipSampling`: lights and reward pokes, no odour) is not classified at all;
+`analyze_session_multi_run_by_id_date` skips those runs and prints why.
 
 > Raising beats warning **because `batch_analyze_sessions` already catches per session**. The
 > broken session names itself, writes no derivative, and the batch completes. A warning does
@@ -1300,11 +1336,12 @@ reader could not have returned those, so the fallback is not dead code.
 The `.schema.json` sidecar follows the **CSV**, not the parquet: it records which object
 columns were JSON-encoded to survive flat text, which parquet does not need.
 
-### Every QC entry point asks for CSV explicitly
+### Every QC entry point passes `save_csv` explicitly
 
-`qc/_common.fingerprint_session`, `verify_scripts` (for both `run_trial_classification.py` and
-`batch_process.py`, via `--save-csv`) and `outcome_agreement.py` all pass it, because all three
-read `trial_data.csv` directly -- `_common` fingerprints the *canonical CSV*.
+`qc/_common.fingerprint_session` passes `save_csv=False`: it fingerprints every table from its
+parquet (section 26). `verify_scripts` passes `--save-csv` to `run_trial_classification.py` and
+`batch_process.py`, which keeps that flag's wiring exercised. `outcome_agreement.py` passes
+`save_csv=True` because it reads `trial_data.csv`.
 
 > **Never rely on the default in the harness.** The gate would then change meaning whenever
 > the default did, and the failure is not a mismatch but a `FileNotFoundError` on a file
@@ -1479,7 +1516,7 @@ three `poke_durations` consumers exercised; `verify_scripts` GREEN, covering the
 
 | key | what it covers |
 |---|---|
-| `trial_data` | the canonical CSV -- unchanged |
+| `trial_data` | the table **as written** (`trial_data.parquet`) |
 | `metrics` | the reported metrics dict (`run.REPORT`, 25 entries) -- unchanged |
 | `position_data` | the side-table, **as written** |
 | `metrics_by_trial` | the per-trial metric table, **as written** |
@@ -1558,6 +1595,25 @@ after. Final compare **54/54 green**, 9/9 on each of the six keys.
 > Also: `Bash(timeout=)` is capped at 600000 ms and **silently clamps**, so a longer value
 > reads as a 10-minute kill on a job that needs more. Run the long gates in the background
 > instead.
+
+### Every fingerprint is platform-independent *(2026-10-07)*
+
+A fingerprint hashes a table's values, read back from its parquet and rendered with
+`to_csv(lineterminator="\n")` (`_common._csv`). Two things made the same session hash
+differently on macOS and Windows, although the pipeline output is identical there
+(`sub-053 20260520`: the Mac- and PC-written `trial_data.parquet` pass
+`assert_frame_equal(check_exact=True)`):
+
+1. **Line endings.** `to_csv`'s default is `os.linesep`, which is `\r\n` on Windows. Every
+   CSV-rendered md5 went RED, and only the JSON-hashed `metrics` stayed green.
+2. **`read_csv` float parsing.** `trial_data` was fingerprinted by reading back the CSV the
+   pipeline wrote, and pandas' default float parser turns long decimals
+   (`796.8960000000001`) into different doubles on each platform. With LF forced, the
+   long-decimal `*_ms` columns were all that still differed, in all nine sessions. The side
+   tables, rendered from parquet, matched byte for byte, float columns included.
+
+Reading `trial_data` from the parquet, like the side tables, removes the second cause and
+makes the gate stricter: dtypes survive, and a CSV round trip could hide a dtype change.
 
 ---
 

@@ -12,10 +12,12 @@ Design choices that make the fingerprint trustworthy:
 * Reads the real, read-only ``rawdata``; redirects ALL derivatives I/O to a
   throwaway temp dir via ``HYPNOSE_DERIVATIVES_ROOT`` so nothing touches the
   server and runs never collide.
-* Fingerprints the *canonical CSV* of ``trial_data`` (sorted columns, reset
-  index) -- NOT parquet bytes, whose pyarrow/version/compression metadata is
-  non-deterministic -- and never the manifest/summary files (wall-clock
-  timestamps live there).
+* Fingerprints each table's *values*, read back from the written parquet (sorted
+  columns, reset index) and rendered with ``to_csv(lineterminator="\\n")``. Not the
+  parquet bytes, whose pyarrow/version/compression metadata is not deterministic;
+  not a CSV read back with ``read_csv``, whose float parsing differs by platform; and
+  never the manifest/summary files (wall-clock timestamps live there). The same
+  session therefore fingerprints identically on macOS and Windows.
 * Fingerprints metrics from the *returned dict* (no file, no timestamps).
 * Imports every pipeline entry point in ONE place (below). When modules move
   during the restructuring, only these import lines change -- the md5s must not.
@@ -123,28 +125,14 @@ def _md5(text: str) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 
-def _canonical_trial_data_df(csv_path: Path) -> "pd.DataFrame":
-    """Read trial_data with columns sorted and index reset (order-independent)."""
-    df = pd.read_csv(csv_path)
-    return df.reindex(sorted(df.columns), axis=1).reset_index(drop=True)
-
-
-def _canonical_trial_data(csv_path: Path) -> str:
-    """Column-order- and index-independent CSV serialization of trial_data."""
-    return _canonical_trial_data_df(csv_path).to_csv(index=False)
+def _csv(obj, **kwargs) -> str:
+    """`to_csv` with `\\n` line endings; the default, `os.linesep`, is `\\r\\n` on Windows."""
+    return obj.to_csv(lineterminator="\n", **kwargs)
 
 
 def _canonical_metrics(metrics: dict) -> str:
     """Deterministic, timestamp-free serialization of the metric values."""
     return json.dumps(metrics, sort_keys=True, default=str)
-
-
-def _trial_data_fingerprint(csv_path: Path) -> tuple[str, dict]:
-    """Return (overall md5, {column_name: md5 of that column's values})."""
-    df = _canonical_trial_data_df(csv_path)
-    overall = _md5(df.to_csv(index=False))
-    per_col = {str(c): _md5(df[c].to_csv(index=False, header=False)) for c in df.columns}
-    return overall, per_col
 
 
 def _metrics_fingerprint(metrics: dict) -> tuple[str, dict]:
@@ -157,20 +145,19 @@ def _metrics_fingerprint(metrics: dict) -> tuple[str, dict]:
 def _canonical_table_df(parquet_path: Path) -> "pd.DataFrame":
     """A saved table in canonical form: columns sorted, index reset.
 
-    Reads the **parquet**, because that is the only copy `save_csv=False` writes, but
-    fingerprints its *CSV rendering* rather than the file bytes -- pyarrow version and
-    compression metadata are not deterministic, which is why `trial_data` has always
-    been fingerprinted through the canonical CSV rather than the parquet.
+    - Reads the **parquet**: it is always written, and its values come back exact.
+    - Fingerprinted through its CSV *rendering*, not the file bytes, whose pyarrow
+      version and compression metadata are not deterministic.
     """
     df = pd.read_parquet(parquet_path)
     return df.reindex(sorted(df.columns), axis=1).reset_index(drop=True)
 
 
 def _table_fingerprint(parquet_path: Path) -> tuple[str, dict]:
-    """Return (overall md5, {column_name: md5}) for a saved side-table."""
+    """Return (overall md5, {column_name: md5}) for a saved table, `trial_data` included."""
     df = _canonical_table_df(parquet_path)
-    overall = _md5(df.to_csv(index=False))
-    per_col = {str(c): _md5(df[c].to_csv(index=False, header=False)) for c in df.columns}
+    overall = _md5(_csv(df, index=False))
+    per_col = {str(c): _md5(_csv(df[c], index=False, header=False)) for c in df.columns}
     return overall, per_col
 
 
@@ -184,9 +171,9 @@ def _canonical_metric_value(value) -> str:
     `sort_keys` and `default=str`, which renders a tuple as a list, deterministically.
     """
     if isinstance(value, pd.DataFrame):
-        return value.to_csv(index=True)
+        return _csv(value, index=True)
     if isinstance(value, pd.Series):
-        return value.to_csv(index=True, header=False)
+        return _csv(value, index=True, header=False)
     return json.dumps(value, sort_keys=True, default=str)
 
 
@@ -275,19 +262,18 @@ def fingerprint_session(subjid, date) -> dict:
 
         sink = io.StringIO()
         with contextlib.redirect_stdout(sink):
-            # `save_csv=True` explicitly, never by default: this harness fingerprints the
-            # *canonical CSV* of trial_data, so relying on `save_csv`'s default would let a
-            # later change to it break the gate silently (Phase 7b.3).
+            # `save_csv=False` explicitly, never by default (section 23): every table is
+            # fingerprinted from its parquet, which is always written.
             analyze_session_multi_run_by_id_date(
-                subjid, date, verbose=False, save=True, print_summary=False, save_csv=True
+                subjid, date, verbose=False, save=True, print_summary=False, save_csv=False
             )
 
-        matches = list(tmp.glob(f"**/ses-*_date-{date}/{layout.RESULTS_DIRNAME}/**/trial_data.csv"))
+        matches = list(tmp.glob(f"**/ses-*_date-{date}/{layout.RESULTS_DIRNAME}/**/trial_data.parquet"))
         if not matches:
             raise FileNotFoundError(
-                f"trial_data.csv not found for subj={subjid} date={date} under {tmp}"
+                f"trial_data.parquet not found for subj={subjid} date={date} under {tmp}"
             )
-        trial_data_md5, trial_data_columns = _trial_data_fingerprint(matches[0])
+        trial_data_md5, trial_data_columns = _table_fingerprint(matches[0])
         results_dir = layout.results_dir_of(matches[0])
 
         with contextlib.redirect_stdout(sink):

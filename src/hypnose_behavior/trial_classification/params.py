@@ -2,7 +2,7 @@
 
 The functions that read a session's schema and turn it into the numbers the classifiers run
 on: the sampling offset, the per-odor minimum sampling times, the response window, and the
-single-reward protocol detection.
+single-reward and odour-discrimination protocol detection.
 
 They live apart from the classifiers because all three of ``detect_trials``,
 ``classify_trials`` and ``analyze_response_times`` need the same parameters, and none of them
@@ -161,3 +161,17 @@ def _get_single_reward_info(root) -> tuple[bool, frozenset, frozenset]:
     if not rewarded_set:
         return False, frozenset(), frozenset()
     return True, rewarded_set, all_set
+
+
+def _odour_discrimination_info(root) -> tuple[bool, bool]:
+    """``(is_odour_discrimination, skips_sampling)`` from the schema; ``(False, False)`` if unreadable.
+
+    - Odour discrimination: every sequence is one odour long, whichever odours (A/B, G/E, ...).
+    - ``skipSampling`` marks its stage 1, where no odour is sampled.
+    """
+    try:
+        _, schema_settings = detect_settings.detect_settings(Path(root))
+    except Exception:
+        return False, False
+    return (bool(schema_settings.get('isOdourDiscriminationProtocol')),
+            bool(schema_settings.get('skipSampling')))

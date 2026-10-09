@@ -30,6 +30,7 @@ import json
 
 import matplotlib.colors as mcolors
 
+from hypnose_behavior.frames import odor_letter
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import (
     _iter_subject_dirs,
@@ -64,7 +65,7 @@ __all__ = [
     # imports. DECISIONS.md section 5 names `_computed_metrics` by its old path
     # `visualization._computed_metrics`; it is this function.
     "_extract_metric_value", "_metric_name_for_key", "_computed_metrics",
-    "_computed_metric", "_series_line_widths", "_build_odor_colors",
+    "_computed_metric", "_series_line_widths", "_build_odor_colors", "_PORT_COLORS",
 ]
 
 
@@ -617,15 +618,13 @@ def _series_line_widths(show_mean: bool):
     return 3.5, None
 
 
-_ODOR_A_COLOR = "#E53935"   # bright red
+# A rewarded odour takes its port's colour, whatever the odour: bright red, teal/green.
+_PORT_COLORS = {1: "#E53935", 2: "#00796B"}
 
-_ODOR_B_COLOR = "#00796B"   # teal/green
+# A hidden-rule odour: the lighter colour of the port its learned association points to.
+_HR_PORT_COLORS = {1: "#EF9A9A", 2: "#4DB6AC"}
 
-_HR_A_COLOR = "#EF9A9A"     # lighter red  (HR odor associated with reward A)
-
-_HR_B_COLOR = "#4DB6AC"     # lighter green (HR odor associated with reward B)
-
-_OTHER_ODOR_COLORS = [      # distinct colours for non-A/B, non-HR odors
+_OTHER_ODOR_COLORS = [      # distinct colours for odours neither rewarded nor hidden-rule
     "#1E88E5",  # blue
     "#FDD835",  # yellow
     "#FB8C00",  # orange
@@ -634,20 +633,23 @@ _OTHER_ODOR_COLORS = [      # distinct colours for non-A/B, non-HR odors
     "#6D4C41",  # brown
 ]
 
-def _build_odor_colors(subj_dirs, odors_list) -> Tuple[dict, dict]:
-    """Return ``({odor_letter: color}, {hr_odor_letter: 'A'|'B'})`` using the
-    shared scheme: A=red, B=green, hidden-rule odor=lighter red/green by its
-    learned A/B association, every other odor=a distinct palette colour."""
+def _build_odor_colors(subj_dirs, odors_list, port_odors) -> Tuple[dict, dict]:
+    """``({odor_letter: color}, {hr_odor_letter: 'A'|'B'})`` in the shared scheme.
+
+    - A rewarded odour (``port_odors``, a `PortOdors`) takes its port's colour.
+    - A hidden-rule odour takes the lighter colour of its associated port
+      (`hr_odor_associations`: ``'A'`` is port 1, ``'B'`` port 2).
+    - Every other odour: a distinct palette colour.
+    """
     assoc = hr_odor_associations(subj_dirs)
+    letter_port = {odor_letter(o): p for p in (1, 2) for o in port_odors.odors(p)}
     colors: dict = {}
     other_i = 0
     for letter in odors_list:
-        if letter == "A":
-            colors[letter] = _ODOR_A_COLOR
-        elif letter == "B":
-            colors[letter] = _ODOR_B_COLOR
+        if letter in letter_port:
+            colors[letter] = _PORT_COLORS[letter_port[letter]]
         elif letter in assoc:
-            colors[letter] = _HR_A_COLOR if assoc[letter] == "A" else _HR_B_COLOR
+            colors[letter] = _HR_PORT_COLORS[1 if assoc[letter] == "A" else 2]
         else:
             colors[letter] = _OTHER_ODOR_COLORS[other_i % len(_OTHER_ODOR_COLORS)]
             other_i += 1
