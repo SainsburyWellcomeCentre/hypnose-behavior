@@ -91,11 +91,8 @@ assumes the two rewarded odours are A and B, or names the reward ports after the
 - **Port letters stored as odour identities.** `classify_trials.py:429,438` tag port 1 `'A'`
   and port 2 `'B'`, and that letter is what `first_supply_odor_identity` /
   `first_reward_poke_odor_identity` hold: a G trial paid at port 1 reads `'A'`.
-  `metric_analysis/sing_rew_metrics.py:111` and `visualization/movement/sing_rew_movement.py:83`
-  map ports to letters the same way.
-- **Plotters keyed on A/B.** `visualization/sampling.py:925`, `prep.py:645-650`,
-  `pred_seq_utils.py:113-125,314`, `sing_rew.py:324-520`,
-  `movement/speed.py:524-643`, `movement/traces.py:461-1250`, `movement/tortuosity.py:145,158`,
+- **Plotters keyed on A/B.** `visualization/movement/speed.py:524-643`,
+  `movement/traces.py:461-1250`, `movement/tortuosity.py:145,158`,
   `modelling/switchpoint/plots.py:65` and `data.py:90` (`_ab_label`), and
   `metric_analysis/metrics/hidden_rule.py:387`. `fa_port_ratio_by_odor_session` prints the
   ports as `A=` / `B=` in the metrics report.
@@ -128,7 +125,18 @@ migration, one step at a time:
 3. **The plotters and metrics listed above**, on `main`. Done: `plot_choice_history`,
    `plot_decision_accuracy_by_odor`, and the false-alarm family (`fa_port_number`,
    `fa_analysis`, the FA-ratio plotters in `false_alarm.py` and `hidden_rule.py`,
-   `get_fa_ratio_a_stats`).
+   `get_fa_ratio_a_stats`), the shared colour builder `prep._build_odor_colors`, sampling's
+   `plot_poke_duration_by_odor`, `hidden_rule_and_false_alarm`, and the odour colours, order and
+   rewarded-odour filter in `pred_seq_utils`. The predictive-sequence protocol's own sequence
+   names and colours (`SEQUENCE_COLORS`, the G-C / G-F split) stay.
+
+   **Skipped: the single-reward protocol**, which is not in use and is unlikely to get a G/E
+   variant. If it does, its A/B code is: `metric_analysis/sing_rew_metrics.py:90-111`
+   (`_odor_to_identity` / `_port_to_identity`, the anticipatory hit compares the final odour's
+   letter with `fa_port` mapped 1 → A, 2 → B), `visualization/sing_rew.py:69-79,320-530`
+   (`_port_label`, the `split_AB` boxplots, "Port A"/"Port B" legend), and
+   `visualization/movement/sing_rew_movement.py:70-130,249-268` (`GROUP_*` keyed A/B,
+   `_port_letter`, `_ab_letter`, which also reads the `*_odor_identity` columns).
 4. **`ab_learning`**, on its branch after merging `main`. It selects runs on the per-run
    `protocol_mode == "odour_discrimination"`. The stage regex can go, because stage-1
    (`skipSampling`) runs are no longer analysed. `correct_port` comes from `reward_ports()`.

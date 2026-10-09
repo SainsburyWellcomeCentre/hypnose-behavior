@@ -339,7 +339,7 @@ class PortOdors:
       `reward_ports_by_run`, and raises as that does.
     - ``name(port)``: the odour letters joined by "/" (``"A"``; ``"A/G"`` across a switch);
       ``""`` when no session added pays at that port.
-    - ``odors()``: every rewarded odour name added, sorted.
+    - ``odors(port=None)``: the rewarded odour names added, sorted; only ``port``'s when given.
     """
 
     def __init__(self):
@@ -355,5 +355,7 @@ class PortOdors:
     def name(self, port) -> str:
         return "/".join(sorted({odor_letter(o) for o in self._odors.get(port, ())}))
 
-    def odors(self) -> list:
+    def odors(self, port=None) -> list:
+        if port is not None:
+            return sorted(self._odors.get(port, ()))
         return sorted(set().union(*self._odors.values()))

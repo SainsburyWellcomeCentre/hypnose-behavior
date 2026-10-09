@@ -17,7 +17,11 @@ from hypnose_behavior.io.layout import (
     session_selectors,
 )
 from hypnose_behavior.frames import odor_letter, position_entries_by_trial
-from hypnose_behavior.io.load_results import PortOdors, reward_ports_by_letter
+from hypnose_behavior.io.load_results import (
+	PortOdors,
+	reward_ports_by_letter,
+	reward_ports_by_run,
+)
 from hypnose_behavior.io.loaders import _load_position_data
 from hypnose_behavior.visualization.prep import (
 	_collect_sessions,
@@ -94,13 +98,15 @@ def _order_sequence_labels(groups):
 	return labels
 
 
-def _order_odor_labels(groups):
+def _order_odor_labels(groups, port_odors=None):
+	"""Rewarded odours by port (port 1 first), then the rest by letter."""
 	def _key(name):
 		text = str(name)
 		if text.startswith("Odor"):
 			text = text.replace("Odor", "", 1)
 		return text
-	return sorted(groups.keys(), key=_key)
+	rewarded = [o for o in _rewarded_by_port(port_odors) if o in groups]
+	return rewarded + sorted((k for k in groups if k not in rewarded), key=_key)
 
 
 SEQUENCE_COLORS = {
@@ -110,9 +116,10 @@ SEQUENCE_COLORS = {
 	"E-D-B": "#7f7f7f",
 }
 
+# A rewarded odour takes its port's colour; `ODOR_COLORS` covers the odours no port pays.
+PORT_COLORS = {1: "#2ca02c", 2: "#d62728"}
+
 ODOR_COLORS = {
-	"OdorA": "#2ca02c",
-	"OdorB": "#d62728",
 	"OdorF": "#7fbf7f",
 	"OdorC": "#f08080",
 	"OdorG": "#1f77b4",
@@ -123,7 +130,26 @@ ODOR_COLORS = {
 }
 
 SEQUENCE_ORDER = ["F-G-A", "E-D-A", "E-D-B", "C-G-B"]
-ODOR_ORDER = ["OdorA", "OdorB", "OdorC", "OdorD", "OdorE", "OdorF", "OdorG-F", "OdorG-C", "OdorG"]
+ODOR_ORDER = ["OdorC", "OdorD", "OdorE", "OdorF", "OdorG-F", "OdorG-C", "OdorG"]
+
+
+def _rewarded_by_port(port_odors):
+	"""The rewarded odour names, port 1's then port 2's; `[]` without a `PortOdors`."""
+	return (port_odors.odors(1) + port_odors.odors(2)) if port_odors is not None else []
+
+
+def _odor_colors(port_odors):
+	"""`ODOR_COLORS` plus each rewarded odour in its port's colour."""
+	colors = dict(ODOR_COLORS)
+	for port, color in PORT_COLORS.items():
+		colors.update({odor: color for odor in port_odors.odors(port)})
+	return colors
+
+
+def _odor_order(port_odors):
+	"""Rewarded odours by port (port 1 first), then `ODOR_ORDER`."""
+	rewarded = _rewarded_by_port(port_odors)
+	return rewarded + [o for o in ODOR_ORDER if o not in rewarded]
 
 
 def _canonical_odor(value) -> str:
@@ -302,6 +328,7 @@ def last_odor_poke_time(
 					per_cat_sessions[cat].append({"n_trials": 0, "groups": {}})
 				continue
 			n_trials = len(df)
+			odor_ports = reward_ports_by_letter(reward_ports_by_run(results_dir))
 			completed = df[df.get("is_aborted") == False]
 			# `in_poke_times` is the provenance flag matching the poke facts this reads;
 			# an unfiltered view carries positions the poke blob never had -- section 2.
@@ -312,7 +339,8 @@ def last_odor_poke_time(
 				cat_df = completed[completed.get("response_time_category") == cat]
 				for _, row in cat_df.iterrows():
 					last_odor = row.get("last_odor")
-					if last_odor not in {"OdorA", "OdorB"}:
+					# Trials ending on a rewarded odour only.
+					if not isinstance(last_odor, str) or odor_letter(last_odor) not in odor_ports:
 						continue
 					seq = _parse_json_value(row.get("odor_sequence"))
 					if not _sequence_len_ok(seq):
@@ -517,6 +545,7 @@ def first_odor_poke_duration(
 	figs = []
 	odor_filter = _build_odor_filter(odor)
 	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
+		port_odors = PortOdors()
 		pooled = {}
 		session_records = []
 		for results_dir in results_dirs:
@@ -524,6 +553,7 @@ def first_odor_poke_duration(
 			if df.empty:
 				session_records.append({"n_trials": 0, "groups": {}})
 				continue
+			port_odors.add(results_dir)
 			n_trials = len(df)
 			completed = df[df.get("is_aborted") == False]
 			pokes_by_trial = position_entries_by_trial(
@@ -550,8 +580,8 @@ def first_odor_poke_duration(
 
 		if pooled:
 			fig, ax = plt.subplots(figsize=(10, 5))
-			ordered = {k: pooled[k] for k in _order_odor_labels(pooled)}
-			_plot_violins_with_stats(ax, ordered, "Poke Duration", "Odor", color_map=ODOR_COLORS)
+			ordered = {k: pooled[k] for k in _order_odor_labels(pooled, port_odors)}
+			_plot_violins_with_stats(ax, ordered, "Poke Duration", "Odor", color_map=_odor_colors(port_odors))
 			ax.set_title(f"Subjid {subjid} first-odor poke duration")
 			ax.set_ylim(bottom=0)
 			fig.tight_layout()
@@ -563,8 +593,8 @@ def first_odor_poke_duration(
 			mode_label = "rolling" if moving_avg else "daily mean"
 			summary_fig = _plot_summary(
 				session_records,
-				color_map=ODOR_COLORS,
-				group_order=ODOR_ORDER,
+				color_map=_odor_colors(port_odors),
+				group_order=_odor_order(port_odors),
 				ylabel="Poke Duration (ms)",
 				title=f"Subjid {subjid} first-odor poke duration ({mode_label})",
 				moving_avg=moving_avg,
@@ -624,6 +654,7 @@ def poke_time_all_pos(
 	odor_filter = _build_odor_filter(odor)
 	categories = [("completed", False), ("aborted", True)]
 	for subjid, date_vals, results_dirs in _collect_sessions(subjids, dates, **select):
+		port_odors = PortOdors()
 		per_cat_pooled = {name: {} for name, _ in categories}
 		per_cat_sessions = {name: [] for name, _ in categories}
 
@@ -633,6 +664,8 @@ def poke_time_all_pos(
 				for name, _ in categories:
 					per_cat_sessions[name].append({"n_trials": 0, "groups": {}})
 				continue
+			# G is split by the odour before it only where it is a sequence odour, not rewarded.
+			split_g = "G" not in reward_ports_by_letter(port_odors.add(results_dir))
 			n_trials = len(df)
 			pokes_by_trial = position_entries_by_trial(
 				_load_position_data(results_dir, df), "in_poke_times")
@@ -651,7 +684,7 @@ def poke_time_all_pos(
 						odor_str = str(odor_name) if odor_name is not None else None
 						if odor_name is not None and poke_ms is not None:
 							key = odor_str
-							if odor_str == "OdorG":
+							if odor_str == "OdorG" and split_g:
 								if prev_odor == "OdorC":
 									key = "OdorG-C"
 								elif prev_odor == "OdorF":
@@ -670,8 +703,9 @@ def poke_time_all_pos(
 			pooled = per_cat_pooled[name]
 			if pooled:
 				fig, ax = plt.subplots(figsize=(10, 5))
-				ordered = {k: pooled[k] for k in _order_odor_labels(pooled)}
-				_plot_violins_with_stats(ax, ordered, "Poke Duration (ms)", "Odor", color_map=ODOR_COLORS)
+				ordered = {k: pooled[k] for k in _order_odor_labels(pooled, port_odors)}
+				_plot_violins_with_stats(ax, ordered, "Poke Duration (ms)", "Odor",
+										 color_map=_odor_colors(port_odors))
 				ax.set_title(f"Subjid {subjid} poke duration (all positions, {name})")
 				ax.set_ylim(bottom=0)
 				fig.tight_layout()
@@ -684,8 +718,8 @@ def poke_time_all_pos(
 			for name, _ in categories:
 				summary_fig = _plot_summary(
 					per_cat_sessions[name],
-					color_map=ODOR_COLORS,
-					group_order=ODOR_ORDER,
+					color_map=_odor_colors(port_odors),
+					group_order=_odor_order(port_odors),
 					ylabel="Poke Duration (ms)",
 					title=f"Subjid {subjid} poke duration (all positions, {name}) ({mode_label})",
 					moving_avg=moving_avg,
@@ -1016,8 +1050,8 @@ def fa_analysis(
 
 		if poke_groups:
 			fig, ax = plt.subplots(figsize=(10, 5))
-			ordered = {k: poke_groups[k] for k in _order_odor_labels(poke_groups)}
-			_plot_violins_with_stats(ax, ordered, "Poke Time (ms)", "Odor", color_map=ODOR_COLORS)
+			ordered = {k: poke_groups[k] for k in _order_odor_labels(poke_groups, port_odors)}
+			_plot_violins_with_stats(ax, ordered, "Poke Time (ms)", "Odor", color_map=_odor_colors(port_odors))
 			ax.set_title(f"Subjid {subjid} FA poke time by odor")
 			ax.set_ylim(bottom=0)
 			fig.tight_layout()
@@ -1026,7 +1060,7 @@ def fa_analysis(
 				save_figure(fig, "fa_poke_time", subjids=[subjid], dates=date_vals)
 
 		if resp_groups:
-			ordered_odors = _order_odor_labels(resp_groups)
+			ordered_odors = _order_odor_labels(resp_groups, port_odors)
 			labels = []
 			has_any = False
 			fig, ax = plt.subplots(figsize=(12, 5))
@@ -1117,8 +1151,8 @@ def fa_analysis(
 			mode_label = "rolling" if moving_avg else "daily mean"
 			summary_fig = _plot_summary(
 				poke_session_records,
-				color_map=ODOR_COLORS,
-				group_order=ODOR_ORDER,
+				color_map=_odor_colors(port_odors),
+				group_order=_odor_order(port_odors),
 				ylabel="FA Poke Time (ms)",
 				title=f"Subjid {subjid} FA poke time by odor ({mode_label})",
 				moving_avg=moving_avg,
@@ -1140,8 +1174,8 @@ def fa_analysis(
 			for port in (1, 2):
 				resp_summary_fig = _plot_summary(
 					resp_session_records[port],
-					color_map=ODOR_COLORS,
-					group_order=ODOR_ORDER,
+					color_map=_odor_colors(port_odors),
+					group_order=_odor_order(port_odors),
 					ylabel="FA Response Time (ms)",
 					title=f"Subjid {subjid} FA response time (FA→{port_odors.name(port)}) by odor ({mode_label})",
 					moving_avg=moving_avg,

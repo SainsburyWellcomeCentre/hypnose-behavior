@@ -29,7 +29,7 @@ from hypnose_behavior.io.layout import (
     normalize_subjid,
     session_selectors,
 )
-from hypnose_behavior.io.load_results import PortOdors
+from hypnose_behavior.io.load_results import PortOdors, reward_ports_by_letter
 from hypnose_behavior.io.paths import (
     get_rawdata_root,
     get_derivatives_root,
@@ -178,6 +178,7 @@ def hidden_rule_and_false_alarm(
 
     rows = []
     observed_hr_letters = set()
+    port_odors = PortOdors()
     for sid, subj_dir, subj_dates in subject_iter:
         ses_recs = iter_sessions(subj_dir, subj_dates, **select)
         for session_num, rec in enumerate(ses_recs, start=1):
@@ -185,6 +186,8 @@ def hidden_rule_and_false_alarm(
             results_dir = rec.results_dir
             if not rec.analysed:
                 continue
+            # The rewarded odours are never hidden-rule odours.
+            rewarded = set(reward_ports_by_letter(port_odors.add(results_dir)))
 
             # Hidden rule detection rate, computed through the registry rather
             # than read from metrics_*.json (`docs/DECISIONS.md` section 5).
@@ -201,11 +204,11 @@ def hidden_rule_and_false_alarm(
                 hr_by_odor = metrics.get("hidden_rule_by_odor", {}) or {}
                 for odor_name in hr_by_odor.get("hr_odors", []) or []:
                     letter = _odor_to_letter(odor_name)
-                    if letter not in ("A", "B"):
+                    if letter not in rewarded:
                         observed_hr_letters.add(letter)
                 for odor_name in (hr_by_odor.get("by_odor", {}) or {}).keys():
                     letter = _odor_to_letter(odor_name)
-                    if letter not in ("A", "B"):
+                    if letter not in rewarded:
                         observed_hr_letters.add(letter)
 
             # Per-odor false alarm rate; odors with a zero denominator are omitted
@@ -238,7 +241,7 @@ def hidden_rule_and_false_alarm(
                 by_odor = (metrics.get("hidden_rule_by_odor", {}) or {}).get("by_odor", {}) or {}
                 for odor_name, stats in by_odor.items():
                     letter = _odor_to_letter(odor_name)
-                    if letter in ("A", "B"):
+                    if letter in rewarded:
                         continue
                     dr = stats.get("detection_rate") if isinstance(stats, dict) else None
                     if not isinstance(dr, (int, float)) or np.isnan(dr):
@@ -261,8 +264,8 @@ def hidden_rule_and_false_alarm(
     markers_cycle = ['o', '^', 's', 'X', 'D', 'P', 'v', '>', '<', '*', 'h', 'H', '8', 'p', 'x']
     subj_to_marker = {sid: markers_cycle[i % len(markers_cycle)] for i, sid in enumerate(unique_subj)}
 
-    # Colors: shared odor scheme (A=red, B=green, HR odor=lighter red/green by
-    # its learned reward association, other odors=distinct palette); the
+    # Colors: shared odor scheme (rewarded odour=its port's colour, HR odor=the lighter
+    # colour of its associated port, other odors=distinct palette); the
     # hidden-rule detection series ("HR") is forced to black.
     series_order = list(odors_list) + ["HR"]
     # Per-HR-odor detection series (only present when show_lines added rows).
@@ -273,7 +276,7 @@ def hidden_rule_and_false_alarm(
     hrperf_letters = [s.split("_", 1)[1] for s in hrperf_series]
     color_letters = list(odors_list) + [l for l in hrperf_letters if l not in odors_list]
     subj_dirs_for_colors = [t[1] for t in subject_iter]
-    odor_colors, hr_assoc = _build_odor_colors(subj_dirs_for_colors, color_letters)
+    odor_colors, hr_assoc = _build_odor_colors(subj_dirs_for_colors, color_letters, port_odors)
     series_color = dict(odor_colors)
     series_color["HR"] = "black"
     for s in hrperf_series:
@@ -284,8 +287,7 @@ def hidden_rule_and_false_alarm(
     hidden_rule_letters = set(observed_hr_letters)
     hidden_rule_letters.update(hrperf_letters)
     hidden_rule_letters.update(l for l in color_letters if l in hr_assoc)
-    hidden_rule_letters.discard("A")
-    hidden_rule_letters.discard("B")
+    hidden_rule_letters -= {odor_letter(o) for o in port_odors.odors()}
     hr_dash_cycle = [(0, (7, 3)), (0, (2, 2)), (0, (6, 2, 1, 2))]
     odor_linestyle = {}
     odor_alpha = {}
