@@ -301,9 +301,50 @@ def detect_settings(root):
         # Silent fallback; leave as empty list
         pass
 
+    # --- Probe trials: a final-position rewarded odor that is also rewarded earlier ---
+    # - Probe alone: the hidden-rule inference above stands, with the final odors (A/B) as
+    #   the hidden-rule odors.
+    # - Probe plus a hidden rule: the hidden-rule odors are re-inferred with the final odors
+    #   left out, since they share positions with them.
+    probe_indices_inferred = []
+    probe_odors_inferred = []
+    is_probe_hidden_rule = False
+    try:
+        final_rewarded = set()
+        early_rewarded_by_pos = defaultdict(set)
+        for definition in _iter_definitions(sequences_obj):
+            for pos_idx, choices in enumerate(definition):
+                items = _flatten_list(choices) if isinstance(choices, list) else [choices]
+                names = {n for n in (_command_name(it) for it in items if _is_rewarded(it)) if n}
+                if pos_idx == len(definition) - 1:
+                    final_rewarded |= names
+                else:
+                    early_rewarded_by_pos[pos_idx] |= names
+        probe_by_pos = {idx: odors & final_rewarded for idx, odors in early_rewarded_by_pos.items()}
+        probe_indices = sorted(idx for idx, odors in probe_by_pos.items() if odors)
+        probe_odors = sorted(set().union(*probe_by_pos.values()))
+        hr_pairs = sorted((idx, sorted(odors - final_rewarded))
+                          for idx, odors in early_rewarded_by_pos.items()
+                          if len(odors - final_rewarded) == 2)
+        probe_indices_inferred, probe_odors_inferred = probe_indices, probe_odors
+        if probe_indices and hr_pairs:
+            is_probe_hidden_rule = True
+            hidden_rule_indices_inferred = [idx for idx, _ in hr_pairs]
+            hidden_rule_odors_inferred = list(dict.fromkeys(o for _, pair in hr_pairs for o in pair))
+    except Exception:
+        probe_indices_inferred, probe_odors_inferred, is_probe_hidden_rule = [], [], False
+
     schema_settings['hiddenRuleIndicesInferred'] = hidden_rule_indices_inferred
     schema_settings['hiddenRuleIndexInferred'] = hidden_rule_indices_inferred[0] if hidden_rule_indices_inferred else None
     schema_settings['hiddenRuleOdorsInferred'] = hidden_rule_odors_inferred
+    schema_settings['probeIndicesInferred'] = probe_indices_inferred
+    schema_settings['probeOdorsInferred'] = probe_odors_inferred
+    # The three early-reward protocols, mutually exclusive. Only the probe-hidden-rule one
+    # has its own trial schema; a probe session is scored as a hidden-rule one.
+    schema_settings['isProbeHiddenRuleProtocol'] = is_probe_hidden_rule
+    schema_settings['isProbeProtocol'] = bool(probe_indices_inferred) and not is_probe_hidden_rule
+    schema_settings['isHiddenRuleProtocol'] = (not probe_indices_inferred
+                                               and bool(hidden_rule_odors_inferred))
 
     # --- Enumerate concrete candidate sequences and their final-position reward status ---
     # A concrete sequence is the ordered tuple of odor commands across positions. It is

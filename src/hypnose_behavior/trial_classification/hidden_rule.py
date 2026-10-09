@@ -4,6 +4,9 @@ Both classifiers resolve the hidden-rule positions identically -- from the stage
 encodes them, otherwise from the schema's inferred indices -- then check each trial's sequence
 against them and print the same header.
 
+The probe of a probe-hidden-rule session is scored by the same rules, so its helpers live
+here too.
+
 That shared logic lives here so neither classifier imports from the other. It is the same
 shape as ``windows.py`` and ``outcome.py``: the shared rule becomes a leaf, and every caller
 depends on the leaf rather than on a peer (``DECISIONS.md`` sections 3 and 13).
@@ -136,6 +139,29 @@ def _hidden_rule_odor_set(hidden_rule_indices, schema_settings, schema_err, verb
         return hr_odor_set
     except Exception as e:
         raise ValueError(f"Hidden Rule Odor Identities could not be inferred from Schema: {e}")
+
+
+def _probe_indices_and_odor_set(schema_settings):
+    """``(indices, odors)`` of the probe on a probe-hidden-rule session, else ``([], None)``.
+
+    A probe-only session also returns ``([], None)``: it is scored as a hidden rule, with the
+    final odors as the hidden-rule odors.
+    """
+    if not schema_settings.get('isProbeHiddenRuleProtocol'):
+        return [], None
+    indices = sorted(set(_ensure_int_list(schema_settings.get('probeIndicesInferred'))))
+    return indices, set(map(str, schema_settings.get('probeOdorsInferred') or []))
+
+
+def _early_reward_type(hr_hit_indices, probe_hit_indices):
+    """``'hidden_rule'`` / ``'probe'``, whichever the trial reached first, else ``'neither'``."""
+    first_hr = min(hr_hit_indices, default=None)
+    first_probe = min(probe_hit_indices, default=None)
+    if first_hr is None and first_probe is None:
+        return 'neither'
+    if first_probe is None or (first_hr is not None and first_hr < first_probe):
+        return 'hidden_rule'
+    return 'probe'
 
 
 def _check_hidden_rule(odor_sequence, candidate_indices, odor_set):

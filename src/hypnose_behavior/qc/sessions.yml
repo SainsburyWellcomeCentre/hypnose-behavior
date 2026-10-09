@@ -27,6 +27,10 @@
 #   hidden_rule          sub-048 20260306 (ses-062)  location0123, seq len 5
 #                        sub-040 20251229 (ses-046)  location0123, single run
 #                        sub-040 20251124 (ses-021)  location01234 -> final pos dropped
+#   probe                sub-045 20260203 (ses-039)  quintuples-probe-option2-location1:
+#                                                    A/B rewarded early, scored as hidden rule
+#   probe_hidden_rule    sub-062 20261007 (ses-063)  hiddenrule-probe-location1-option6:
+#                                                    HR C/F and probe A/B, both at index 1
 #   preseq               sub-059 20260612 (ses-036)  preseq-triples-stage1
 #
 # Sequence lengths covered: 1 (odourdiscrimination), 3 (singrew / preseq), 5 (quintuples).
@@ -64,3 +68,9 @@ sessions:
   - subjid: "040"
     date: "20251124"
     label: hidden_rule_pos12345_finalpos_bug
+  - subjid: "045"
+    date: "20260203"
+    label: probe_quintuples_location1
+  - subjid: "062"
+    date: "20261007"
+    label: probe_hidden_rule_location1

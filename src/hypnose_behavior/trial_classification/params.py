@@ -175,3 +175,24 @@ def _odour_discrimination_info(root) -> tuple[bool, bool]:
         return False, False
     return (bool(schema_settings.get('isOdourDiscriminationProtocol')),
             bool(schema_settings.get('skipSampling')))
+
+
+_PROTOCOL_LABELS = {
+    'is_odour_discrimination': 'isOdourDiscriminationProtocol',
+    'is_hidden_rule': 'isHiddenRuleProtocol',
+    'is_probe': 'isProbeProtocol',
+    'is_probe_hidden_rule': 'isProbeHiddenRuleProtocol',
+}
+
+
+def _protocol_labels(root) -> dict:
+    """The schema's protocol labels, as the manifest's ``session`` block stores them.
+
+    - ``is_singrew`` is not here: it is written separately, from ``_get_single_reward_info``.
+    - Every label is None when the schema cannot be read: unknown, not False.
+    """
+    try:
+        _, schema_settings = detect_settings.detect_settings(Path(root))
+    except Exception:
+        return {label: None for label in _PROTOCOL_LABELS}
+    return {label: bool(schema_settings.get(key)) for label, key in _PROTOCOL_LABELS.items()}

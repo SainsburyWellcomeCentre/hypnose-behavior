@@ -409,6 +409,10 @@ def save_session_analysis_results(classification: dict, root, session_metadata: 
         "hidden_rule_locations": classification.get("hidden_rule_locations"),
         "hidden_rule_positions": classification.get("hidden_rule_positions"),
         "hidden_rule_odors": classification.get("hidden_rule_odors"),
+        # Probe-hidden-rule protocol only; empty otherwise.
+        "probe_locations": classification.get("probe_locations"),
+        "probe_positions": classification.get("probe_positions"),
+        "probe_odors": classification.get("probe_odors"),
     }
     summary = {
         "created_at": manifest["created_at"],

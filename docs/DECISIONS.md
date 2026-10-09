@@ -3378,3 +3378,38 @@ disk costs correctness.
 **Gate:** `regression` **GREEN, 90 fingerprints across all nine sessions**, byte-identical
 · `check_imports` PASS. The per-session write path is untouched; only the batch layer
 above it changed.
+
+---
+
+## 40. Three early-reward protocols; only the joint one is a mode *(2026-10-09)*
+
+`detect_settings` labels a session with at most one of three mutually exclusive flags. A
+**probe** is a final-position rewarded odour (A/B) that the schema also rewards earlier:
+
+| label | schema | example | scored as |
+|---|---|---|---|
+| `isHiddenRuleProtocol` | a non-final odour rewarded early; A/B only at the end | sub-040 20251229 | `standard`, HR odours C/F |
+| `isProbeProtocol` | A/B rewarded early, no other early pair | sub-045 20260203 | `standard`, **HR odours A/B** |
+| `isProbeHiddenRuleProtocol` | both | sub-062 20261007 | `probe_hidden_rule` |
+
+- **A probe-only session keeps being scored as a hidden rule**, A/B as its HR odours, so
+  every saved probe session stays byte-identical. Do not "fix" it into the probe columns
+  without regenerating its fixture on purpose.
+- **The joint session breaks the exactly-two HR inference**: index 1 holds F, C, A and B.
+  For that label only, the HR odours are re-inferred with the final odours left out; the
+  original inference is untouched and still decides the other two.
+- **Its own mode, not new base columns** -- the §20/§21 measurement again: probe columns on
+  `StandardTrialRecord` would add nine all-null columns to every session.
+  `ProbeHiddenRuleTrialRecord` extends `StandardTrialRecord`; the probe fields mirror the HR
+  ones and are scored by the same helpers, plus `early_reward_type`
+  (`hidden_rule` / `probe` / `neither`, the first one reached).
+- **Success is the HR rule unchanged.** The schema also rewards the odour after an HR/probe
+  odour (the reward stays unlocked), so leaving one or two odours later is still a success.
+- **The labels are written to `manifest.session`** (and so `summary.session`) next to
+  `is_singrew`, as `is_odour_discrimination` / `is_hidden_rule` / `is_probe` /
+  `is_probe_hidden_rule`, None when the schema is unreadable.
+- **Metrics are not probe-aware yet**: on a joint session `hidden_rule_mask`'s non-HR group
+  contains the probe trials.
+
+Fixtures: sub-045 20260203 (probe) was generated from the code before this change; sub-062
+20261007 (joint) is generated from it.

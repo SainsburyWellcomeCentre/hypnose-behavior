@@ -39,7 +39,7 @@ from hypnose_behavior.io.load_results import (
 )
 from hypnose_behavior.io.parquet_peek import peek
 from hypnose_behavior.io.protocol_schema import (
-    MODES, ODOUR_DISCRIMINATION, SINGLE_REWARD, STANDARD,
+    MODES, ODOUR_DISCRIMINATION, PROBE_HIDDEN_RULE, SINGLE_REWARD, STANDARD,
     mode_independent_columns, trial_data_columns,
 )
 from hypnose_behavior.metric_analysis.registry import REGISTRY, MetricSpec
@@ -77,8 +77,8 @@ __all__ = [
     # sessions saved before the restructure.
     "trial_data_columns",
     "mode_independent_columns",
-    "MODES", "STANDARD", "SINGLE_REWARD", "ODOUR_DISCRIMINATION",
-    "reward_ports",             # {odor: reward port} of a loaded session (`results`)
+    "MODES", "STANDARD", "SINGLE_REWARD", "ODOUR_DISCRIMINATION", "PROBE_HIDDEN_RULE",
+    "reward_ports",            # {odor: reward port} of a loaded session (`results`)
     "reward_ports_by_run",      # {run_id: {odor: reward port}}; `results` or a results dir
     "reward_port_of",           # one trial's port: (ports_by_run, run_id, odor) -> 1 | 2 | None
     "reward_ports_by_letter",   # {odor letter: port} over a session's runs

@@ -35,9 +35,10 @@ from hypnose_behavior.io.protocol_schema import (
 )
 import hypnose_behavior.trial_classification.windows as windows
 from hypnose_behavior.trial_classification.hidden_rule import (
-    _check_hidden_rule, _drop_final_hidden_rule_index,
+    _check_hidden_rule, _drop_final_hidden_rule_index, _early_reward_type,
     _hidden_rule_indices_from_stage_or_schema, _hidden_rule_odor_set,
     _hidden_rule_positions, _hidden_rule_success, _print_hidden_rule_header,
+    _probe_indices_and_odor_set,
 )
 from hypnose_behavior.trial_classification.outcome import classify_completed_trial, latency_label
 from hypnose_behavior.trial_classification.params import (
@@ -783,6 +784,16 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
     completed_hr_missed_rewarded = []
     completed_hr_missed_unrewarded = []
     completed_hr_missed_timeout = []
+    # Probe-hidden-rule protocol only, the probe's counterparts of the HR lists above.
+    aborted_sequences_probe = []
+    completed_probe = []
+    completed_probe_missed = []
+    completed_probe_rewarded = []
+    completed_probe_unrewarded = []
+    completed_probe_timeout = []
+    completed_probe_missed_rewarded = []
+    completed_probe_missed_unrewarded = []
+    completed_probe_missed_timeout = []
     non_initiated_odor1_attempts = []
     # Single-reward protocol: completed sequences whose final position is NOT rewarded.
     # Empty (and never appended to) for the default protocol, so legacy output is unchanged.
@@ -795,6 +806,12 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
         'unrewarded': (completed_unrewarded, completed_hr_unrewarded, completed_hr_missed_unrewarded),
         'timeout': (completed_timeout, completed_hr_timeout, completed_hr_missed_timeout),
     }
+    # The same, for the probe: (acted on it, missed it).
+    probe_outcome_buckets = {
+        'rewarded': (completed_probe_rewarded, completed_probe_missed_rewarded),
+        'unrewarded': (completed_probe_unrewarded, completed_probe_missed_unrewarded),
+        'timeout': (completed_probe_timeout, completed_probe_missed_timeout),
+    }
 
     if single_reward_info is None:
         single_reward_info = _get_single_reward_info(root)
@@ -805,8 +822,9 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
     # whose schema is undefined -- see `io/protocol_schema.resolve_mode`. The mode is
     # carried out on `result` so `save_results` can stamp it into the manifest, which is
     # how a reader knows which field set to check the file against.
-    protocol_mode = resolve_mode(is_odour_discrimination=is_odour_discrimination,
-                                 is_single_reward=is_single_reward)
+    protocol_mode = resolve_mode(
+        is_odour_discrimination=is_odour_discrimination, is_single_reward=is_single_reward,
+        is_probe_hidden_rule=bool(schema_settings.get('isProbeHiddenRuleProtocol')))
     record_cls = record_class_for(protocol_mode)
     # The final position of a full sequence is always the reward position, so it can
     # never be a hidden-rule position -- drop it (single-reward left untouched).
@@ -815,6 +833,14 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
         _hidden_rule_positions(hidden_rule_indices)
 
     hr_odor_set = _hidden_rule_odor_set(hidden_rule_indices, schema_settings, schema_err, verbose)
+
+    # Probe-hidden-rule protocol only; `probe_odor_set` is None otherwise.
+    probe_indices, probe_odor_set = _probe_indices_and_odor_set(schema_settings)
+    probe_positions = [idx + 1 for idx in probe_indices]
+    if verbose and probe_odor_set is not None:
+        print(f"Probe positions: {', '.join(map(str, probe_positions))} "
+              f"(indices {', '.join(map(str, probe_indices))}); "
+              f"probe odors: {sorted(probe_odor_set)}")
 
     # Aggregators for the summary prints (completed trials only)
     agg_position_poke_times = {pos: [] for pos in range(1, max_positions + 1)}
@@ -949,6 +975,23 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
         trial_rec.hidden_rule_success = hr_success
         trial_rec.hidden_rule_success_position = hr_success_position
 
+        hit_probe, probe_success = False, False
+        if probe_odor_set is not None:
+            enough_for_probe, hit_probe, probe_hit_indices = _check_hidden_rule(
+                final_odor_sequence, probe_indices, probe_odor_set)
+            probe_hit_positions = [idx + 1 for idx in probe_hit_indices]
+            probe_success, probe_success_position = _hidden_rule_success(
+                probe_hit_positions, len(final_odor_sequence), max_positions, bool(trial_await_rewards))
+            trial_rec.probe_locations = list(probe_indices)
+            trial_rec.probe_positions = list(probe_positions)
+            trial_rec.enough_odors_for_probe = enough_for_probe
+            trial_rec.hit_probe = hit_probe
+            trial_rec.probe_hit_indices = probe_hit_indices
+            trial_rec.probe_hit_positions = probe_hit_positions
+            trial_rec.probe_success = probe_success
+            trial_rec.probe_success_position = probe_success_position
+            trial_rec.early_reward_type = _early_reward_type(hr_hit_indices, probe_hit_indices)
+
         if is_odour_discrimination:
             trial_rec.odourdiscrimination_mode = True
             trial_rec.last_valve_start = odourdisc_ctx['last_valve_start']
@@ -1016,6 +1059,8 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
             aborted_sequences.append(copy.copy(trial_rec))
             if hit_hidden_rule:
                 aborted_sequences_hr.append(copy.copy(trial_rec))
+            if hit_probe:
+                aborted_sequences_probe.append(copy.copy(trial_rec))
             continue
 
         for pos, v in (position_valve_times or {}).items():
@@ -1044,6 +1089,9 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
         else:
             hr_category = 0
 
+        if hit_probe:
+            (completed_probe if probe_success else completed_probe_missed).append(copy.copy(trial_rec))
+
         if is_single_reward and sequence_rewarded is False:
             fr_window_end = _false_response_window_end(
                 trial_end, await_reward_time, initiation_starts_sorted, cue_poke_starts_sorted,
@@ -1063,6 +1111,8 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
             buckets[0].append(copy.copy(trial_rec))
             if hr_category:
                 buckets[hr_category].append(copy.copy(trial_rec))
+            if hit_probe:
+                probe_outcome_buckets[outcome][0 if probe_success else 1].append(copy.copy(trial_rec))
 
         completed_sequences.append(copy.copy(trial_rec))
 
@@ -1096,6 +1146,17 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
         'completed_sequence_HR_missed_rewarded': _frame(completed_hr_missed_rewarded),
         'completed_sequence_HR_missed_unrewarded': _frame(completed_hr_missed_unrewarded),
         'completed_sequence_HR_missed_reward_timeout': _frame(completed_hr_missed_timeout),
+
+        # Probe-hidden-rule protocol only. Empty otherwise.
+        'aborted_sequences_probe': _frame(aborted_sequences_probe),
+        'completed_sequences_probe': _frame(completed_probe),
+        'completed_sequences_probe_missed': _frame(completed_probe_missed),
+        'completed_sequence_probe_rewarded': _frame(completed_probe_rewarded),
+        'completed_sequence_probe_unrewarded': _frame(completed_probe_unrewarded),
+        'completed_sequence_probe_reward_timeout': _frame(completed_probe_timeout),
+        'completed_sequence_probe_missed_rewarded': _frame(completed_probe_missed_rewarded),
+        'completed_sequence_probe_missed_unrewarded': _frame(completed_probe_missed_unrewarded),
+        'completed_sequence_probe_missed_reward_timeout': _frame(completed_probe_missed_timeout),
     }
 
     if isinstance(result['non_initiated_sequences'], pd.DataFrame) and not result['non_initiated_sequences'].empty:
@@ -1115,6 +1176,9 @@ def classify_trials(data, events, trial_counts, odor_map, stage, root, verbose=T
     result['hidden_rule_locations'] = list(hidden_rule_indices)
     result['hidden_rule_position'] = hidden_rule_position
     result['hidden_rule_odors'] = sorted(list(hr_odor_set)) if hr_odor_set is not None else []
+    result['probe_locations'] = list(probe_indices)
+    result['probe_positions'] = list(probe_positions)
+    result['probe_odors'] = sorted(probe_odor_set) if probe_odor_set is not None else []
 
     if verbose:
         _print_classification_summary(
@@ -1200,6 +1264,22 @@ def _print_classification_summary(result, *, initiated_trials, hidden_rule_indic
         print(f"-- HR Missed Unrewarded: {len(result['completed_sequence_HR_missed_unrewarded'])} ({len(result['completed_sequence_HR_missed_unrewarded'])/hr_missed_total*100:.1f}%)")
         print(f"-- HR Missed Timeout: {len(result['completed_sequence_HR_missed_reward_timeout'])} ({len(result['completed_sequence_HR_missed_reward_timeout'])/hr_missed_total*100:.1f}%)")
     print()
+
+    if result['probe_odors']:
+        print(f"PROBE SPECIFIC BREAKDOWN (odors {', '.join(result['probe_odors'])}, "
+              f"positions {', '.join(map(str, result['probe_positions']))}):")
+        for label, key in (("Probe trials (acted on)", 'completed_sequences_probe'),
+                           ("Probe Missed (completed)", 'completed_sequences_probe_missed'),
+                           ("Aborted Probe trials", 'aborted_sequences_probe')):
+            print(f"-- {label}: {len(result[key])} ({_pct(len(result[key]), ini_n):.1f}%)")
+        for label, prefix in (("Probe", 'completed_sequence_probe'),
+                              ("Probe Missed", 'completed_sequence_probe_missed')):
+            total = sum(len(result[f'{prefix}_{o}']) for o in ('rewarded', 'unrewarded', 'reward_timeout'))
+            if total > 0:
+                for o, name in (('rewarded', 'Rewarded'), ('unrewarded', 'Unrewarded'), ('reward_timeout', 'Timeout')):
+                    n = len(result[f'{prefix}_{o}'])
+                    print(f"   -- {label} {name}: {n} ({_pct(n, total):.1f}%)")
+        print()
 
     print("POKE TIME RANGES BY POSITION:")
     print("-" * 40)
