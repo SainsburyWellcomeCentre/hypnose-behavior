@@ -26,9 +26,9 @@
 #                        sub-040 20251124 (ses-021)  3 runs
 #   hidden_rule          sub-048 20260306 (ses-062)  location0123, seq len 5
 #                        sub-040 20251229 (ses-046)  location0123, single run
-#                        sub-040 20251124 (ses-021)  location01234 -> final pos dropped
 #   probe                sub-045 20260203 (ses-039)  quintuples-probe-option2-location1:
 #                                                    A/B rewarded early, scored as hidden rule
+#                        sub-040 20251124 (ses-021)  location01234 -> final pos dropped
 #   probe_hidden_rule    sub-062 20261007 (ses-063)  hiddenrule-probe-location1-option6:
 #                                                    HR C/F and probe A/B, both at index 1
 #   preseq               sub-059 20260612 (ses-036)  preseq-triples-stage1
