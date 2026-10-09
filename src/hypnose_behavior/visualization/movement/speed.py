@@ -28,6 +28,7 @@ from hypnose_behavior.io.layout import (
     normalize_subjid,
     session_selectors,
 )
+from hypnose_behavior.io.load_results import reward_port_of, reward_ports_by_run
 from hypnose_behavior.io.loaders import (
     _load_position_data,
     iter_sessions,
@@ -461,7 +462,7 @@ def plot_traces_with_speed_threshold(
             return _safe_dt(row.get("fa_time")) or _safe_dt(row.get("sequence_end"))
         return _safe_dt(row.get("sequence_end"))
 
-    def _infer_port_with_odor_fallback(row):
+    def _infer_port_with_odor_fallback(row, ports_by_run):
         # Try explicit port fields first
         for col in [
             "response_port", "rewarded_port", "reward_port", "supply_port",
@@ -486,15 +487,11 @@ def plot_traces_with_speed_threshold(
                         return 1
                 except Exception:
                     continue
-        # Try odor labels
-        odor = str(row.get("last_odor_name") or row.get("last_odor") or row.get("odor_name") or row.get("odor") or "").strip().lower()
-        if odor in {"b", "odorb", "odor_b", "2", "portb", "port_b"}:
-            return 2
-        if odor in {"a", "odora", "odor_a", "1", "porta", "port_a"}:
-            return 1
-        return None
+        # Try the port the trial's odour pays
+        odor = row.get("last_odor_name") or row.get("last_odor") or row.get("odor_name") or row.get("odor")
+        return reward_port_of(ports_by_run, row.get("run_id"), odor)
 
-    def _port_for_coloring(row, cond):
+    def _port_for_coloring(row, cond, ports_by_run):
         """Choose plotting port by explicit behavior columns first.
 
         - FA trials: use fa_port
@@ -517,15 +514,12 @@ def plot_traces_with_speed_threshold(
                     return int(float(row[preferred_col]))
                 except Exception:
                     pass
-        return _infer_port_with_odor_fallback(row)
+        return _infer_port_with_odor_fallback(row, ports_by_run)
 
-    def _category_from_row(row):
-        odor = str(row.get("last_odor_name") or row.get("last_odor") or "A")
-        if odor in {"A", "OdorA", "1"}:
-            return "A"
-        if odor in {"B", "OdorB", "2"}:
-            return "B"
-        return "A"
+    def _odor_port(row, ports_by_run):
+        """The port the trial's last odour pays; port 1 when it pays none."""
+        odor = row.get("last_odor_name") or row.get("last_odor")
+        return reward_port_of(ports_by_run, row.get("run_id"), odor) or 1
 
     traces = {"rewarded": [], "unrewarded": [], "fa": []}
     markers = {"rewarded": [], "unrewarded": [], "fa": []}
@@ -534,6 +528,7 @@ def plot_traces_with_speed_threshold(
         results_dir = rec.results_dir
         if not rec.analysed:
             continue
+        ports_by_run = reward_ports_by_run(results_dir)
         skipped_no_poke_end = []
         analysis_path = layout.table_path(results_dir, "speed_analysis.parquet")
 
@@ -636,11 +631,11 @@ def plot_traces_with_speed_threshold(
                     nearest_idx = int(np.argmin(np.abs((seg["time"] - thr_time).dt.total_seconds())))
                     marker = (x[nearest_idx], y[nearest_idx])
 
-                port = _port_for_coloring(row, cond)
+                port = _port_for_coloring(row, cond, ports_by_run)
                 if cond == "fa":
                     color = port_colors_fa.get(port, port_colors_fa[1])
                 else:
-                    color = port_colors.get(port, port_colors[1 if _category_from_row(row) == "A" else 2])
+                    color = port_colors.get(port, port_colors[_odor_port(row, ports_by_run)])
 
                 traces[cond].append({"x": x, "y": y, "color": color, "session": date_str})
                 if marker is not None:
