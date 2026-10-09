@@ -92,8 +92,15 @@ assumes the two rewarded odours are A and B, or names the reward ports after the
   and port 2 `'B'`, and that letter is what `first_supply_odor_identity` /
   `first_reward_poke_odor_identity` hold: a G trial paid at port 1 reads `'A'`.
 - **Still keyed on A/B.** `metric_analysis/metrics/hidden_rule.py:387`
-  (`hr_odor_associations`, below). `fa_port_ratio_by_odor_session` prints the ports as `A=` /
-  `B=` in the metrics report.
+  (`hr_odor_associations`, below).
+- **The metrics report's FA port line.** `metric_analysis/metrics/false_alarm.py`,
+  `fa_port_ratio_by_odor_session`, prints `OdorC: A=4, B=0, Bias ratio: 1.000`, naming the
+  ports A/B. It only matters once a protocol with false alarms on non-rewarded odours (hidden
+  rule, sequences) runs with G/E; odour discrimination has none, and no such protocol is planned.
+  If one is: name the ports from `PortOdors` when the session has `reward_port_by_odor` saved,
+  and keep `A=`/`B=` otherwise, because this printer runs inside the metrics pipeline, where a
+  raise fails the whole session's metrics run (and pooled multi-session results may carry no
+  runs). It changes `metric_analysis/`, so gate it with `qc/regression.py`.
 - **`ab_learning`** (branch `ab-learning-detection`). `data.py` keeps runs whose stage name
   matches `odourdiscrimination…stageN` and scores `correct_port = port == odor` through
   `PORT_LETTERS = {1: "A", 2: "B"}`. G/E runs are therefore never loaded, and would score
