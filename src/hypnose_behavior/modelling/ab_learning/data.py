@@ -1,9 +1,14 @@
-"""Per-animal trial and failed-attempt frames for the A/B learning analysis.
+"""Per-animal trial and failed-attempt frames for the odour-discrimination learning analysis.
 
 Reads each session's saved ``trial_data`` and ``non_initiated_attempts`` and keeps the
-**odour-discrimination runs only**, stage 2 onwards: the stage is read per run from
-``summary.json``, because a session can mix stages (sub-066 ses-010: run 1 odour
-discrimination, run 2 doubles) while its ``protocol_mode`` names one.
+**odour-discrimination runs only**: each run's own ``protocol_mode`` from ``summary.json``,
+because a session can mix protocols (sub-066 ses-010: run 1 odour discrimination, run 2
+doubles) while its session-level mode names one.
+
+A choice is a reward port (1 or 2). A completed trial is scored by its outcome; a port
+visit after a failed attempt is correct at the port its odor pays at in the run
+(``reward_port_by_odor``, saved per run). A session saved before that field existed
+raises: re-run trial classification.
 
 Two frames, keyed alike (``subjid`` / ``ses`` / ``date`` / ``session_idx`` / ``run_id`` /
 ``initiation_sequence_time``):
@@ -21,26 +26,27 @@ a row breaking either is kept and reported with a warning.
 from __future__ import annotations
 
 import json
-import re
 import warnings
 
 import numpy as np
 import pandas as pd
 
+from hypnose_behavior.frames import odor_letter
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.layout import derivatives, subject_selections
-from hypnose_behavior.io.load_results import load_non_initiated_attempts
-from hypnose_behavior.io.loaders import _odor_to_letter, iter_sessions
+from hypnose_behavior.io.load_results import (
+    load_non_initiated_attempts, reward_port_of, reward_ports_by_run,
+)
+from hypnose_behavior.io.loaders import iter_sessions
 
 __all__ = [
     "INDEX_COLUMNS",
     "MODES",
-    "PORT_LETTERS",
+    "PORTS",
     "PORT_VISIT_LABELS",
     "build_choices",
     "choice_rows",
     "choice_sequence",
-    "is_ab_stage",
     "load_ab_data",
     "reward_bounds",
     "session_bounds",
@@ -54,49 +60,55 @@ MODES = ("completed", "attempts")
 # Each mode's row index in `build_choices`.
 INDEX_COLUMNS = {"completed": "trial_idx", "attempts": "choice_attempt_idx"}
 
-# `odourdiscrimination-stageN`, also inside a schema path. Stage 1 presents no odor (light
-# and reward-port pokes only) and is not part of the analysis.
-_STAGE_RE = re.compile(r"odourdiscrimination\W*stage(\d+)", re.IGNORECASE)
-_EXCLUDED_STAGES = {1}
+# A run's saved `protocol_mode` when it is analysed here. Stage-1 runs (no odor) are not
+# classified, so never carry it.
+_PROTOCOL_MODE = "odour_discrimination"
 
 # A failed attempt counts as a port visit when the visit fell inside the response window
 # or up to its late multiple. `FA_late` is a visit long after the attempt, not a response
 # to it; `nFA` is no visit.
 PORT_VISIT_LABELS = ("FA_time_in", "FA_time_out")
 
-# Reward port -> the odor it pays out for.
-PORT_LETTERS = {1: "A", 2: "B"}
+# The reward ports, as the `*_port` columns number them.
+PORTS = (1, 2)
 
 _KEY = ["run_id", "initiation_sequence_time"]
 _IDENTITY = ["subjid", "ses", "date", "session_idx"]
 _TRIAL_COLUMNS = _IDENTITY + [
     "run_id", "global_trial_id", "initiation_sequence_time", "sequence_start", "odor",
-    "choice", "outcome", "correct", "is_aborted", "attempt_number", "poke_ms",
-    "short_sampling", "n_failed",
+    "choice", "reward_port", "outcome", "correct", "is_aborted", "attempt_number",
+    "poke_ms", "short_sampling", "n_failed",
 ]
 _ATTEMPT_COLUMNS = _IDENTITY + [
     "run_id", "initiation_sequence_time", "attempt_start", "attempt_number", "odor",
     "poke_ms", "zero_poke", "met_min_sampling", "failure_reason", "fa_label", "port_visit",
-    "port", "correct_port", "global_trial_id", "trailing",
+    "port", "reward_port", "correct_port", "global_trial_id", "trailing",
 ]
 _SESSION_COLUMNS = _IDENTITY + ["n_runs", "n_trials", "n_attempts"]
 _RUN_COLUMNS = _IDENTITY + ["run_id", "start", "end"]
 _CHOICE_COLUMNS = _IDENTITY + [
     "run_id", "global_trial_id", "initiation_sequence_time", "time", "odor", "choice",
-    "correct", "is_completed", "zero_poke", "attempt_in_trial", "choice_attempt_idx",
-    "trial_idx", "x_session",
+    "reward_port", "correct", "is_completed", "zero_poke", "attempt_in_trial",
+    "choice_attempt_idx", "trial_idx", "x_session",
 ]
-
-
-def is_ab_stage(stage_name) -> bool:
-    """Whether a run's stage name is an odour-discrimination stage the analysis uses."""
-    match = _STAGE_RE.search(str(stage_name or ""))
-    return bool(match) and int(match.group(1)) not in _EXCLUDED_STAGES
 
 
 def _letters(series: pd.Series) -> pd.Series:
     """Stored odor names as bare letters (``"OdorA"`` -> ``"A"``)."""
-    return series.map(lambda v: "" if pd.isna(v) else _odor_to_letter(v))
+    return series.map(lambda v: "" if pd.isna(v) else odor_letter(v))
+
+
+def _ports(series: pd.Series) -> pd.Series:
+    """A ``*_port`` column as reward ports, ``<NA>`` where it names none of `PORTS`."""
+    port = pd.to_numeric(series, errors="coerce")
+    return port.where(port.isin(PORTS)).astype("Int64")
+
+
+def _reward_ports(frame: pd.DataFrame, ports_by_run: dict) -> pd.Series:
+    """The port each row's odor pays at in its run; ``<NA>`` where the run pays it nowhere."""
+    return pd.Series([reward_port_of(ports_by_run, run_id, odor)
+                      for run_id, odor in zip(frame["run_id"], frame["odor_name"])],
+                     index=frame.index, dtype="Int64")
 
 
 def _as_ns(series: pd.Series) -> pd.Series:
@@ -112,9 +124,9 @@ def _wall_clock(value):
     return stamp.tz_localize(None) if stamp.tzinfo else stamp
 
 
-def _ab_runs(results_dir) -> dict:
-    """``{run_id: (start, end)}`` of the runs whose stage (from ``summary.json``) passes
-    `is_ab_stage`."""
+def _od_runs(results_dir) -> dict:
+    """``{run_id: (start, end)}`` of the runs ``summary.json`` records as odour
+    discrimination."""
     path = layout.table_path(results_dir, "summary.json")
     try:
         with open(path, encoding="utf-8") as f:
@@ -123,15 +135,13 @@ def _ab_runs(results_dir) -> dict:
         return {}
     kept = {}
     for run in runs:
-        stage = run.get("stage")
-        name = stage.get("stage_name") if isinstance(stage, dict) else stage
-        if is_ab_stage(name):
+        if (run.get("parameters") or {}).get("protocol_mode") == _PROTOCOL_MODE:
             kept[run.get("run_id")] = (_wall_clock(run.get("start_time")),
                                        _wall_clock(run.get("end_time")))
     return kept
 
 
-def _trial_frame(td: pd.DataFrame) -> pd.DataFrame:
+def _trial_frame(td: pd.DataFrame, ports_by_run: dict) -> pd.DataFrame:
     """The analysis columns of one session's trials."""
     outcome = td["response_time_category"].astype(object).where(
         td["response_time_category"].notna(), "").astype(str)
@@ -139,13 +149,13 @@ def _trial_frame(td: pd.DataFrame) -> pd.DataFrame:
     correct[outcome == "rewarded"] = True
     correct[outcome == "unrewarded"] = False
 
-    # The port the animal chose: the reward it collected, or the wrong port it poked.
-    choice = pd.Series("", index=td.index, dtype=object)
-    for column, when in (("first_supply_odor_identity", "rewarded"),
-                         ("first_reward_poke_odor_identity", "unrewarded")):
+    # The port the animal chose: where it collected the reward, or the wrong port it poked.
+    choice = pd.Series(pd.NA, index=td.index, dtype="Int64")
+    for column, when in (("first_supply_port", "rewarded"),
+                         ("first_reward_poke_port", "unrewarded")):
         if column in td.columns:
-            picked = td[column].astype(str)
-            choice = choice.mask((outcome == when) & picked.isin(PORT_LETTERS.values()), picked)
+            picked = _ports(td[column])
+            choice = choice.mask((outcome == when) & picked.notna(), picked)
 
     reason = (td["fallback_reason"] if "fallback_reason" in td.columns
               else pd.Series(None, index=td.index, dtype=object))
@@ -156,6 +166,7 @@ def _trial_frame(td: pd.DataFrame) -> pd.DataFrame:
         "sequence_start": _as_ns(td["sequence_start"]),
         "odor": _letters(td["odor_name"]),
         "choice": choice,
+        "reward_port": _reward_ports(td, ports_by_run),
         "outcome": outcome,
         "correct": correct,
         "is_aborted": td["is_aborted"].fillna(False).astype(bool),
@@ -166,16 +177,17 @@ def _trial_frame(td: pd.DataFrame) -> pd.DataFrame:
     })
 
 
-def _attempt_frame(ni: pd.DataFrame) -> pd.DataFrame:
+def _attempt_frame(ni: pd.DataFrame, ports_by_run: dict) -> pd.DataFrame:
     """The analysis columns of one session's failed attempts."""
     odor = _letters(ni["odor_name"])
     poke_ms = pd.to_numeric(ni["continuous_poke_time_ms"], errors="coerce")
     fa_label = ni["fa_label"].astype(str)
     port_visit = fa_label.isin(PORT_VISIT_LABELS)
-    port = pd.to_numeric(ni["fa_port"], errors="coerce").map(PORT_LETTERS)
-    port = port.where(port_visit).fillna("")
+    port = _ports(ni["fa_port"]).where(port_visit.to_numpy())
+    reward_port = _reward_ports(ni, ports_by_run)
+    scored = port.notna() & reward_port.notna()
     correct_port = pd.Series(np.nan, index=ni.index, dtype=object)
-    correct_port[port_visit] = (port == odor)[port_visit]
+    correct_port[scored] = (port == reward_port)[scored].astype(bool)
     met_min = (ni["met_min_sampling"] if "met_min_sampling" in ni.columns
                else pd.Series(np.nan, index=ni.index))
     return pd.DataFrame({
@@ -191,6 +203,7 @@ def _attempt_frame(ni: pd.DataFrame) -> pd.DataFrame:
         "fa_label": fa_label,
         "port_visit": port_visit.to_numpy(),
         "port": port,
+        "reward_port": reward_port,
         "correct_port": correct_port,
     })
 
@@ -231,21 +244,23 @@ def load_ab_data(subjids, dates=None, *, ses=None, index=None, date_range=None,
         load_ab_data([63, 64, 65, 66], ses_range=(1, 14))
 
     ``subjids`` / ``dates`` / the selectors take every form of
-    ``io.layout.subject_selections``. Runs of other stages are dropped whatever the
+    ``io.layout.subject_selections``. Runs of other protocols are dropped whatever the
     selection, and a session with neither a trial nor a failed attempt left is skipped.
+    Raises for a selected session saved before ``reward_port_by_odor`` existed.
 
     Returns ``{"trials", "attempts", "sessions"}``:
 
-    - ``trials``: ``odor`` / ``choice`` (``"A"``/``"B"``, ``""`` when no choice),
-      ``outcome`` (``response_time_category``), ``correct`` (True / False, NaN unless
-      rewarded or unrewarded), ``attempt_number``, ``poke_ms``, ``short_sampling`` (the rig
-      initiated below the minimum sampling time) and ``n_failed`` (failed attempts in its
-      initiation).
+    - ``trials``: ``odor`` (letter), ``choice`` (port 1 / 2, ``<NA>`` when no choice),
+      ``reward_port`` (where the odor pays in the run), ``outcome``
+      (``response_time_category``), ``correct`` (True / False, NaN unless rewarded or
+      unrewarded), ``attempt_number``, ``poke_ms``, ``short_sampling`` (the rig initiated
+      below the minimum sampling time) and ``n_failed`` (failed attempts in its initiation).
     - ``attempts``: ``odor``, ``poke_ms``, ``zero_poke``, ``met_min_sampling`` (reached the
       minimum without the rig initiating), ``failure_reason``, ``fa_label``,
-      ``port_visit`` (``fa_label`` in ``PORT_VISIT_LABELS``), ``port`` (``"A"``/``"B"``
-      when visited), ``correct_port`` (NaN without a visit), ``global_trial_id`` of the
-      trial the initiation produced and ``trailing`` (it produced none).
+      ``port_visit`` (``fa_label`` in ``PORT_VISIT_LABELS``), ``port`` (1 / 2 when
+      visited), ``reward_port``, ``correct_port`` (``port == reward_port``; NaN without
+      both), ``global_trial_id`` of the trial the initiation produced and ``trailing`` (it
+      produced none).
     - ``sessions``: one row per kept session, with the kept ``n_runs`` and the row counts.
     - ``runs``: one row per kept run of a kept session, ``start`` / ``end`` from
       ``summary.json`` on the trial tables' clock (NaT where it records none).
@@ -266,7 +281,8 @@ def load_ab_data(subjids, dates=None, *, ses=None, index=None, date_range=None,
             if not rec.analysed:
                 continue
             label = f"sub-{subjid} ses-{rec.ref.ses}"
-            runs = _ab_runs(rec.results_dir)
+            ports_by_run = reward_ports_by_run(rec.results_dir)
+            runs = _od_runs(rec.results_dir)
             td = rec.views["trial_data"]
             td = td[td["run_id"].isin(runs)] if len(td.columns) else td
             ni = load_non_initiated_attempts(rec.results_dir)
@@ -277,12 +293,12 @@ def load_ab_data(subjids, dates=None, *, ses=None, index=None, date_range=None,
                           f"attempt, skipped")
                 continue
 
-            trials = (_trial_frame(td.sort_values(["run_id", "global_trial_id"])) if len(td)
-                      else pd.DataFrame(columns=_TRIAL_COLUMNS[len(_IDENTITY):-1]))
+            trials = (_trial_frame(td.sort_values(["run_id", "global_trial_id"]), ports_by_run)
+                      if len(td) else pd.DataFrame(columns=_TRIAL_COLUMNS[len(_IDENTITY):-1]))
             identity = {"subjid": int(subjid), "ses": rec.ref.ses,
                         "date": rec.date_str, "session_idx": session_idx}
             if len(ni):
-                trials, attempts = _join(trials, _attempt_frame(ni), label)
+                trials, attempts = _join(trials, _attempt_frame(ni, ports_by_run), label)
                 attempt_parts.append(attempts.assign(**identity))
             else:
                 trials = trials.assign(n_failed=0)
@@ -328,7 +344,7 @@ def build_choices(data: dict) -> pd.DataFrame:
         completed = choices[choices["is_completed"]]      # completed-trial mode
         every_choice = choices                            # all-choice-attempt mode
 
-    A choice is an expressed A/B decision. A completed trial counts when it was scored
+    A choice is an expressed port decision. A completed trial counts when it was scored
     (rewarded or unrewarded); a timeout or an aborted trial expresses none. A failed
     attempt counts when a reward port was visited, zero-poke attempts included: the visit
     is a choice whether or not the odor was sampled long enough.
@@ -344,8 +360,8 @@ def build_choices(data: dict) -> pd.DataFrame:
       the first choice and 1 at the last (``(k - 1) / (K_s - 1)``, 0.0 for a single
       choice), so a within-session slope never mixes the two axes.
 
-    Also carries ``odor``, ``choice`` (``"A"`` / ``"B"``), ``correct``, ``is_completed``,
-    ``zero_poke`` (False on completed rows) and the
+    Also carries ``odor``, ``choice`` (port 1 / 2), ``reward_port``, ``correct``,
+    ``is_completed``, ``zero_poke`` (False on completed rows) and the
     ``(run_id, initiation_sequence_time)`` key the two source frames join on.
     """
     trials, attempts = data["trials"], data["attempts"]
@@ -357,6 +373,7 @@ def build_choices(data: dict) -> pd.DataFrame:
         "time": scored["sequence_start"],
         "odor": scored["odor"],
         "choice": scored["choice"],
+        "reward_port": scored["reward_port"],
         "correct": scored["correct"].astype(bool),
         "is_completed": True,
         "zero_poke": False,
@@ -368,6 +385,7 @@ def build_choices(data: dict) -> pd.DataFrame:
         "time": visited["attempt_start"],
         "odor": visited["odor"],
         "choice": visited["port"],
+        "reward_port": visited["reward_port"],
         "correct": visited["correct_port"].astype(bool),
         "is_completed": False,
         "zero_poke": visited["zero_poke"].astype(bool),

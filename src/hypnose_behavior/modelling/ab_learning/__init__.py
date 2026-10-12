@@ -1,4 +1,4 @@
-"""Sudden vs. gradual learning of the A/B odour discrimination.
+"""Sudden vs. gradual learning of a two-odour discrimination (A/B, G/E, ...).
 
 One module per role:
 

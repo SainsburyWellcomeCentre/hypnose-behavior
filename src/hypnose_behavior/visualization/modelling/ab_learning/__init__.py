@@ -1,4 +1,4 @@
-"""Figures for the A/B learning analysis (see ``hypnose_behavior.modelling.ab_learning``).
+"""Figures for the odour-discrimination learning analysis (``modelling.ab_learning``).
 
 One module per analysis block, mirroring the modelling package:
 

@@ -1,4 +1,4 @@
-"""Whether completed trials alone describe the A/B learning.
+"""Whether completed trials alone describe the odour-discrimination learning.
 
 Four diagnostics over the frames of `data.load_ab_data`, each a pure function of them:
 
@@ -246,7 +246,7 @@ def choice_persistence(data: dict, min_choices: int = 2) -> dict:
     """
     trials = data["trials"]
     attempts = data["attempts"]
-    choices = attempts[~attempts["trailing"].astype(bool) & attempts["port_visit"].astype(bool)]
+    choices = attempts[~attempts["trailing"].astype(bool) & attempts["port"].notna()]
     choices = choices.assign(global_trial_id=choices["global_trial_id"].astype(int))
     choices = choices.sort_values(_TRIAL_KEY + ["attempt_number"])
 
@@ -266,17 +266,17 @@ def choice_persistence(data: dict, min_choices: int = 2) -> dict:
                           how="inner")
     previous = paired.groupby(_TRIAL_KEY)["port"].shift()
     consecutive = paired[previous.notna()].assign(
-        agree=lambda f: f["port"] == previous[f.index])
+        agree=lambda f: (f["port"] == previous[f.index]).astype(bool))
     consecutive = consecutive.join(p_attempt, on=_ODOR_KEY)
     p = consecutive["p_attempt"]
     consecutive["chance"] = p**2 + (1 - p)**2
 
     # (b) last choice attempt against the trial's own choice, so one attempt is enough.
     last = choices.groupby(_TRIAL_KEY).tail(1).set_index(_TRIAL_KEY)["port"].rename("last_port")
-    scored = trials[(trials["n_choices"] > 0) & trials["choice"].isin(("A", "B"))]
+    scored = trials[(trials["n_choices"] > 0) & trials["choice"].notna()]
     scored = scored.join(last, on=_TRIAL_KEY)
     scored = scored.join(p_attempt, on=_ODOR_KEY).join(p_trial, on=_ODOR_KEY)
-    scored["agree"] = scored["last_port"] == scored["choice"]
+    scored["agree"] = (scored["last_port"] == scored["choice"]).astype(bool)
     pa, pt = scored["p_attempt"], scored["p_trial"]
     scored["chance"] = pa * pt + (1 - pa) * (1 - pt)
 

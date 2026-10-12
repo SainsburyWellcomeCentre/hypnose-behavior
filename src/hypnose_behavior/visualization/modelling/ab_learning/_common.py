@@ -1,4 +1,4 @@
-"""Layout and styling shared by the A/B learning figures.
+"""Layout and styling shared by the odour-discrimination learning figures.
 
 Every figure in this package draws **one animal per figure**, so the pieces they share
 are the frame around the data: the loader guard, the figure and axis setup, the session

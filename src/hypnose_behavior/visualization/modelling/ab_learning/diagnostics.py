@@ -1,4 +1,4 @@
-"""Figures for the A/B learning diagnostics (``modelling.ab_learning.diagnostics``).
+"""Figures for the learning diagnostics (``modelling.ab_learning.diagnostics``).
 
 Each ``plot_*`` takes the same subject/session selection as `load_ab_data` -- or the
 already-loaded frames as ``data=`` -- and draws **one figure per animal**, x = the animal's
