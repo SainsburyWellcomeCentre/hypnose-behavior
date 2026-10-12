@@ -101,10 +101,8 @@ assumes the two rewarded odours are A and B, or names the reward ports after the
   and keep `A=`/`B=` otherwise, because this printer runs inside the metrics pipeline, where a
   raise fails the whole session's metrics run (and pooled multi-session results may carry no
   runs). It changes `metric_analysis/`, so gate it with `qc/regression.py`.
-- **`ab_learning`** (branch `ab-learning-detection`). `data.py` keeps runs whose stage name
-  matches `odourdiscrimination…stageN` and scores `correct_port = port == odor` through
-  `PORT_LETTERS = {1: "A", 2: "B"}`. G/E runs are therefore never loaded, and would score
-  every port visit wrong if they were.
+- ~~**`discrimination_learning`** (branch `ab-learning-detection`)~~ — done 2026-10-12, step 4
+  below.
 
 ### What replaces it
 
@@ -150,9 +148,12 @@ migration, one step at a time:
    `visualization/modelling/switchpoint/plots.py:64-66,126-135,242-250` (`_AB_COLORS`,
    "reward A" labels). The migration would key trials on `first_supply_port` (else the port
    of the last odour), colour by port and label with `PortOdors`.
-4. **`ab_learning`**, on its branch after merging `main`. It selects runs on the per-run
-   `protocol_mode == "odour_discrimination"`. The stage regex can go, because stage-1
-   (`skipSampling`) runs are no longer analysed. `correct_port` comes from `reward_ports()`.
+4. ~~**`discrimination_learning`**~~ — done 2026-10-12 on `ab-learning-detection` (`15f0a49`).
+   `load_discrimination_data` keeps the runs whose own `protocol_mode` is
+   `odour_discrimination`. `choice` / `port` are reward ports (1 / 2), and `reward_port` comes
+   from `reward_port_of`. A failed attempt's port visit is correct at `reward_port`; a
+   completed trial keeps the rig's outcome. A/B results are unchanged, and the G/E sessions
+   load and score.
 
 Hidden-rule odours also have a port (the A or B segment they are rewarded in). The hidden-rule
 plots infer it from rewards today; the schema could give it the same way, later and separately.
