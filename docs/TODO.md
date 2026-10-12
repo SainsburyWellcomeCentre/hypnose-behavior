@@ -8,17 +8,6 @@ were re-measured on `8e5ee27`.
 
 ---
 
-## The standing caveat
-
-> **The server has not been re-analysed.** Every saved session on the derivatives tree
-> predates the v2.0.0 restructure. The nine coverage sessions in
-> `src/hypnose_behavior/qc/sessions.yml` are the only ones current with this code, and the
-> gates re-derive those from rawdata rather than reading what is saved.
-
-This outlives any one plan.
-
----
-
 ## ~~`sleap-hypnose` still resolves the flat layout~~ — done 2026-08-26
 
 `sleap_utils.py` spelled `session_dir / "saved_analysis_results"` in five places and
@@ -35,19 +24,61 @@ checked rather than assumed.
 
 ---
 
-## Select hidden-rule sessions automatically
+## Select sessions by protocol label, from a per-subject index
 
-`summary.json` already carries `params.hidden_rule_odors` / `_positions` for every saved
-session, pre-restructure ones included, so this needs no manifest flag and no
-re-analysis — measured, it separated all nine fixture sessions correctly and found 29 of
-sub-040's 48. Promote the `_session_hr_odors` closure in
-`visualization/sampling.py:764` to `io/loaders.py` beside `iter_sessions`: it is a loader
-concern, and five of the callers sit outside `visualization/`, so `prep.py` cannot hold
-it (section 36). That also retires the copies in `visualization/hidden_rule.py` and
-`movement/traces.py`, which each re-read `summary.json` for the same lookup. Then give
-the `hidden_rule.py` plotters a `plot_hr_dates` flag that fills `dates` from it when no
-dates are passed, so a hidden-rule figure stops needing the dates looked up by hand.
-`plot_regression`-gated, since it reaches those 44 cases.
+Every saved session carries its protocol labels (`is_hidden_rule`, `is_probe`,
+`is_probe_hidden_rule`, `is_odour_discrimination`, `is_singrew`) in `manifest.session` and
+`summary.session`, and its odours in `summary.params.hidden_rule_odors` / `probe_odors`
+(`DECISIONS.md` section 40). The hidden-rule figures take their dates by hand, and the
+lookups in `visualization/sampling.py:768`, `hidden_rule.py:535`, `false_alarm.py:995` and
+`movement/traces.py:1307` each re-read a session's `summary.json` for `hidden_rule_odors`
+alone, which cannot tell a probe session from a hidden-rule one: sub-045 20260203 and
+sub-040 20251124 list A/B there.
+
+- **One index per subject**, `session_labels.json` in the subject's derivatives directory:
+  per `ses`, its date, the five labels, both odour lists, and the manifest's `created_at`.
+- **Written on every save, checked on every read.** `save_session_analysis_results` writes
+  its session's entry whenever it writes a manifest, at the first analysis and at every
+  re-run, so a re-run cannot leave the index stale. Every read checks the index against one
+  listing of the subject's derivatives directory. A date the index lacks (any session saved
+  before the index existed) is read from that session's `summary.json` and added; a date no
+  longer on disk is dropped. The index is then written back, so the next call reads one
+  file per subject.
+- **A cache, not a second source** (section 29). `summary.json` stays authoritative and
+  deleting the index rebuilds it. A session without labels is unknown, not False
+  (section 2): it is indexed as unknown, and a selection says how many it skipped.
+- **Atomic writes** (temp file, then `os.replace`), since two runs of one subject can save at
+  once. A read writes to the derivatives tree as well, which the gates'
+  `HYPNOSE_DERIVATIVES_ROOT` redirect covers.
+- **The index selects; the caller decides.** A `labels=` selection beside `iter_sessions` in
+  `io/loaders.py`: a loader concern with callers outside `visualization/`, so not `prep.py`
+  (section 36). Whether a probe session counts as a hidden-rule session is each caller's
+  choice; for the switch-point model it does not. The `hidden_rule.py` plotters then get a `plot_hr_dates` flag that fills `dates`
+  from it when none are passed, and the four lookups above read the index.
+
+Gate: `regression.py` (the save path) and `plot_regression.py` (the plotters).
+
+---
+
+## Probe trials downstream of classification
+
+On a probe-hidden-rule session the hidden-rule columns hold the C/F trials only. The probe
+trials have their own columns (`hit_probe`, `probe_success`, `early_reward_type`; section
+40), and nothing after classification reads them. Measured on sub-062 20261007, `main` at
+`dbcff01`:
+
+- **The switch-point model needs no change.** `modelling/switchpoint/data.py`
+  (`prepare_subject`) keeps every completed trial and scores it SHORT on
+  `hidden_rule_success`, so a probe trial is LONG, a probe success included: 14 of the 93
+  completed trials, beside 10 SHORT. SHORT means the hidden rule was used. The model runs
+  on hidden-rule and probe-hidden-rule sessions only, never on a probe-only session, where
+  A/B are the hidden-rule odours.
+- **`hidden_rule_mask`**: its non-HR group holds the probe trials.
+- **The plotters** have not run on a probe-hidden-rule session, and `plot_regression.py` has
+  none among its cases. Eleven modules outside classification read the hidden-rule columns
+  or odours, with 27 of the reads in `metric_analysis/metrics/hidden_rule.py`.
+
+Gate: `regression.py` for the metrics; `plot_regression.py` with sub-062 added to its cases.
 
 ---
 
