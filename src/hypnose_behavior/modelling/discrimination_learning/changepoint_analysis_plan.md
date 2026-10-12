@@ -4,10 +4,10 @@
 
 # Layout: 
 
-New notebook ab_learning.ipynb to hold visualization code execution. 
-Modelling functions (maths etc.) belong into src/hypnose_behavior/modelling/ab_learning/ in designated files per model. 
-Visualization functions belong into src/hypnose_behavior/visualization/modelling/ab_learning/ with designated files (not just one plot file). 
-       Note: the functions plot_cumulative_rewards and plot_cumulative_rewards_by_trial are currently in visualization/rewards.py. Consider moving them into ab_learning for consistency. 
+New notebook discrimination_learning.ipynb to hold visualization code execution. 
+Modelling functions (maths etc.) belong into src/hypnose_behavior/modelling/discrimination_learning/ in designated files per model. 
+Visualization functions belong into src/hypnose_behavior/visualization/modelling/discrimination_learning/ with designated files (not just one plot file). 
+       Note: the functions plot_cumulative_rewards and plot_cumulative_rewards_by_trial are currently in visualization/rewards.py. Consider moving them into discrimination_learning for consistency. 
 
 # Order of execution
 
@@ -53,7 +53,7 @@ r(t) = λ(t) × p(t)
 
 Any bend in the raw cumulative reward curve could be due to increased engagement or increased accuracy. Everything below exists to differentiate them.
 
-*This is done with the function plot_cumulative_rewards() in src/hypnose_behavior/visualization/rewards.py. Consider moving to ab_learning. 
+*This is done with the function plot_cumulative_rewards() in src/hypnose_behavior/visualization/rewards.py. Consider moving to discrimination_learning. 
 
 
 ### 0.3 Hypothesis

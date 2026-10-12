@@ -1,6 +1,6 @@
-"""Figures for the learning diagnostics (``modelling.ab_learning.diagnostics``).
+"""Figures for the learning diagnostics (``modelling.discrimination_learning.diagnostics``).
 
-Each ``plot_*`` takes the same subject/session selection as `load_ab_data` -- or the
+Each ``plot_*`` takes the same subject/session selection as `load_discrimination_data` -- or the
 already-loaded frames as ``data=`` -- and draws **one figure per animal**, x = the animal's
 odour-discrimination sessions in order, labelled by session number. Every proportion is
 drawn with its 95% Wilson interval. Returns ``{subjid: Figure}``; ``save=True`` files each
@@ -14,13 +14,13 @@ from __future__ import annotations
 import numpy as np
 
 from hypnose_behavior.io.save import finish_figure, legend_figure, save_figure, show_suffix
-from hypnose_behavior.modelling.ab_learning.diagnostics import (
+from hypnose_behavior.modelling.discrimination_learning.diagnostics import (
     PRIOR_GROUPS,
     failed_attempt_accuracy,
     initiation_rate,
     lose_shift_summary,
 )
-from hypnose_behavior.visualization.modelling.ab_learning._common import (
+from hypnose_behavior.visualization.modelling.discrimination_learning._common import (
     SECOND,
     SERIES,
     ZERO,
@@ -65,7 +65,8 @@ def plot_initiation_rate(subjids=None, dates=None, *, data=None, save=False, **s
         line_with_band(ax, frame, "session_idx", "rate", "rate_lo", "rate_hi", SERIES)
         style_axis(ax, ylabel="Initiation rate")
         session_ticks(ax, frame)
-        _save(fig, f"ab_learning_initiation_rate_sub-{subjid:03d}", data, save, subjid)
+        _save(fig, f"discrimination_learning_initiation_rate"
+                   f"_sub-{subjid:03d}", data, save, subjid)
         figures[subjid] = fig
     return figures
 
@@ -104,8 +105,8 @@ def plot_failed_attempt_accuracy(subjids=None, dates=None, *, data=None, legend=
         fig.legend(*top.get_legend_handles_labels(), loc="outside lower center", ncols=2,
                    frameon=False, fontsize=text_size() * 0.7)
         entries += finish_figure(fig, legend, show)
-        _save(fig, f"ab_learning_failed_attempt_accuracy{show_suffix(show)}_sub-{subjid:03d}",
-              data, save, subjid)
+        _save(fig, f"discrimination_learning_failed_attempt_accuracy{show_suffix(show)}"
+                   f"_sub-{subjid:03d}", data, save, subjid)
         figures[subjid] = fig
     legend_figure(entries, fontsize=text_size() * 0.7)
     return figures
@@ -149,8 +150,9 @@ def plot_lose_shift(subjids=None, dates=None, *, data=None, legend=None, show=No
         ax.set_xlim(-0.5, len(groups) - 0.5)
         ax.set_xlabel("Attempt before (n trials)")
         finish_figure(fig, legend, show)
-        name = (f"ab_learning_lose_shift{show_suffix(show)}_pooled" if subjid is None
-                else f"ab_learning_lose_shift{show_suffix(show)}_sub-{subjid:03d}")
+        name = (f"discrimination_learning_lose_shift{show_suffix(show)}_pooled"
+                if subjid is None
+                else f"discrimination_learning_lose_shift{show_suffix(show)}_sub-{subjid:03d}")
         _save(fig, name, data, save, subjid)
         figures["pooled" if subjid is None else subjid] = fig
     return figures

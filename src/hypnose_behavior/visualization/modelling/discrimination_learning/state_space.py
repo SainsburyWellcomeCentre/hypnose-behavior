@@ -1,4 +1,4 @@
-"""Figures for the state-space model (``modelling.ab_learning.state_space``).
+"""Figures for the state-space model (``modelling.discrimination_learning.state_space``).
 
 `plot_state_space` takes `state_space.fit_state_space` results and draws **one figure
 per animal**. Returns ``{subjid: Figure}``; ``save=True`` files each figure under its own
@@ -16,9 +16,9 @@ from hypnose_behavior.io.save import (
     show_suffix,
     tie,
 )
-from hypnose_behavior.modelling.ab_learning.diagnostics import wilson_interval
-from hypnose_behavior.modelling.ab_learning.state_space import LEARNED
-from hypnose_behavior.visualization.modelling.ab_learning._common import (
+from hypnose_behavior.modelling.discrimination_learning.diagnostics import wilson_interval
+from hypnose_behavior.modelling.discrimination_learning.state_space import LEARNED
+from hypnose_behavior.visualization.modelling.discrimination_learning._common import (
     BAND_ALPHA,
     BOUNDARY,
     REFERENCE,
@@ -242,8 +242,8 @@ def plot_state_space(fits: dict, *, boundary: dict | None = None, legend=None, s
         fig.legend(*in_order(excess, _ORDER), loc="outside lower center", ncols=5,
                    frameon=False, fontsize=annotation_size())
         entries += finish_figure(fig, legend, show)
-        _save(fig, f"ab_learning_state_space{show_suffix(show)}_{mode}_sub-{subjid:03d}",
-              rows, save, subjid)
+        _save(fig, f"discrimination_learning_state_space{show_suffix(show)}_{mode}"
+                   f"_sub-{subjid:03d}", rows, save, subjid)
         figures[int(subjid)] = fig
     legend_figure(entries, fontsize=annotation_size())
     return figures

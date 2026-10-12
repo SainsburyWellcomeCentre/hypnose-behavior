@@ -1,9 +1,9 @@
-"""Figures for the session regression (``modelling.ab_learning.log_regression``).
+"""Figures for the session regression (``modelling.discrimination_learning.log_regression``).
 
-`plot_gain_decomposition` takes the same subject/session selection as `load_ab_data` --
-or the already-loaded frames as ``data=``, or the fitted models as ``fits=`` -- and draws
-**one figure per animal**. Returns ``{subjid: Figure}``; ``save=True`` files each figure
-under its own animal with `io.save.save_figure`.
+`plot_gain_decomposition` takes the same subject/session selection as
+`load_discrimination_data` -- or the already-loaded frames as ``data=``, or the fitted models
+as ``fits=`` -- and draws **one figure per animal**. Returns ``{subjid: Figure}``;
+``save=True`` files each figure under its own animal with `io.save.save_figure`.
 
 Both panels are on the log-odds scale, where the decomposition is additive; the right
 axis of the top panel carries the matching accuracies.
@@ -20,7 +20,7 @@ from hypnose_behavior.io.save import (
     show_suffix,
     tie,
 )
-from hypnose_behavior.modelling.ab_learning.log_regression import (
+from hypnose_behavior.modelling.discrimination_learning.log_regression import (
     MIN_TRIALS,
     fit_session_models,
     gain_decomposition,
@@ -28,7 +28,7 @@ from hypnose_behavior.modelling.ab_learning.log_regression import (
     overnight_share,
     session_levels,
 )
-from hypnose_behavior.visualization.modelling.ab_learning._common import (
+from hypnose_behavior.visualization.modelling.discrimination_learning._common import (
     BAND_ALPHA,
     REFERENCE,
     SECOND,
@@ -238,8 +238,8 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
         fig.legend(*in_order(bottom, _LEGEND_ORDER), loc="outside lower center", ncols=3,
                    frameon=False, fontsize=annotation_size())
         entries += finish_figure(fig, legend, show)
-        _save(fig, f"ab_learning_gain_decomposition{show_suffix(show)}_sub-{subjid:03d}",
-              fits[subjid]["sessions"], save, subjid)
+        _save(fig, f"discrimination_learning_gain_decomposition{show_suffix(show)}"
+                   f"_sub-{subjid:03d}", fits[subjid]["sessions"], save, subjid)
         figures[subjid] = fig
     legend_figure(entries, fontsize=annotation_size())
     return figures

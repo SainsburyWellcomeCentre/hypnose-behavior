@@ -1,6 +1,6 @@
-"""Figures for the single-sigmoid fits (``modelling.ab_learning.sigmoid``).
+"""Figures for the single-sigmoid fits (``modelling.discrimination_learning.sigmoid``).
 
-Each ``plot_*`` takes the same subject/session selection as `load_ab_data` -- or the
+Each ``plot_*`` takes the same subject/session selection as `load_discrimination_data` -- or the
 already-loaded frames as ``data=``, or the fits themselves -- and draws **one figure per
 animal**. Returns ``{subjid: Figure}``; ``save=True`` files each figure under its own
 animal with `io.save.save_figure`.
@@ -28,9 +28,9 @@ from hypnose_behavior.io.save import (
     show_suffix,
     tie,
 )
-from hypnose_behavior.modelling.ab_learning.data import session_bounds
-from hypnose_behavior.modelling.ab_learning.diagnostics import wilson_interval
-from hypnose_behavior.modelling.ab_learning.sigmoid import (
+from hypnose_behavior.modelling.discrimination_learning.data import session_bounds
+from hypnose_behavior.modelling.discrimination_learning.diagnostics import wilson_interval
+from hypnose_behavior.modelling.discrimination_learning.sigmoid import (
     VARIANTS,
     erf_curve,
     expected_count,
@@ -39,7 +39,7 @@ from hypnose_behavior.modelling.ab_learning.sigmoid import (
     fit_rate,
     variant_test,
 )
-from hypnose_behavior.visualization.modelling.ab_learning._common import (
+from hypnose_behavior.visualization.modelling.discrimination_learning._common import (
     BAND_ALPHA,
     BOUNDARY,
     REFERENCE,
@@ -54,7 +54,9 @@ from hypnose_behavior.visualization.modelling.ab_learning._common import (
     style_axis,
     text_size,
 )
-from hypnose_behavior.visualization.modelling.ab_learning.cumulative import CURVE_STYLES
+from hypnose_behavior.visualization.modelling.discrimination_learning.cumulative import (
+    CURVE_STYLES,
+)
 
 __all__ = ["SHOW_FITS", "plot_accuracy_sigmoid", "plot_sigmoid_anchors"]
 
@@ -67,7 +69,7 @@ _CONTOUR = -1.92
 
 # One-hue sequential ramp, surface-light to dark blue.
 _SURFACE_CMAP = mcolors.LinearSegmentedColormap.from_list(
-    "ab_surface", ["#f4f8fd", "#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"])
+    "lnl_surface", ["#f4f8fd", "#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"])
 
 # The observed choices keep excess correct's colour from 1.1, drawn thick; the fits run
 # over them closely dotted in a dark colour, so the data shows between the dots.
@@ -336,8 +338,8 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
             excess.text(0.01, 0.97, "\n".join(headline), transform=excess.transAxes,
                         fontsize=annotation_size(), va="top", ha="left")
         entries = finish_figure(fig, legend, show)
-        _save(fig, f"ab_learning_accuracy_sigmoid{show_suffix(show)}_{mode}_sub-{subjid:03d}",
-              rows, save, subjid)
+        _save(fig, f"discrimination_learning_accuracy_sigmoid{show_suffix(show)}_{mode}"
+                   f"_sub-{subjid:03d}", rows, save, subjid)
         legend_figure(entries, fontsize=annotation_size())
         figures[int(subjid)] = {"fit": fig}
 
@@ -348,8 +350,8 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
                 ax.axvline(start, **BOUNDARY)
             ax.set_xlim(0, len(rows))
             ax.set_xlabel(unit.capitalize())
-            _save(fig, f"ab_learning_accuracy_sigmoid_surface_{mode}_sub-{subjid:03d}", rows,
-                  save, subjid)
+            _save(fig, f"discrimination_learning_accuracy_sigmoid_surface_{mode}"
+                       f"_sub-{subjid:03d}", rows, save, subjid)
             figures[int(subjid)]["surface"] = fig
     return figures
 
@@ -494,8 +496,8 @@ def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
         counts.set_xlim(0, span)
         acc.set_xlabel("Task time (h)")
         entries += finish_figure(fig, legend)
-        _save(fig, f"ab_learning_sigmoid_anchors_sub-{subjid:03d}", data["sessions"], save,
-              subjid)
+        _save(fig, f"discrimination_learning_sigmoid_anchors"
+                   f"_sub-{subjid:03d}", data["sessions"], save, subjid)
         figures[int(subjid)] = fig
         table.append({"subjid": int(subjid),
                       **{_ANCHOR_LABELS[name]: hours for name, hours in midpoints.items()}})

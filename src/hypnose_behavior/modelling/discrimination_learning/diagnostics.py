@@ -1,6 +1,7 @@
 """Whether completed trials alone describe the odour-discrimination learning.
 
-Four diagnostics over the frames of `data.load_ab_data`, each a pure function of them:
+Four diagnostics over the frames of `data.load_discrimination_data`, each a pure function
+of them:
 
 - `initiation_rate` (D1) -- per session, the share of sampling attempts that became a
   trial. Separates learning to hold the poke from learning the odor-port association.

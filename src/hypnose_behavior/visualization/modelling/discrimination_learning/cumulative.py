@@ -1,7 +1,8 @@
-"""The engagement, knowledge and reward figures (``modelling.ab_learning.cumulative``).
+"""The engagement, knowledge and reward figures
+(``modelling.discrimination_learning.cumulative``).
 
-Each ``plot_*`` takes the same subject/session selection as `load_ab_data` -- or the
-already-loaded frames as ``data=``. ``save=True`` files a figure with
+Each ``plot_*`` takes the same subject/session selection as `load_discrimination_data` --
+or the already-loaded frames as ``data=``. ``save=True`` files a figure with
 `io.save.save_figure`.
 
 - `plot_cumulative_panels` -- every running count on one task-time axis, one figure per
@@ -24,14 +25,16 @@ from hypnose_behavior.io.save import (
     save_figure,
     show_suffix,
 )
-from hypnose_behavior.modelling.ab_learning.cumulative import (
+from hypnose_behavior.modelling.discrimination_learning.cumulative import (
     WINDOW,
     cumulative_curves,
     excess_by_index,
     rolling_accuracy,
 )
-from hypnose_behavior.modelling.ab_learning.data import MODES, reward_bounds, session_bounds
-from hypnose_behavior.visualization.modelling.ab_learning._common import (
+from hypnose_behavior.modelling.discrimination_learning.data import (
+    MODES, reward_bounds, session_bounds,
+)
+from hypnose_behavior.visualization.modelling.discrimination_learning._common import (
     BOUNDARY,
     REFERENCE,
     SECOND,
@@ -145,8 +148,8 @@ def plot_cumulative_panels(subjids=None, dates=None, *, data=None, mode="complet
         ax.set_xlabel("Task time (h)")
         ax.legend(frameon=False, fontsize=annotation_size(), loc="upper left")
         entries += finish_figure(fig, legend, show)
-        _save(fig, f"ab_learning_cumulative_panels{show_suffix(show)}_sub-{subjid:03d}", data,
-              save, subjid)
+        _save(fig, f"discrimination_learning_cumulative_panels{show_suffix(show)}"
+                   f"_sub-{subjid:03d}", data, save, subjid)
         figures[int(subjid)] = fig
     legend_figure(entries, fontsize=annotation_size())
     print(f"Final counts ({mode}):")
@@ -184,8 +187,8 @@ def plot_excess_by_index(subjids=None, dates=None, *, data=None, mode="completed
         style_axis(ax, ylabel="Excess correct", ylim=None)
         ax.set_xlim(0, len(animal))
         ax.set_xlabel(unit.capitalize())
-        _save(fig, f"ab_learning_excess_by_index_{mode}_sub-{subjid:03d}", data, save,
-              subjid)
+        _save(fig, f"discrimination_learning_excess_by_index_{mode}"
+                   f"_sub-{subjid:03d}", data, save, subjid)
         figures[int(subjid)] = fig
     return figures
 
@@ -274,7 +277,7 @@ def _accuracy_figure(data, mode, window, clock, xlabel, xlim, show_mean=False):
 def _save_name(stem, mode, subjects):
     """``{stem}_{mode}``, with the animal when the figure holds one."""
     single = f"_sub-{subjects[0]:03d}" if len(subjects) == 1 else ""
-    return f"ab_learning_{stem}_{mode}{single}"
+    return f"discrimination_learning_{stem}_{mode}{single}"
 
 
 def plot_cohort_accuracy(subjids=None, dates=None, *, data=None, mode="completed",

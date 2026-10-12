@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-from hypnose_behavior.modelling.ab_learning.data import choice_rows, choice_sequence, task_time
+from hypnose_behavior.modelling.discrimination_learning.data import (
+    choice_rows, choice_sequence, task_time,
+)
 
 __all__ = ["SERIES", "WINDOW", "cumulative_curves", "excess_by_index", "rolling_accuracy"]
 
@@ -53,7 +55,7 @@ def _series(data: dict, frame: pd.DataFrame, column: str, name: str,
 def cumulative_curves(data: dict, mode: str = "completed") -> pd.DataFrame:
     """The running counts of the module docstring, one long frame over every animal.
 
-        curves = cumulative_curves(load_ab_data(...))
+        curves = cumulative_curves(load_discrimination_data(...))
         curves = cumulative_curves(ab, mode="attempts")
 
     ``mode`` sets the rows of ``excess`` (completed trials, or every choice attempt) and
@@ -81,7 +83,7 @@ def cumulative_curves(data: dict, mode: str = "completed") -> pd.DataFrame:
 def excess_by_index(data: dict, mode: str = "completed") -> pd.DataFrame:
     """Excess correct over the mode's own row index, one row per choice.
 
-        excess = excess_by_index(load_ab_data(...), mode="attempts")
+        excess = excess_by_index(load_discrimination_data(...), mode="attempts")
 
     The `data.choice_sequence` rows (``k``, ``y``, ``hours``) plus ``excess``,
     ``cumsum(y - 0.5)`` within the animal once that row is included. Each row is one
@@ -95,7 +97,7 @@ def excess_by_index(data: dict, mode: str = "completed") -> pd.DataFrame:
 def rolling_accuracy(data: dict, mode: str = "completed", window: int = WINDOW) -> pd.DataFrame:
     """Accuracy over each ``window`` of consecutive choices, one row per choice.
 
-        acc = rolling_accuracy(load_ab_data(...), mode="attempts", window=30)
+        acc = rolling_accuracy(load_discrimination_data(...), mode="attempts", window=30)
 
     The `data.choice_sequence` rows plus ``accuracy``, the share correct over the window
     centred on the row, within the animal and across its sessions. Within ``window / 2``

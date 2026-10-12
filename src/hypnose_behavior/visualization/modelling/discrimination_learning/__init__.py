@@ -1,4 +1,5 @@
-"""Figures for the odour-discrimination learning analysis (``modelling.ab_learning``).
+"""Figures for the odour-discrimination learning analysis
+(``modelling.discrimination_learning``).
 
 One module per analysis block, mirroring the modelling package:
 

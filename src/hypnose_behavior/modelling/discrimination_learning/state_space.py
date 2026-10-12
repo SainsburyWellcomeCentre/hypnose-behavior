@@ -58,7 +58,7 @@ import pymc as pm
 import pytensor.tensor as pt
 from scipy.special import expit
 
-from hypnose_behavior.modelling.ab_learning.data import choice_sequence
+from hypnose_behavior.modelling.discrimination_learning.data import choice_sequence
 
 __all__ = [
     "BOUNDARIES",

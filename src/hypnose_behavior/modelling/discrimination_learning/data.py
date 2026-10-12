@@ -47,7 +47,7 @@ __all__ = [
     "build_choices",
     "choice_rows",
     "choice_sequence",
-    "load_ab_data",
+    "load_discrimination_data",
     "reward_bounds",
     "session_bounds",
     "task_time",
@@ -236,12 +236,12 @@ def _join(trials: pd.DataFrame, attempts: pd.DataFrame, label: str):
     return trials, attempts
 
 
-def load_ab_data(subjids, dates=None, *, ses=None, index=None, date_range=None,
+def load_discrimination_data(subjids, dates=None, *, ses=None, index=None, date_range=None,
                  ses_range=None, index_range=None, verbose: bool = True) -> dict:
     """The trial and failed-attempt frames of the odour-discrimination runs.
 
-        load_ab_data({63: {"ses_range": (1, 10)}, 64: {"ses_range": (3, 11)}})
-        load_ab_data([63, 64, 65, 66], ses_range=(1, 14))
+        load_discrimination_data({63: {"ses_range": (1, 10)}, 64: {"ses_range": (3, 11)}})
+        load_discrimination_data([63, 64, 65, 66], ses_range=(1, 14))
 
     ``subjids`` / ``dates`` / the selectors take every form of
     ``io.layout.subject_selections``. Runs of other protocols are dropped whatever the
@@ -289,8 +289,8 @@ def load_ab_data(subjids, dates=None, *, ses=None, index=None, date_range=None,
             ni = ni[ni["run_id"].isin(runs)] if len(ni.columns) else ni
             if td.empty and ni.empty:
                 if verbose:
-                    print(f"[load_ab_data] {label}: no odour-discrimination trial or "
-                          f"attempt, skipped")
+                    print(f"[load_discrimination_data] {label}: no odour-discrimination "
+                          f"trial or attempt, skipped")
                 continue
 
             trials = (_trial_frame(td.sort_values(["run_id", "global_trial_id"]), ports_by_run)
@@ -340,7 +340,7 @@ def within_session_position(frame: pd.DataFrame) -> pd.Series:
 def build_choices(data: dict) -> pd.DataFrame:
     """One row per **choice**: a completed trial, or a failed attempt with a port visit.
 
-        choices = build_choices(load_ab_data(...))
+        choices = build_choices(load_discrimination_data(...))
         completed = choices[choices["is_completed"]]      # completed-trial mode
         every_choice = choices                            # all-choice-attempt mode
 
@@ -441,7 +441,7 @@ def task_time(data: dict, frame: pd.DataFrame, column: str) -> pd.Series:
     a row whose run has no recorded start or end.
 
     ``frame`` needs ``subjid``, ``session_idx`` and ``run_id``, as every frame of
-    `load_ab_data` and `build_choices` has.
+    `load_discrimination_data` and `build_choices` has.
     """
     clock = _run_clock(data).set_index(["subjid", "session_idx", "run_id"])
     joined = frame[["subjid", "session_idx", "run_id"]].join(

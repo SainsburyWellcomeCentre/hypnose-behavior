@@ -3381,7 +3381,7 @@ above it changed.
 
 ---
 
-## 40. Plotters take `legend` and `show` and finish each figure with `finish_figure` *(ab_learning figures, 2026-10-01)*
+## 40. Plotters take `legend` and `show` and finish each figure with `finish_figure` *(discrimination_learning figures, 2026-10-01)*
 
 Every plotting function takes `legend=None` and `show=None` and follows the convention in
 `hypnose_helpers.viz.plotter` (re-exported from `io.save`):
@@ -3404,7 +3404,7 @@ when the series is hidden. Call `finish_figure` before saving, not after: a figu
 first keeps every line and its legend.
 
 New plotters follow it from the start; existing ones adopt it when next touched.
-`ab_learning`'s `plot_cumulative_panels` is the first.
+`discrimination_learning`'s `plot_cumulative_panels` is the first.
 
 **Gate:** helpers `tests/test_legends.py`, `test_series.py`, `test_plotter.py` pass ·
 `check_imports` PASS · `check_layering` PASS.

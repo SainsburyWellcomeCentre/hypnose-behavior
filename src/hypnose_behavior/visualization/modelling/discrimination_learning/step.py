@@ -1,4 +1,4 @@
-"""Figures for the step model (``modelling.ab_learning.step``).
+"""Figures for the step model (``modelling.discrimination_learning.step``).
 
 `plot_step_posterior` takes the step fits of `step.fit_step` and draws **one figure per
 animal**. Returns ``{subjid: Figure}``; ``save=True`` files each figure under its own
@@ -9,8 +9,8 @@ from __future__ import annotations
 import numpy as np
 
 from hypnose_behavior.io.save import save_figure
-from hypnose_behavior.modelling.ab_learning.sigmoid import erf_curve
-from hypnose_behavior.visualization.modelling.ab_learning._common import (
+from hypnose_behavior.modelling.discrimination_learning.sigmoid import erf_curve
+from hypnose_behavior.visualization.modelling.discrimination_learning._common import (
     BAND_ALPHA,
     BOUNDARY,
     REFERENCE,
@@ -150,7 +150,7 @@ def plot_step_posterior(steps: dict, *, save=False):
                           xycoords=("data", "axes fraction"), xytext=(3, -2),
                           textcoords="offset points", va="top",
                           fontsize=annotation_size(), color=REFERENCE)
-        _save(fig, f"ab_learning_step_posterior_{mode}_sub-{subjid:03d}", rows, save,
-              subjid)
+        _save(fig, f"discrimination_learning_step_posterior_{mode}"
+                   f"_sub-{subjid:03d}", rows, save, subjid)
         figures[int(subjid)] = fig
     return figures

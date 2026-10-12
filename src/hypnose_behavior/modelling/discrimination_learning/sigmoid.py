@@ -37,7 +37,7 @@ from scipy.optimize import minimize
 from scipy.special import erf, expit, logit
 from scipy.stats import chi2
 
-from hypnose_behavior.modelling.ab_learning.data import (
+from hypnose_behavior.modelling.discrimination_learning.data import (
     choice_sequence,
     session_bounds,
     task_time,
@@ -77,7 +77,7 @@ VARIANTS = ("free", "chance")
 BEST = "best"
 LRT_ALPHA = 0.05
 
-# `fit_rate` events, from `load_ab_data`'s trials.
+# `fit_rate` events, from `load_discrimination_data`'s trials.
 RATE_EVENTS = ("initiations", "rewards")
 
 _CHANCE = 0.5

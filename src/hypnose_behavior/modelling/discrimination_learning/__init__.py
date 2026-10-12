@@ -18,5 +18,5 @@ One module per role:
 - ``step``        -- the step model: whether a step describes the change, and the
   posterior over when it happened.
 
-Figures live in ``hypnose_behavior.visualization.modelling.ab_learning``.
+Figures live in ``hypnose_behavior.visualization.modelling.discrimination_learning``.
 """

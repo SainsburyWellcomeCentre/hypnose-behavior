@@ -34,7 +34,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from hypnose_behavior.modelling.ab_learning.diagnostics import wilson_interval
+from hypnose_behavior.modelling.discrimination_learning.diagnostics import wilson_interval
 
 __all__ = [
     "N_WINDOW",

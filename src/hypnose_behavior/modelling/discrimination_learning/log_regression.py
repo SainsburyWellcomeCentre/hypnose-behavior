@@ -61,7 +61,7 @@ import pandas as pd
 import statsmodels.formula.api as smf
 from scipy import stats
 
-from hypnose_behavior.modelling.ab_learning.data import (
+from hypnose_behavior.modelling.discrimination_learning.data import (
     MODES,
     choice_rows,
     within_session_position,
@@ -140,7 +140,7 @@ def fit_session_models(data: dict, *, mode: str = "completed",
                        min_trials: int = MIN_TRIALS) -> dict:
     """Fit M_a, M_b and M_c per animal.
 
-        fits = fit_session_models(load_ab_data(...))
+        fits = fit_session_models(load_discrimination_data(...))
         fits = fit_session_models(ab, mode="attempts")      # the robustness re-run
 
     Returns ``{subjid: fit}``, each fit a dict of:

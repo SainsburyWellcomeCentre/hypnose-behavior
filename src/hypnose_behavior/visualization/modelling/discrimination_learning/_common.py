@@ -14,7 +14,7 @@ import math
 import matplotlib.pyplot as plt
 
 from hypnose_behavior.io.save import tie
-from hypnose_behavior.modelling.ab_learning.data import load_ab_data
+from hypnose_behavior.modelling.discrimination_learning.data import load_discrimination_data
 
 __all__ = [
     "BAND_ALPHA",
@@ -84,9 +84,9 @@ def annotation_size() -> float:
 
 
 def require_data(subjids, dates, selectors, data):
-    """The already-loaded frames, or `load_ab_data` over the selection."""
+    """The already-loaded frames, or `load_discrimination_data` over the selection."""
     if data is None:
-        data = load_ab_data(subjids, dates, **selectors)
+        data = load_discrimination_data(subjids, dates, **selectors)
     if data["sessions"].empty:
         raise ValueError("No odour-discrimination session matched the selection; check the "
                          "subjects, the selectors and that the data location is reachable.")

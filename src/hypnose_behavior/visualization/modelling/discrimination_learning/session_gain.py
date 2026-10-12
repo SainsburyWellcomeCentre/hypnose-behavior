@@ -1,6 +1,6 @@
-"""Figures for the raw-accuracy gains (``modelling.ab_learning.session_gain``).
+"""Figures for the raw-accuracy gains (``modelling.discrimination_learning.session_gain``).
 
-Each ``plot_*`` takes the same subject/session selection as `load_ab_data` -- or the
+Each ``plot_*`` takes the same subject/session selection as `load_discrimination_data` -- or the
 already-loaded frames as ``data=``, or the fitted models of
 `log_regression.fit_session_models` as ``fits=`` -- and draws **one figure per animal**,
 over the rows the regression was fitted on. Returns ``{subjid: Figure}``; ``save=True``
@@ -29,13 +29,13 @@ from hypnose_behavior.io.save import (
     show_suffix,
     tie,
 )
-from hypnose_behavior.modelling.ab_learning.log_regression import (
+from hypnose_behavior.modelling.discrimination_learning.log_regression import (
     MIN_TRIALS,
     fit_session_models,
     fitted_curves,
     gain_decomposition,
 )
-from hypnose_behavior.modelling.ab_learning.session_gain import (
+from hypnose_behavior.modelling.discrimination_learning.session_gain import (
     N_WINDOW,
     edge_gains,
     edge_windows,
@@ -43,7 +43,7 @@ from hypnose_behavior.modelling.ab_learning.session_gain import (
     position_profile,
     session_profile,
 )
-from hypnose_behavior.visualization.modelling.ab_learning._common import (
+from hypnose_behavior.visualization.modelling.discrimination_learning._common import (
     BAND_ALPHA,
     REFERENCE,
     SECOND,
@@ -235,8 +235,8 @@ def plot_edge_gains(subjids=None, dates=None, *, data=None, fits=None, mode="com
         fig.legend(*in_order(bottom, _EDGE_ORDER), loc="outside lower center", ncols=3,
                    frameon=False, fontsize=annotation_size())
         entries += finish_figure(fig, legend, show)
-        _save(fig, f"ab_learning_edge_gains{show_suffix(show)}_sub-{subjid:03d}", fit, save,
-              titles=False)
+        _save(fig, f"discrimination_learning_edge_gains{show_suffix(show)}"
+                   f"_sub-{subjid:03d}", fit, save, titles=False)
         figures[subjid] = fig
     legend_figure(entries, fontsize=annotation_size())
     return figures
@@ -296,8 +296,8 @@ def plot_position_profile(subjids=None, dates=None, *, data=None, fits=None,
         fig.legend(*in_order(bottom, _PROFILE_ORDER), loc="outside lower center", ncols=3,
                    frameon=False, fontsize=annotation_size())
         entries += finish_figure(fig, legend, show)
-        _save(fig, f"ab_learning_position_profile{show_suffix(show)}_sub-{subjid:03d}", fit,
-              save)
+        _save(fig, f"discrimination_learning_position_profile{show_suffix(show)}"
+                   f"_sub-{subjid:03d}", fit, save)
         figures[subjid] = fig
     legend_figure(entries, fontsize=annotation_size())
     return figures
@@ -362,8 +362,8 @@ def plot_session_profiles(subjids=None, dates=None, *, data=None, fits=None,
         fig.legend(*in_order(axes.flat[0], _PROFILE_ORDER), loc="outside upper right",
                    ncols=2, frameon=False, fontsize=annotation_size())
         entries += finish_figure(fig, legend, show)
-        _save(fig, f"ab_learning_session_profiles{show_suffix(show)}_sub-{subjid:03d}", fit,
-              save)
+        _save(fig, f"discrimination_learning_session_profiles{show_suffix(show)}"
+                   f"_sub-{subjid:03d}", fit, save)
         figures[subjid] = fig
     legend_figure(entries, fontsize=annotation_size())
     return figures
