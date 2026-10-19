@@ -5,6 +5,9 @@ are the frame around the data: the loader guard, the figure and axis setup, the 
 ticks, the reference lines and the save call. The colours are the categorical slots the package
 draws in, in a fixed order, so a series keeps its colour from one figure to the next.
 
+With ``separate_odors`` an odour takes its reward port's colour (`PORT_COLOURS`) and both
+odours together the `COMBINED` grey: `odor_parts` lists what to draw.
+
 Package-internal: the plotters import from here, nothing outside does.
 """
 from __future__ import annotations
@@ -14,13 +17,17 @@ import math
 import matplotlib.pyplot as plt
 
 from hypnose_behavior.io.save import tie
-from hypnose_behavior.modelling.discrimination_learning.data import load_discrimination_data
+from hypnose_behavior.modelling.discrimination_learning.data import (
+    by_odor, is_per_odor, load_discrimination_data, per_odor,
+)
 
 __all__ = [
     "BAND_ALPHA",
     "BOUNDARY",
     "CATEGORICAL",
+    "COMBINED",
     "MAX_SESSION_TICKS",
+    "PORT_COLOURS",
     "REFERENCE",
     "SECOND",
     "SERIES",
@@ -32,7 +39,12 @@ __all__ = [
     "in_order",
     "index_bounds",
     "line_with_band",
+    "odor_parts",
+    "odor_tag",
+    "odor_title",
+    "odors_tag",
     "require_data",
+    "resolve_fits",
     "save_scope",
     "session_ticks",
     "style_axis",
@@ -57,6 +69,11 @@ ZERO = dict(color="#5c5b57", linewidth=0.8, zorder=0)
 # animal (`subject_colour`).
 CATEGORICAL = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300",
                "#4a3aa7", "#e34948")
+
+# An odour drawn alone takes its reward port's colour, as in the session plotters; both
+# odours together are dark grey.
+PORT_COLOURS = {1: "#FF6B6B", 2: "#4ECDC4"}
+COMBINED = "#4f4e4a"
 
 # In a figure laid out along sessions, a session occupies this much of its slot on the x
 # axis; the rest is the boundary that follows it, so a within-session segment and the
@@ -91,6 +108,54 @@ def require_data(subjids, dates, selectors, data):
         raise ValueError("No odour-discrimination session matched the selection; check the "
                          "subjects, the selectors and that the data location is reachable.")
     return data
+
+
+def odor_parts(data, separate_odors: bool, show_combined: bool = False) -> list:
+    """``[(label, colour, data)]`` to draw: the data whole (label and colour None), or
+    with ``separate_odors`` each odour in its port colour, then both together when
+    ``show_combined`` (labelled ``"A+B"``)."""
+    if not separate_odors:
+        if show_combined:
+            raise ValueError("show_combined draws both odours beside each one alone: pass "
+                             "separate_odors=True")
+        return [(None, None, data)]
+    split = by_odor(data)
+    parts = [(odor.name, PORT_COLOURS[odor.port], part) for odor, part in split.items()]
+    if show_combined:
+        parts.append(("+".join(odor.name for odor in split), COMBINED, data))
+    return parts
+
+
+def resolve_fits(fits, separate_odors: bool, load, fit):
+    """The fits a plotter draws: ``fits`` as given (pooled, or per odour from
+    `data.per_odor`), else ``fit(load())``, run per odour with ``separate_odors``."""
+    if fits is None:
+        data = load()
+        return per_odor(fit, data) if separate_odors else fit(data)
+    if separate_odors and not is_per_odor(fits):
+        raise ValueError("separate_odors needs fits per odour, per_odor(fit_..., data), or "
+                         "data= to fit them")
+    return fits
+
+
+def odor_tag(odor) -> str:
+    """The save-name tag of a figure of one odour, ``"_odor-A"`` (``"/"`` dropped)."""
+    return f"_odor-{odor.name.replace('/', '')}"
+
+
+def odor_title(ax, odor) -> None:
+    """Name the odour a figure is of, top right of ``ax``, in its port colour."""
+    if odor is not None:
+        ax.set_title(odor.name, loc="right", color=PORT_COLOURS[odor.port],
+                     fontsize=text_size(), fontweight="bold")
+
+
+def odors_tag(separate_odors: bool, show_combined: bool = False) -> str:
+    """The save-name tag of a figure drawing each odour: ``"_odors"`` or
+    ``"_odors-combined"``; ``""`` for the pooled figure."""
+    if not separate_odors:
+        return ""
+    return "_odors-combined" if show_combined else "_odors"
 
 
 def figure(n_rows: int = 1, *, width: float = 6.4, height: float = 4.2):
@@ -139,7 +204,8 @@ def index_bounds(rows):
             .sort_values("session_idx"))
 
 
-def line_with_band(ax, frame, x, y, lo, hi, color, label=None):
+def line_with_band(ax, frame, x, y, lo, hi, color, label=None, *, linestyle="-",
+                   marker="o"):
     """A line of markers with its interval as a filled band; rows without ``y`` dropped.
 
     The band is tied to the line's ``label``, so ``show`` hides the two together.
@@ -151,8 +217,8 @@ def line_with_band(ax, frame, x, y, lo, hi, color, label=None):
                            linewidth=0)
     if label:
         tie(band, label)
-    ax.plot(frame[x], frame[y], color=color, linewidth=2, marker="o", markersize=5,
-            markeredgecolor="white", markeredgewidth=1, label=label)
+    ax.plot(frame[x], frame[y], color=color, linewidth=2, linestyle=linestyle, marker=marker,
+            markersize=5, markeredgecolor="white", markeredgewidth=1, label=label)
 
 
 def in_order(ax, order):

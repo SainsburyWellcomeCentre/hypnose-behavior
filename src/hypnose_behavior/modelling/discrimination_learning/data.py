@@ -22,17 +22,22 @@ into one clock per animal.
 
 Within an initiation the odor does not change, and every attempt carries its initiation;
 a row breaking either is kept and reported with a warning.
+
+Each odour alone: `by_odor` splits the frames by the reward port the odour pays at, and
+`per_odor` runs any function of this package on each part.
 """
 from __future__ import annotations
 
 import json
+import sys
 import warnings
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
 
 from hypnose_behavior.frames import odor_letter
-from hypnose_behavior.io import layout
+from hypnose_behavior.io import cohort_cache, layout, load_results, loaders
 from hypnose_behavior.io.layout import derivatives, subject_selections
 from hypnose_behavior.io.load_results import (
     load_non_initiated_attempts, reward_port_of, reward_ports_by_run,
@@ -42,12 +47,17 @@ from hypnose_behavior.io.loaders import iter_sessions
 __all__ = [
     "INDEX_COLUMNS",
     "MODES",
+    "Odor",
     "PORTS",
     "PORT_VISIT_LABELS",
     "build_choices",
+    "by_odor",
     "choice_rows",
     "choice_sequence",
+    "is_per_odor",
     "load_discrimination_data",
+    "odor_names",
+    "per_odor",
     "reward_bounds",
     "session_bounds",
     "task_time",
@@ -86,6 +96,21 @@ _ATTEMPT_COLUMNS = _IDENTITY + [
 ]
 _SESSION_COLUMNS = _IDENTITY + ["n_runs", "n_trials", "n_attempts"]
 _RUN_COLUMNS = _IDENTITY + ["run_id", "start", "end"]
+
+# What a load reads per session, in either results layout: the files the cache stamps.
+_SOURCE_FILES = (
+    "manifest.json", "summary.json", "trial_data.parquet", "trial_data.csv",
+    "non_initiated_attempts.parquet", "non_initiated_attempts.csv",
+    "non_initiated_FA.parquet", "non_initiated_FA.csv",
+)
+_FRAMES = ("trials", "attempts", "sessions", "runs")
+
+
+class Odor(NamedTuple):
+    """One rewarded odour: the reward ``port`` it pays at and its ``name`` (``"A"``;
+    ``"A/G"`` where a selection spans two odour pairs)."""
+    port: int
+    name: str
 _CHOICE_COLUMNS = _IDENTITY + [
     "run_id", "global_trial_id", "initiation_sequence_time", "time", "odor", "choice",
     "reward_port", "correct", "is_completed", "zero_poke", "attempt_in_trial",
@@ -236,19 +261,88 @@ def _join(trials: pd.DataFrame, attempts: pd.DataFrame, label: str):
     return trials, attempts
 
 
+def _matched_sessions(entries) -> list:
+    """``(subjid, SessionRecord)`` for every session each selection matches, in order."""
+    matched = []
+    for subjid, subj_dates, select in entries:
+        subj_dir = derivatives.subject_dir(subjid, missing_ok=True)
+        if subj_dir is None:
+            print(f"Warning: no derivatives directory for subject {subjid}, skipping")
+            continue
+        matched += [(subjid, rec) for rec in iter_sessions(subj_dir, subj_dates, **select)]
+    return matched
+
+
+def _build(matched: list, verbose: bool) -> dict:
+    """The frames of `load_discrimination_data` from the matched sessions."""
+    trial_parts, attempt_parts, session_rows, run_rows = [], [], [], []
+    kept = {}
+    for subjid, rec in matched:
+        if not rec.analysed:
+            continue
+        label = f"sub-{subjid} ses-{rec.ref.ses}"
+        ports_by_run = reward_ports_by_run(rec.results_dir)
+        runs = _od_runs(rec.results_dir)
+        td = rec.views["trial_data"]
+        td = td[td["run_id"].isin(runs)] if len(td.columns) else td
+        ni = load_non_initiated_attempts(rec.results_dir)
+        ni = ni[ni["run_id"].isin(runs)] if len(ni.columns) else ni
+        if td.empty and ni.empty:
+            if verbose:
+                print(f"[load_discrimination_data] {label}: no odour-discrimination "
+                      f"trial or attempt, skipped")
+            continue
+
+        trials = (_trial_frame(td.sort_values(["run_id", "global_trial_id"]), ports_by_run)
+                  if len(td) else pd.DataFrame(columns=_TRIAL_COLUMNS[len(_IDENTITY):-1]))
+        session_idx = kept.get(subjid, 0)
+        identity = {"subjid": int(subjid), "ses": rec.ref.ses,
+                    "date": rec.date_str, "session_idx": session_idx}
+        if len(ni):
+            trials, attempts = _join(trials, _attempt_frame(ni, ports_by_run), label)
+            attempt_parts.append(attempts.assign(**identity))
+        else:
+            trials = trials.assign(n_failed=0)
+        if len(trials):
+            trial_parts.append(trials.assign(**identity))
+        session_rows.append({**identity, "n_runs": len(runs), "n_trials": len(trials),
+                             "n_attempts": len(ni)})
+        run_rows.extend({**identity, "run_id": run_id, "start": start, "end": end}
+                        for run_id, (start, end) in sorted(runs.items()))
+        kept[subjid] = session_idx + 1
+
+    trials = (pd.concat(trial_parts, ignore_index=True) if trial_parts
+              else pd.DataFrame(columns=_TRIAL_COLUMNS))
+    attempts = (pd.concat(attempt_parts, ignore_index=True) if attempt_parts
+                else pd.DataFrame(columns=_ATTEMPT_COLUMNS))
+    return {
+        "trials": trials[_TRIAL_COLUMNS],
+        "attempts": attempts[_ATTEMPT_COLUMNS],
+        "sessions": pd.DataFrame(session_rows, columns=_SESSION_COLUMNS),
+        "runs": pd.DataFrame(run_rows, columns=_RUN_COLUMNS),
+    }
+
+
 def load_discrimination_data(subjids, dates=None, *, ses=None, index=None, date_range=None,
-                 ses_range=None, index_range=None, verbose: bool = True) -> dict:
+                 ses_range=None, index_range=None, verbose: bool = True, cache=False,
+                 refresh: bool = False) -> dict:
     """The trial and failed-attempt frames of the odour-discrimination runs.
 
         load_discrimination_data({63: {"ses_range": (1, 10)}, 64: {"ses_range": (3, 11)}})
         load_discrimination_data([63, 64, 65, 66], ses_range=(1, 14))
+        load_discrimination_data(ab_cohort, cache=True)
 
     ``subjids`` / ``dates`` / the selectors take every form of
     ``io.layout.subject_selections``. Runs of other protocols are dropped whatever the
     selection, and a session with neither a trial nor a failed attempt left is skipped.
     Raises for a selected session saved before ``reward_port_by_odor`` existed.
 
-    Returns ``{"trials", "attempts", "sessions"}``:
+    ``cache=True`` keeps the frames under ``<derivatives>/cache/discrimination_learning``
+    (a path puts them there instead) and reads them back while they are current
+    (`io.cohort_cache`): the selection is still walked and each matched session's files
+    are listed, but none is read. ``refresh=True`` rebuilds the cache.
+
+    Returns ``{"trials", "attempts", "sessions", "runs"}``:
 
     - ``trials``: ``odor`` (letter), ``choice`` (port 1 / 2, ``<NA>`` when no choice),
       ``reward_port`` (where the odor pays in the run), ``outcome``
@@ -270,56 +364,105 @@ def load_discrimination_data(subjids, dates=None, *, ses=None, index=None, date_
     entries = subject_selections(subjids, dates, ses=ses, index=index,
                                  date_range=date_range, ses_range=ses_range,
                                  index_range=index_range)
-    trial_parts, attempt_parts, session_rows, run_rows = [], [], [], []
-    for subjid, subj_dates, select in entries:
-        subj_dir = derivatives.subject_dir(subjid, missing_ok=True)
-        if subj_dir is None:
-            print(f"Warning: no derivatives directory for subject {subjid}, skipping")
-            continue
-        session_idx = 0
-        for rec in iter_sessions(subj_dir, subj_dates, **select):
-            if not rec.analysed:
-                continue
-            label = f"sub-{subjid} ses-{rec.ref.ses}"
-            ports_by_run = reward_ports_by_run(rec.results_dir)
-            runs = _od_runs(rec.results_dir)
-            td = rec.views["trial_data"]
-            td = td[td["run_id"].isin(runs)] if len(td.columns) else td
-            ni = load_non_initiated_attempts(rec.results_dir)
-            ni = ni[ni["run_id"].isin(runs)] if len(ni.columns) else ni
-            if td.empty and ni.empty:
-                if verbose:
-                    print(f"[load_discrimination_data] {label}: no odour-discrimination "
-                          f"trial or attempt, skipped")
-                continue
+    matched = _matched_sessions(entries)
+    if not cache:
+        return _build(matched, verbose)
+    key = [[int(subjid), subj_dates, {k: v for k, v in select.items() if v is not None}]
+           for subjid, subj_dates, select in entries]
+    sources = cohort_cache.fingerprint([rec.results_dir for _, rec in matched], _SOURCE_FILES)
+    code = cohort_cache.code_digest(sys.modules[__name__], load_results, loaders)
+    return cohort_cache.load_or_build(
+        "discrimination_learning", key, sources, code, lambda: _build(matched, verbose),
+        root=None if cache is True else cache, refresh=refresh,
+        label="load_discrimination_data", verbose=verbose)
 
-            trials = (_trial_frame(td.sort_values(["run_id", "global_trial_id"]), ports_by_run)
-                      if len(td) else pd.DataFrame(columns=_TRIAL_COLUMNS[len(_IDENTITY):-1]))
-            identity = {"subjid": int(subjid), "ses": rec.ref.ses,
-                        "date": rec.date_str, "session_idx": session_idx}
-            if len(ni):
-                trials, attempts = _join(trials, _attempt_frame(ni, ports_by_run), label)
-                attempt_parts.append(attempts.assign(**identity))
-            else:
-                trials = trials.assign(n_failed=0)
-            if len(trials):
-                trial_parts.append(trials.assign(**identity))
-            session_rows.append({**identity, "n_runs": len(runs), "n_trials": len(trials),
-                                 "n_attempts": len(ni)})
-            run_rows.extend({**identity, "run_id": run_id, "start": start, "end": end}
-                            for run_id, (start, end) in sorted(runs.items()))
-            session_idx += 1
 
-    trials = (pd.concat(trial_parts, ignore_index=True) if trial_parts
-              else pd.DataFrame(columns=_TRIAL_COLUMNS))
-    attempts = (pd.concat(attempt_parts, ignore_index=True) if attempt_parts
-                else pd.DataFrame(columns=_ATTEMPT_COLUMNS))
-    return {
-        "trials": trials[_TRIAL_COLUMNS],
-        "attempts": attempts[_ATTEMPT_COLUMNS],
-        "sessions": pd.DataFrame(session_rows, columns=_SESSION_COLUMNS),
-        "runs": pd.DataFrame(run_rows, columns=_RUN_COLUMNS),
-    }
+def odor_names(data: dict) -> dict:
+    """``{port: name}`` of the odours the loaded trials and attempts pay at each reward port,
+    letters "/"-joined where a port pays more than one (``{1: "A", 2: "B"}``)."""
+    rows = pd.concat([data[f][["reward_port", "odor"]] for f in ("trials", "attempts")])
+    rows = rows[rows["reward_port"].notna() & (rows["odor"] != "")]
+    return {int(port): "/".join(sorted(part["odor"].unique()))
+            for port, part in rows.groupby("reward_port")}
+
+
+def by_odor(data: dict) -> dict:
+    """``{Odor: data}``: the loaded frames once per rewarded odour, port 1 first.
+
+        for odor, part in by_odor(ab).items(): ...
+
+    - ``trials`` and ``attempts`` keep that odour's rows. A row with no reward port (no
+      odour recorded) is in neither part, with a warning, though the pooled analyses count it.
+    - ``sessions`` and ``runs`` stay whole, so ``session_idx`` and the `task_time` clock are
+      the ones the pooled data use; ``n_trials`` / ``n_attempts`` count the odour's rows.
+    """
+    unassigned = {f: int(data[f]["reward_port"].isna().sum()) for f in ("trials", "attempts")}
+    if any(unassigned.values()):
+        warnings.warn(f"by_odor: {unassigned['trials']} trial(s) and {unassigned['attempts']} "
+                      f"attempt(s) have no reward port (no odour recorded) and are left out of "
+                      f"every odour.", RuntimeWarning, stacklevel=2)
+    out = {}
+    for port, name in odor_names(data).items():
+        part = {f: data[f][data[f]["reward_port"].eq(port).fillna(False).astype(bool)]
+                for f in ("trials", "attempts")}
+        sessions = data["sessions"].copy()
+        for column, frame in (("n_trials", part["trials"]), ("n_attempts", part["attempts"])):
+            counts = frame.groupby(["subjid", "session_idx"]).size().rename("n")
+            sessions[column] = (sessions.join(counts, on=["subjid", "session_idx"])["n"]
+                                .fillna(0).astype(int).to_numpy())
+        out[Odor(port, name)] = {**part, "sessions": sessions, "runs": data["runs"]}
+    return out
+
+
+def is_per_odor(value) -> bool:
+    """Whether ``value`` is an ``{Odor: ...}`` dict, as `by_odor` and `per_odor` return."""
+    return isinstance(value, dict) and bool(value) and all(isinstance(k, Odor) for k in value)
+
+
+def _is_data(value) -> bool:
+    return isinstance(value, dict) and set(_FRAMES) <= set(value)
+
+
+def per_odor(fn, *args, **kwargs):
+    """``fn`` on each odour alone.
+
+        fits = per_odor(fit_session_models, ab, mode="attempts")    # {Odor: fits}
+        per_odor(model_comparison, fits)                            # one table
+        per_odor(gate_table, walk, steps, walk_b, walk_s)
+
+    - An argument holding loaded data is split with `by_odor`; an ``{Odor: ...}`` argument
+      is taken one odour at a time; any other passes through to every call.
+    - Returns ``{Odor: result}``, or one frame when every result is a frame: ``odor`` and
+      ``port`` first, each added only where a result does not already have the column.
+    """
+    def split(value):
+        return by_odor(value) if _is_data(value) else value
+
+    args = [split(a) for a in args]
+    kwargs = {k: split(v) for k, v in kwargs.items()}
+    odors = next((list(v) for v in [*args, *kwargs.values()] if is_per_odor(v)), None)
+    if odors is None:
+        raise ValueError("per_odor needs loaded data or an {Odor: ...} argument")
+
+    def pick(value, odor):
+        return value[odor] if is_per_odor(value) else value
+
+    results = {}
+    for odor in odors:
+        try:
+            results[odor] = fn(*(pick(a, odor) for a in args),
+                               **{k: pick(v, odor) for k, v in kwargs.items()})
+        except Exception as error:
+            error.add_note(f"per_odor: raised for odour {odor.name} (port {odor.port})")
+            raise
+    if not all(isinstance(r, pd.DataFrame) for r in results.values()):
+        return results
+    parts = []
+    for odor, frame in results.items():
+        added = {k: v for k, v in (("odor", odor.name), ("port", odor.port))
+                 if k not in frame.columns}
+        parts.append(frame.assign(**added)[[*added, *frame.columns]])
+    return pd.concat(parts, ignore_index=True)
 
 
 def within_session_position(frame: pd.DataFrame) -> pd.Series:

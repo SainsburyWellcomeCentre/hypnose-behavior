@@ -16,18 +16,19 @@ removes chance from each choice, but on a time axis its slope is still ``choice 
 in engagement, and only one that ``initiations`` lacks is a change in accuracy.
 
 `excess_by_index` takes the rate out: excess correct over the mode's own row index, where
-the slope is ``p - 0.5`` alone. `rolling_accuracy` is accuracy itself, over a window of
-choices, at each choice's task time.
+the slope is ``p - 0.5`` alone; `excess_by_odor` splits it by odour on the same index.
+`rolling_accuracy` is accuracy itself, over a window of choices, at each choice's task time.
 """
 from __future__ import annotations
 
 import pandas as pd
 
 from hypnose_behavior.modelling.discrimination_learning.data import (
-    choice_rows, choice_sequence, task_time,
+    INDEX_COLUMNS, choice_rows, choice_sequence, odor_names, task_time,
 )
 
-__all__ = ["SERIES", "WINDOW", "cumulative_curves", "excess_by_index", "rolling_accuracy"]
+__all__ = ["SERIES", "WINDOW", "cumulative_curves", "excess_by_index", "excess_by_odor",
+           "rolling_accuracy"]
 
 # The running counts, in the order the figure stacks them.
 SERIES = ("initiations", "attempts", "excess", "rewards")
@@ -92,6 +93,30 @@ def excess_by_index(data: dict, mode: str = "completed") -> pd.DataFrame:
     rows = choice_sequence(data, mode)
     rows["excess"] = (rows["y"] - 0.5).groupby(rows["subjid"]).cumsum()
     return rows.assign(mode=mode)
+
+
+def excess_by_odor(data: dict, mode: str = "completed") -> pd.DataFrame:
+    """Each odour's excess correct over the mode's pooled row index, one row per choice
+    and odour.
+
+        excess = excess_by_odor(load_discrimination_data(...))
+
+    The `excess_by_index` rows plus ``port`` / ``odor``, and ``excess`` summed over that
+    odour's choices only, flat across the other odour's: the odours share the index and
+    their excesses add up to the pooled one (choices with no odour recorded aside). A
+    bend is a change in that odour's accuracy; the slope is ``p - 0.5`` times its share
+    of the choices.
+    """
+    rows = choice_sequence(data, mode)
+    column = INDEX_COLUMNS[mode]
+    ports = choice_rows(data, mode).sort_values(["subjid", column])["reward_port"]
+    parts = []
+    for port, name in odor_names(data).items():
+        own = ports.eq(port).fillna(False).to_numpy(dtype=bool)
+        step = (rows["y"] - 0.5).where(own, 0.0)
+        parts.append(rows.assign(port=port, odor=name,
+                                 excess=step.groupby(rows["subjid"]).cumsum()))
+    return pd.concat(parts, ignore_index=True).assign(mode=mode)
 
 
 def rolling_accuracy(data: dict, mode: str = "completed", window: int = WINDOW) -> pd.DataFrame:

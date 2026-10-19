@@ -7,6 +7,9 @@ as ``fits=`` -- and draws **one figure per animal**. Returns ``{subjid: Figure}`
 
 Both panels are on the log-odds scale, where the decomposition is additive; the right
 axis of the top panel carries the matching accuracies.
+
+Fits per odour (``separate_odors``, or `data.per_odor` fits) draw one figure per animal
+and odour, ``{subjid: {odour: Figure}}``.
 """
 from __future__ import annotations
 
@@ -20,6 +23,7 @@ from hypnose_behavior.io.save import (
     show_suffix,
     tie,
 )
+from hypnose_behavior.modelling.discrimination_learning.data import is_per_odor
 from hypnose_behavior.modelling.discrimination_learning.log_regression import (
     MIN_TRIALS,
     fit_session_models,
@@ -38,7 +42,10 @@ from hypnose_behavior.visualization.modelling.discrimination_learning._common im
     annotation_size,
     figure,
     in_order,
+    odor_tag,
+    odor_title,
     require_data,
+    resolve_fits,
     save_scope,
     session_ticks,
     style_axis,
@@ -180,12 +187,13 @@ def _headline(share, test) -> str:
 
 
 def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
-                            mode="completed", min_trials=MIN_TRIALS, legend=None, show=None,
-                            save=False, **selectors):
+                            mode="completed", min_trials=MIN_TRIALS, separate_odors=False,
+                            legend=None, show=None, save=False, **selectors):
     """Where each animal's accuracy changed: inside sessions, or between them.
 
         plot_gain_decomposition(data=ab)
         plot_gain_decomposition(fits=fit_session_models(ab, mode="attempts"))
+        plot_gain_decomposition(fits=per_odor(fit_session_models, ab))   # per odour
 
     Top: M_c's fitted log-odds over training. A solid segment runs from a session's
     first choice to its last, a dashed step crosses to the next session's first, and the
@@ -206,10 +214,30 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
     session, 2 within unpaired, 3 overnight, 4 and 5 the within and overnight running
     totals, 6 spans a dropped session (only where one exists). Within and overnight take
     the top panel's segments and steps with them.
+
+    ``separate_odors`` fits each odour alone (or takes ``fits`` per odour) and draws a
+    figure per animal and odour, named top right in its port colour; returns
+    ``{subjid: {odour: Figure}}``.
     """
-    if fits is None:
-        data = require_data(subjids, dates, selectors, data)
-        fits = fit_session_models(data, mode=mode, min_trials=min_trials)
+    fits = resolve_fits(fits, separate_odors,
+                        lambda: require_data(subjids, dates, selectors, data),
+                        lambda d: fit_session_models(d, mode=mode, min_trials=min_trials))
+    if not is_per_odor(fits):
+        figures, entries = _gain_figures(fits, None, legend, show, save)
+        legend_figure(entries, fontsize=annotation_size())
+        return figures
+    figures, entries = {}, []
+    for odor, odor_fits in fits.items():
+        drawn, more = _gain_figures(odor_fits, odor, legend, show, save)
+        for subjid, fig in drawn.items():
+            figures.setdefault(subjid, {})[odor.name] = fig
+        entries += more
+    legend_figure(entries, fontsize=annotation_size())
+    return figures
+
+
+def _gain_figures(fits, odor, legend, show, save):
+    """`plot_gain_decomposition`'s figures of one set of fits; ``odor`` names them."""
     levels, gains = session_levels(fits), gain_decomposition(fits)
     shares = overnight_share(fits).set_index("subjid")
     tests = model_comparison(fits)
@@ -235,11 +263,12 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
         # under the figure title; on the lower axes it would wedge between the two panels.
         top.set_title(_headline(shares.loc[subjid], tests.loc[subjid]), loc="left",
                       fontsize=annotation_size(), color=REFERENCE)
+        odor_title(top, odor)
         fig.legend(*in_order(bottom, _LEGEND_ORDER), loc="outside lower center", ncols=3,
                    frameon=False, fontsize=annotation_size())
         entries += finish_figure(fig, legend, show)
         _save(fig, f"discrimination_learning_gain_decomposition{show_suffix(show)}"
-                   f"_sub-{subjid:03d}", fits[subjid]["sessions"], save, subjid)
+                   f"{odor_tag(odor) if odor else ''}_sub-{subjid:03d}",
+              fits[subjid]["sessions"], save, subjid)
         figures[subjid] = fig
-    legend_figure(entries, fontsize=annotation_size())
-    return figures
+    return figures, entries
