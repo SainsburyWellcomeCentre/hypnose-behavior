@@ -8,14 +8,35 @@ were re-measured on `8e5ee27`.
 
 ---
 
-## The standing caveat
+## Before merging `ab-learning-detection`: per-odour mode and cohort cache
 
-> **The server has not been re-analysed.** Every saved session on the derivatives tree
-> predates the v2.0.0 restructure. The nine coverage sessions in
-> `src/hypnose_behavior/qc/sessions.yml` are the only ones current with this code, and the
-> gates re-derive those from rawdata rather than reading what is saved.
+`6199a90` adds the cohort cache (`io/cohort_cache.py`, `load_discrimination_data(cache=,
+refresh=)`) and the per-odour mode (`per_odor` / `by_odor` in `data.py`; `separate_odors` on
+the cumulative, diagnostics and gain-decomposition plotters). None of it is gated yet.
 
-This outlives any one plan.
+- **Plotters still without the per-odour mode** (`visualization/modelling/discrimination_learning/`):
+  - `session_gain`: `plot_edge_gains` one figure per odour; `plot_position_profile` and
+    `plot_session_profiles` as overlays.
+  - `state_space`, `sigmoid` (`plot_accuracy_sigmoid`, `plot_sigmoid_anchors`) and `step`: one
+    figure per odour, the observed series in its port colour. Per-odour sigmoid fits are
+    `{Odor: {variant: fits}}`.
+- **Trials with no odour.** 234 A/B trials (sub-060/061/062, ses 11-12) have an empty `odor`
+  and no reward port but are scored, so the pooled analyses count them and no single odour does
+  (measured 2026-10-19). Decide whether the pooled view keeps them.
+- **Gates:**
+  - pooled figures (no `separate_odors`) unchanged against `ec676b6`, with `plot_regression`'s
+    `_CHILD` harness on the discrimination-learning plotters, signing colours too;
+  - a cached load equals a fresh one, and a changed source file, changed loader code and
+    `refresh=True` each rebuild (check on a scratch cache root, not the server);
+  - the separate-mode figures rendered and looked at;
+  - `check_imports`, `check_layering`.
+
+  The 2026-10-19 check scripts (`check_cache.py`, `ab_plot_regression.py` with `figwrap/`) are
+  in `Joschua/Backups/claude-memory-backup-2026-10-19/scratch-scripts/` on the server.
+- **Then:** a `DECISIONS.md` section on the cache, which writes a derived copy of saved data into
+  `<derivatives>/cache/`: how that differs from section 5, and what it buys (A/B cohort
+  8-9 s fresh against 0.75 s cached, G/E 1.9 s against 0.26 s; 2026-10-19). Notebook cells for
+  `separate_odors` and `cache=True`.
 
 ---
 
