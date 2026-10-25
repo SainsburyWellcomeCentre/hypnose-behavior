@@ -3381,7 +3381,7 @@ above it changed.
 
 ---
 
-## 40. Plotters take `legend` and `show` and finish each figure with `finish_figure` *(discrimination_learning figures, 2026-10-01)*
+## 41. Plotters take `legend` and `show` and finish each figure with `finish_figure` *(discrimination_learning figures, 2026-10-01)*
 
 Every plotting function takes `legend=None` and `show=None` and follows the convention in
 `hypnose_helpers.viz.plotter` (re-exported from `io.save`):
@@ -3408,3 +3408,82 @@ New plotters follow it from the start; existing ones adopt it when next touched.
 
 **Gate:** helpers `tests/test_legends.py`, `test_series.py`, `test_plotter.py` pass ·
 `check_imports` PASS · `check_layering` PASS.
+
+---
+
+## 42. A choice is a reward port, and the schema says which port pays each odour *(G/E odour discrimination, 2026-10-08)*
+
+Every run saves `reward_port_by_odor` in its `parameters` (`manifest.json` and `summary.json`,
+`session.runs[]`), e.g. `{"OdorG": 1, "OdorE": 2}`. It comes from the schema: a reward
+condition's `position` is its port, 0 → port 1 and 1 → port 2, in every protocol. An odour
+paid at both ports is left out.
+
+- **Reading it:** `io.load_results.reward_ports(results, run_id=None)` and
+  `Session.reward_ports()`. Both raise for a session saved without the field: re-run trial
+  classification; there is no fallback to rawdata. A session can mix protocols, so
+  `reward_ports_by_run` gives every run's map and `reward_port_of(ports_by_run, run_id, odor)`
+  one trial's port. `reward_ports_by_letter` collapses the runs to `{odor letter: port}`, and
+  `PortOdors` collects the odours each port pays over a figure's sessions, for its labels.
+- **Choice and correctness are ports.** The choice is a port number (`first_supply_port`,
+  `first_reward_poke_port`, `fa_port`), and the correct port is `reward_ports()[odor_name]`.
+  The `*_odor_identity` columns hold the port as a letter (`classify_trials.py` tags port 1
+  `'A'` and port 2 `'B'`, so a G trial paid at port 1 reads `'A'`); nothing new reads them.
+- **The port decides layout and colour.** Port 1 goes up and port 2 down
+  (`plot_choice_history`), port positions are uniform in the movement plots, and each port
+  keeps one colour, so A and G (both port 1) share it. Labels name a port after the odours it
+  pays (`FA Ratio (G-E)/(G+E)`, `FA to port G`), never "(port 1)".
+
+**Kept on A/B letters for now**, because they only run with A/B. Each moves to ports if it ever
+runs with other rewarded odours:
+- the single-reward protocol: `metric_analysis/sing_rew_metrics.py` (`_odor_to_identity`,
+  `_port_to_identity`), `visualization/sing_rew.py` (`_port_label`, the `split_AB` boxplots)
+  and `visualization/movement/sing_rew_movement.py` (`GROUP_*`, `_port_letter`, `_ab_letter`);
+- the hidden-rule switch-point model: `modelling/switchpoint/data.py` (`_ab_label`,
+  `AB_LETTERS`, `subset_by_ab`) and `visualization/modelling/switchpoint/plots.py`
+  (`_AB_COLORS`, the "reward A" labels). Key trials on `first_supply_port` (else the last
+  odour's port), colour by port and label with `PortOdors`;
+- the metrics report's false-alarm port line (`false_alarm.fa_port_ratio_by_odor_session`,
+  `A=`/`B=`), for a protocol with false alarms on unrewarded odours. Name the ports from
+  `PortOdors` where `reward_port_by_odor` is saved and keep `A=`/`B=` otherwise: a raise there
+  fails the session's whole metrics run.
+
+The predictive-sequence protocol keeps its own sequence names and colours (`SEQUENCE_COLORS`,
+the G-C / G-F split). The movement plotters (`movement/traces.py`, `speed.py`,
+`tortuosity.py`) follow this section in code and have not been run with it.
+
+**Gate:** `regression` GREEN on every change; the saved maps checked against the supply data,
+G/E `{G: 1, E: 2}` and A/B, doubles, hidden-rule and single-reward sessions `{A: 1, B: 2}` ·
+`plot_regression` GREEN on the port-keyed plotters.
+
+---
+
+## 43. The cohort cache keeps a derived copy of saved data, stamped by what it was built from *(discrimination_learning loader, 2026-10-19)*
+
+`load_discrimination_data(..., cache=True)` keeps its four frames under
+`<derivatives>/cache/discrimination_learning/<digest of the selection>/` (a parquet file per
+frame and `manifest.json`, `io/cohort_cache.py`) and reads them back while they are current.
+`cache=<path>` keeps them there instead; `refresh=True` rebuilds.
+
+**Why this is not the cache section 5 rejected.** There the walk over the mount was paid
+either way and the cache saved 25 ms of compute per session. Here the selection is still
+walked and each matched session's folder listed, but nothing is read, and the reads were the
+cost. Measured 2026-10-19: the A/B cohort (six animals, 72 sessions) 8-9 s fresh against
+0.75 s cached; G/E (two animals, 14 sessions) 1.9 s against 0.26 s.
+
+**What makes it current.** Section 5 rejected a commit stamp, which every unrelated commit
+invalidates. This stamp is the inputs: the size and whole-second mtime of every file the
+loader reads in each matched session (`fingerprint`), and a digest of the source of the
+modules that build the frames (`modelling/discrimination_learning/data.py`,
+`io/load_results.py`, `io/loaders.py`). A re-analysed, added or removed session, or an edit
+to those three modules, rebuilds.
+
+- **The code stamp stops at those three modules.** An edit to anything they import
+  (`frames.odor_letter`, `io/layout`, `io/protocol_schema`) or a new pandas does not rebuild:
+  pass `refresh=True` after one.
+- **It is disposable.** One folder per distinct selection, never pruned; unlike the pooled
+  files of section 39, each is read back by the call that wrote it. Deleting
+  `<derivatives>/cache/` loses nothing.
+
+**Gate:** a cached load equals a fresh one exactly (`assert_frame_equal(check_exact=True)`,
+A/B and G/E), and a changed source file, changed loader code and `refresh=True` each rebuild,
+on a scratch cache root (2026-10-22).

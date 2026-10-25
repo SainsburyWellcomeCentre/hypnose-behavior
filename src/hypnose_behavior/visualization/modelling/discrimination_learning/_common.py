@@ -6,7 +6,8 @@ ticks, the reference lines and the save call. The colours are the categorical sl
 draws in, in a fixed order, so a series keeps its colour from one figure to the next.
 
 With ``separate_odors`` an odour takes its reward port's colour (`PORT_COLOURS`) and both
-odours together the `COMBINED` grey: `odor_parts` lists what to draw.
+odours together the `COMBINED` grey: `odor_parts` lists what to draw, and `odor_figures`
+draws a figure per odour from fits per odour.
 
 Package-internal: the plotters import from here, nothing outside does.
 """
@@ -39,6 +40,8 @@ __all__ = [
     "in_order",
     "index_bounds",
     "line_with_band",
+    "observed_colour",
+    "odor_figures",
     "odor_parts",
     "odor_tag",
     "odor_title",
@@ -138,9 +141,30 @@ def resolve_fits(fits, separate_odors: bool, load, fit):
     return fits
 
 
+def odor_figures(fits, draw) -> tuple:
+    """``draw(fits, None)`` for pooled fits, or ``draw(part, odor)`` for each odour of fits
+    per odour. ``draw`` returns ``({subjid: figure}, legend entries)``; so does this, the
+    figures ``{subjid: {odour: figure}}`` per odour."""
+    if not is_per_odor(fits):
+        return draw(fits, None)
+    figures, entries = {}, []
+    for odor, part in fits.items():
+        drawn, more = draw(part, odor)
+        for subjid, fig in drawn.items():
+            figures.setdefault(subjid, {})[odor.name] = fig
+        entries += more
+    return figures, entries
+
+
+def observed_colour(odor) -> str:
+    """The observed excess correct's colour: `SECOND`, or ``odor``'s port colour."""
+    return SECOND if odor is None else PORT_COLOURS[odor.port]
+
+
 def odor_tag(odor) -> str:
-    """The save-name tag of a figure of one odour, ``"_odor-A"`` (``"/"`` dropped)."""
-    return f"_odor-{odor.name.replace('/', '')}"
+    """The save-name tag of a figure of one odour, ``"_odor-A"`` (``"/"`` dropped); ``""``
+    for None."""
+    return "" if odor is None else f"_odor-{odor.name.replace('/', '')}"
 
 
 def odor_title(ax, odor) -> None:

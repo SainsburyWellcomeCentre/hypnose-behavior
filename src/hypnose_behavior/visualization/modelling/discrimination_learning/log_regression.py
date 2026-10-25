@@ -23,7 +23,6 @@ from hypnose_behavior.io.save import (
     show_suffix,
     tie,
 )
-from hypnose_behavior.modelling.discrimination_learning.data import is_per_odor
 from hypnose_behavior.modelling.discrimination_learning.log_regression import (
     MIN_TRIALS,
     fit_session_models,
@@ -42,6 +41,7 @@ from hypnose_behavior.visualization.modelling.discrimination_learning._common im
     annotation_size,
     figure,
     in_order,
+    odor_figures,
     odor_tag,
     odor_title,
     require_data,
@@ -222,16 +222,8 @@ def plot_gain_decomposition(subjids=None, dates=None, *, data=None, fits=None,
     fits = resolve_fits(fits, separate_odors,
                         lambda: require_data(subjids, dates, selectors, data),
                         lambda d: fit_session_models(d, mode=mode, min_trials=min_trials))
-    if not is_per_odor(fits):
-        figures, entries = _gain_figures(fits, None, legend, show, save)
-        legend_figure(entries, fontsize=annotation_size())
-        return figures
-    figures, entries = {}, []
-    for odor, odor_fits in fits.items():
-        drawn, more = _gain_figures(odor_fits, odor, legend, show, save)
-        for subjid, fig in drawn.items():
-            figures.setdefault(subjid, {})[odor.name] = fig
-        entries += more
+    figures, entries = odor_figures(
+        fits, lambda part, odor: _gain_figures(part, odor, legend, show, save))
     legend_figure(entries, fontsize=annotation_size())
     return figures
 
@@ -268,7 +260,7 @@ def _gain_figures(fits, odor, legend, show, save):
                    frameon=False, fontsize=annotation_size())
         entries += finish_figure(fig, legend, show)
         _save(fig, f"discrimination_learning_gain_decomposition{show_suffix(show)}"
-                   f"{odor_tag(odor) if odor else ''}_sub-{subjid:03d}",
+                   f"{odor_tag(odor)}_sub-{subjid:03d}",
               fits[subjid]["sessions"], save, subjid)
         figures[subjid] = fig
     return figures, entries

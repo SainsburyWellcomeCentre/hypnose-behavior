@@ -14,6 +14,10 @@ files each figure under its own animal with `io.save.save_figure`.
   against that session's M_c line.
 
 All three take ``legend`` and ``show`` (plotter convention, `hypnose_helpers.viz.plotter`).
+
+Fits per odour (``separate_odors``, or `data.per_odor` fits): `plot_edge_gains` draws one
+figure per animal and odour, ``{subjid: {odour: Figure}}``; the two profiles draw every
+odour on the same axes in its reward port's colour.
 """
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ import math
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 from hypnose_behavior.io.save import (
     finish_figure,
@@ -29,6 +34,7 @@ from hypnose_behavior.io.save import (
     show_suffix,
     tie,
 )
+from hypnose_behavior.modelling.discrimination_learning.data import is_per_odor
 from hypnose_behavior.modelling.discrimination_learning.log_regression import (
     MIN_TRIALS,
     fit_session_models,
@@ -45,6 +51,7 @@ from hypnose_behavior.modelling.discrimination_learning.session_gain import (
 )
 from hypnose_behavior.visualization.modelling.discrimination_learning._common import (
     BAND_ALPHA,
+    PORT_COLOURS,
     REFERENCE,
     SECOND,
     SERIES,
@@ -54,7 +61,12 @@ from hypnose_behavior.visualization.modelling.discrimination_learning._common im
     figure,
     in_order,
     line_with_band,
+    odor_figures,
+    odor_tag,
+    odor_title,
+    odors_tag,
     require_data,
+    resolve_fits,
     save_scope,
     session_ticks,
     style_axis,
@@ -80,6 +92,10 @@ _GAIN_GROUPS = (
 _EDGE_ORDER = (_WITHIN_LABEL, _ACROSS_LABEL, "within, running total", "across, running total",
                _GAP_LABEL)
 _PROFILE_ORDER = ("observed", "M_c fit", "M_a fit")
+# Per odour every profile series takes the odour's colour; the fits part by line.
+_ODOR_FITS = (("fitted_c", "M_c fit", (0, (4, 2))), ("fitted_a", "M_a fit", (0, (1, 1.5))))
+# Per odour, each bin's points sit this far apart on the fraction axis.
+_ODOR_DODGE = 0.03
 
 # Same frame as the regression figure: two stacked panels of per-session detail.
 _WIDTH = 10.0
@@ -99,12 +115,24 @@ def _unit(mode: str) -> str:
     return "trial" if mode == "completed" else "choice"
 
 
-def _fits(subjids, dates, data, fits, mode, min_trials, selectors) -> dict:
-    """The given fits, or `fit_session_models` over the loaded selection."""
-    if fits is None:
-        data = require_data(subjids, dates, selectors, data)
-        fits = fit_session_models(data, mode=mode, min_trials=min_trials)
-    return fits
+def _fits(subjids, dates, data, fits, mode, min_trials, separate_odors, selectors) -> dict:
+    """The given fits, or `fit_session_models` over the loaded selection, per odour with
+    ``separate_odors``."""
+    return resolve_fits(fits, separate_odors,
+                        lambda: require_data(subjids, dates, selectors, data),
+                        lambda d: fit_session_models(d, mode=mode, min_trials=min_trials))
+
+
+def _parts(fits) -> list:
+    """``[(odor, fits)]``: each odour of fits per odour, or ``(None, fits)``."""
+    return list(fits.items()) if is_per_odor(fits) else [(None, fits)]
+
+
+def _labels(odors, order) -> list:
+    """The legend order of an overlay: each odour's series in ``order``, then the next's."""
+    if odors == [None]:
+        return list(order)
+    return [f"{odor.name} {label}" for odor in odors for label in order]
 
 
 def _save(fig, name, fit, save, titles=True):
@@ -188,12 +216,13 @@ def _headline(summary, n: int, unit: str) -> str:
 
 
 def plot_edge_gains(subjids=None, dates=None, *, data=None, fits=None, mode="completed",
-                    min_trials=MIN_TRIALS, n=N_WINDOW, legend=None, show=None, save=False,
-                    **selectors):
+                    min_trials=MIN_TRIALS, n=N_WINDOW, separate_odors=False, legend=None,
+                    show=None, save=False, **selectors):
     """Accuracy over the first and last ``n`` choices of each session, and the gains.
 
         plot_edge_gains(fits=fits)
         plot_edge_gains(data=ab, mode="attempts", n=30)
+        plot_edge_gains(data=ab, separate_odors=True)
 
     Top: each session's first-window and last-window accuracy with Wilson 95% intervals,
     joined by a solid segment inside the session (dotted where the windows overlap) and
@@ -208,8 +237,20 @@ def plot_edge_gains(subjids=None, dates=None, *, data=None, fits=None, mode="com
     ``show`` numbers: 1 within session, 2 across sessions, 3 and 4 the within and across
     running totals, 5 spans an unfitted session (only where one exists). Within and across
     take the top panel's segments and steps with them.
+
+    ``separate_odors`` fits each odour alone (or takes ``fits`` per odour) and draws a
+    figure per animal and odour, its windows counting that odour's choices, named top
+    right in its port colour; returns ``{subjid: {odour: Figure}}``.
     """
-    fits = _fits(subjids, dates, data, fits, mode, min_trials, selectors)
+    fits = _fits(subjids, dates, data, fits, mode, min_trials, separate_odors, selectors)
+    figures, entries = odor_figures(
+        fits, lambda part, odor: _edge_figures(part, odor, n, legend, show, save))
+    legend_figure(entries, fontsize=annotation_size())
+    return figures
+
+
+def _edge_figures(fits, odor, n, legend, show, save):
+    """`plot_edge_gains`' figures of one set of fits; ``odor`` names them."""
     windows, gains = edge_windows(fits, n), edge_gains(fits, n)
     summary = gain_summary(gains).set_index(["subjid", "component"])
 
@@ -232,35 +273,45 @@ def plot_edge_gains(subjids=None, dates=None, *, data=None, fits=None, mode="com
                         animal["session_idx"].max() + SESSION_SPAN + 0.4)
         top.set_title(_headline(summary.loc[subjid], n, unit), loc="left",
                       fontsize=annotation_size(), color=REFERENCE)
+        odor_title(top, odor)
         fig.legend(*in_order(bottom, _EDGE_ORDER), loc="outside lower center", ncols=3,
                    frameon=False, fontsize=annotation_size())
         entries += finish_figure(fig, legend, show)
         _save(fig, f"discrimination_learning_edge_gains{show_suffix(show)}"
-                   f"_sub-{subjid:03d}", fit, save, titles=False)
+                   f"{odor_tag(odor)}_sub-{subjid:03d}", fit, save, titles=False)
         figures[subjid] = fig
-    legend_figure(entries, fontsize=annotation_size())
-    return figures
+    return figures, entries
 
 
-def _plot_profile(ax, profile):
-    """Observed accuracy with its Wilson band, and both models' mean prediction."""
-    line_with_band(ax, profile, "center", "accuracy", "accuracy_lo", "accuracy_hi", SERIES,
-                   "observed")
-    ax.plot(profile["center"], profile["fitted_c"], color=_ACROSS, linewidth=2,
-            label="M_c fit")
-    ax.plot(profile["center"], profile["fitted_a"], color=REFERENCE, linewidth=2,
-            linestyle=(0, (1, 1.5)), label="M_a fit")
+def _plot_profile(ax, profile, odor=None):
+    """Observed accuracy with its Wilson band, and both models' mean prediction; per
+    ``odor`` all three in its port colour, the fits dashed (M_c) and dotted (M_a)."""
+    if odor is None:
+        line_with_band(ax, profile, "center", "accuracy", "accuracy_lo", "accuracy_hi",
+                       SERIES, "observed")
+        ax.plot(profile["center"], profile["fitted_c"], color=_ACROSS, linewidth=2,
+                label="M_c fit")
+        ax.plot(profile["center"], profile["fitted_a"], color=REFERENCE, linewidth=2,
+                linestyle=(0, (1, 1.5)), label="M_a fit")
+    else:
+        colour = PORT_COLOURS[odor.port]
+        line_with_band(ax, profile, "center", "accuracy", "accuracy_lo", "accuracy_hi",
+                       colour, f"{odor.name} observed")
+        for column, label, linestyle in _ODOR_FITS:
+            ax.plot(profile["center"], profile[column], color=colour, linewidth=2,
+                    linestyle=linestyle, label=f"{odor.name} {label}")
     ax.axhline(0.5, **ZERO)
 
 
 def plot_position_profile(subjids=None, dates=None, *, data=None, fits=None,
                           mode="completed", min_trials=MIN_TRIALS, bins=10, bin_width=10,
-                          min_sessions=_MIN_SESSIONS, legend=None, show=None, save=False,
-                          **selectors):
+                          min_sessions=_MIN_SESSIONS, separate_odors=False, legend=None,
+                          show=None, save=False, **selectors):
     """Accuracy by position in the session, pooled over each animal's fitted sessions.
 
         plot_position_profile(fits=fits)
         plot_position_profile(fits=fits, bins=5, bin_width=20)
+        plot_position_profile(data=ab, separate_odors=True)
 
     Top: by choice number from the session start, in bins of ``bin_width``; a bin
     reached by fewer than ``min_sessions`` sessions is left out. Bottom: by fraction of
@@ -273,42 +324,73 @@ def plot_position_profile(subjids=None, dates=None, *, data=None, fits=None,
     to once pooled. The grey horizontal is chance.
 
     ``show`` numbers: 1 observed (with its band), 2 M_c fit, 3 M_a fit, in both panels.
+
+    ``separate_odors`` fits each odour alone (or takes ``fits`` per odour) and draws every
+    odour on the same axes in its port colour, positions counting that odour's choices:
+    observed solid, M_c dashed, M_a dotted. ``show`` then numbers the first odour's three,
+    then the next's.
     """
-    fits = _fits(subjids, dates, data, fits, mode, min_trials, selectors)
-    by_choice = position_profile(fits, "choices", bin_width=bin_width)
-    by_fraction = position_profile(fits, "fraction", bins=bins)
+    fits = _fits(subjids, dates, data, fits, mode, min_trials, separate_odors, selectors)
+    split = is_per_odor(fits)
+    parts = [(odor, part, position_profile(part, "choices", bin_width=bin_width),
+              position_profile(part, "fraction", bins=bins)) for odor, part in _parts(fits)]
+    order = _labels([odor for odor, *_ in parts], _PROFILE_ORDER)
 
     figures, entries = {}, []
-    for subjid in sorted(fits):
-        fit = fits[subjid]
+    for subjid in sorted(set().union(*(part for _, part, *_ in parts))):
+        fit = next(part[subjid] for _, part, *_ in parts if subjid in part)
         unit = _unit(fit["mode"])
-        choice = by_choice[(by_choice["subjid"] == subjid)
-                           & (by_choice["n_sessions"] >= min_sessions)]
-        fraction = by_fraction[by_fraction["subjid"] == subjid]
         fig, (top, bottom) = figure(n_rows=2, width=_WIDTH, height=_PANEL_HEIGHT)
-        _plot_profile(top, choice)
-        _plot_profile(bottom, fraction)
+        for odor, part, by_choice, by_fraction in parts:
+            if subjid not in part:
+                continue
+            choice = by_choice[(by_choice["subjid"] == subjid)
+                               & (by_choice["n_sessions"] >= min_sessions)]
+            fraction = by_fraction[by_fraction["subjid"] == subjid]
+            _plot_profile(top, choice, odor)
+            _plot_profile(bottom, fraction, odor)
         for ax in (top, bottom):
             style_axis(ax, ylabel="Accuracy", ylim=None)
         top.set_xlabel(f"{unit.capitalize()} in session")
         bottom.set_xlabel("Fraction of session")
         bottom.set_xlim(0, 1)
-        fig.legend(*in_order(bottom, _PROFILE_ORDER), loc="outside lower center", ncols=3,
-                   frameon=False, fontsize=annotation_size())
+        fig.legend(*in_order(bottom, order), loc="outside lower center",
+                   ncols=len(parts) if split else 3, frameon=False,
+                   fontsize=annotation_size())
         entries += finish_figure(fig, legend, show)
-        _save(fig, f"discrimination_learning_position_profile{show_suffix(show)}"
-                   f"_sub-{subjid:03d}", fit, save)
+        _save(fig, f"discrimination_learning_position_profile{odors_tag(split)}"
+                   f"{show_suffix(show)}_sub-{subjid:03d}", fit, save)
         figures[subjid] = fig
     legend_figure(entries, fontsize=annotation_size())
     return figures
 
 
+def _panel_title(ses, cells) -> str:
+    """``ses 4  n 120  W +0.8``, one ``n`` and W per odour joined by ``/`` (``-`` where
+    the odour's session was not fitted)."""
+    n = "/".join("-" if cell is None else str(cell[0]) for cell in cells)
+    gain = "/".join("-" if cell is None else f"{cell[1]:+.1f}" for cell in cells)
+    return f"ses {ses}  n {n}  W {gain}"
+
+
+def _grid_legend(axes, order):
+    """The handles and labels over every panel, each label once, in ``order``."""
+    found = {}
+    for ax in axes:
+        for handle, label in zip(*ax.get_legend_handles_labels()):
+            found.setdefault(label, handle)
+    labels = [label for label in order if label in found]
+    return [found[label] for label in labels], labels
+
+
 def plot_session_profiles(subjids=None, dates=None, *, data=None, fits=None,
-                          mode="completed", min_trials=MIN_TRIALS, bins=5, legend=None,
-                          show=None, save=False, **selectors):
+                          mode="completed", min_trials=MIN_TRIALS, bins=5,
+                          separate_odors=False, legend=None, show=None, save=False,
+                          **selectors):
     """Accuracy by fraction of the session, one panel per fitted session.
 
         plot_session_profiles(fits=fits)
+        plot_session_profiles(data=ab, separate_odors=True)
 
     Points are the accuracy over each of ``bins`` equal-count bins with Wilson 95%
     intervals; the line is the session's M_c fit, a straight line in log-odds and so a
@@ -317,17 +399,29 @@ def plot_session_profiles(subjids=None, dates=None, *, data=None, fits=None,
     its first bins, is one the line describes poorly. The grey horizontal is chance.
 
     ``show`` numbers: 1 observed, 2 M_c fit, in every panel.
+
+    ``separate_odors`` fits each odour alone (or takes ``fits`` per odour) and draws every
+    odour in each panel in its port colour, a bin's points side by side. A panel is a
+    session either odour fitted; its title gives ``n`` and W per odour. ``show`` then
+    numbers the first odour's two, then the next's.
     """
-    fits = _fits(subjids, dates, data, fits, mode, min_trials, selectors)
-    profiles = session_profile(fits, bins=bins)
-    curves = fitted_curves(fits)
-    gains = gain_decomposition(fits)
-    within = gains[gains["component"] == "within"].set_index(["subjid", "session_idx"])
+    fits = _fits(subjids, dates, data, fits, mode, min_trials, separate_odors, selectors)
+    split = is_per_odor(fits)
+    parts = []
+    for odor, part in _parts(fits):
+        gains = gain_decomposition(part)
+        parts.append((odor, part, session_profile(part, bins=bins), fitted_curves(part),
+                      gains[gains["component"] == "within"].set_index(
+                          ["subjid", "session_idx"])))
+    order = _labels([odor for odor, *_ in parts], _PROFILE_ORDER)
+    offsets = (np.arange(len(parts)) - (len(parts) - 1) / 2) * _ODOR_DODGE
 
     figures, entries = {}, []
-    for subjid in sorted(fits):
-        fit = fits[subjid]
-        sessions = fit["sessions"][fit["sessions"]["kept"]].sort_values("session_idx")
+    for subjid in sorted(set().union(*(part for _, part, *_ in parts))):
+        animal = [part[subjid] for _, part, *_ in parts if subjid in part]
+        fit = animal[0]
+        sessions = (pd.concat([f["sessions"][f["sessions"]["kept"]] for f in animal])
+                    .drop_duplicates("session_idx").sort_values("session_idx"))
         columns = min(_GRID_COLUMNS, len(sessions))
         rows = math.ceil(len(sessions) / columns)
         fig, axes = plt.subplots(rows, columns, figsize=(_CELL_WIDTH * columns,
@@ -336,22 +430,35 @@ def plot_session_profiles(subjids=None, dates=None, *, data=None, fits=None,
                                  constrained_layout=True)
         for ax, session in zip(axes.flat, sessions.itertuples()):
             key = (subjid, session.session_idx)
-            curve = curves[(curves["subjid"] == subjid)
-                           & (curves["session_idx"] == session.session_idx)]
-            profile = profiles[(profiles["subjid"] == subjid)
-                               & (profiles["session_idx"] == session.session_idx)]
-            ax.plot(curve["x"], curve["p"], color=_ACROSS, linewidth=2, label="M_c fit")
-            err = np.vstack([profile["accuracy"] - profile["accuracy_lo"],
-                             profile["accuracy_hi"] - profile["accuracy"]])
-            ax.errorbar(profile["center"], profile["accuracy"], yerr=err, fmt="o",
-                        color=SERIES, markersize=6, markeredgecolor="white",
-                        markeredgewidth=1, elinewidth=2, capsize=0, label="observed")
+            cells = []
+            for offset, (odor, part, profiles, curves, within) in zip(offsets, parts):
+                if key not in within.index:
+                    cells.append(None)
+                    continue
+                name = "" if odor is None else f"{odor.name} "
+                colour = None if odor is None else PORT_COLOURS[odor.port]
+                curve = curves[(curves["subjid"] == subjid)
+                               & (curves["session_idx"] == session.session_idx)]
+                profile = profiles[(profiles["subjid"] == subjid)
+                                   & (profiles["session_idx"] == session.session_idx)]
+                ax.plot(curve["x"], curve["p"], color=colour or _ACROSS, linewidth=2,
+                        label=f"{name}M_c fit")
+                # Clipped: an all-correct bin's Wilson bound sits a rounding error below 1.
+                err = np.clip([profile["accuracy"] - profile["accuracy_lo"],
+                               profile["accuracy_hi"] - profile["accuracy"]], 0, None)
+                ax.errorbar(profile["center"] + offset, profile["accuracy"], yerr=err,
+                            fmt="o", color=colour or SERIES, markersize=6,
+                            markeredgecolor="white", markeredgewidth=1, elinewidth=2,
+                            capsize=0, label=f"{name}observed")
+                n = part[subjid]["sessions"].set_index("session_idx").loc[
+                    session.session_idx, "n"]
+                cells.append((n, within.loc[key, "value"]))
             ax.axhline(0.5, **ZERO)
             style_axis(ax)
             ax.set_xlim(0, 1)
             ax.tick_params(labelsize=annotation_size())
-            ax.set_title(f"ses {session.ses}  n {session.n}  W {within.loc[key, 'value']:+.1f}",
-                         loc="left", fontsize=annotation_size())
+            ax.set_title(_panel_title(session.ses, cells), loc="left",
+                         fontsize=annotation_size())
         # An empty slot in the last row leaves the panel above it at the bottom of its
         # column, where the shared x axis would otherwise have hidden its tick labels.
         for index in range(len(sessions), rows * columns):
@@ -359,11 +466,12 @@ def plot_session_profiles(subjids=None, dates=None, *, data=None, fits=None,
             axes.flat[index - columns].tick_params(labelbottom=True)
         fig.supxlabel("Fraction of session", fontsize=text_size())
         fig.supylabel("Accuracy", fontsize=text_size())
-        fig.legend(*in_order(axes.flat[0], _PROFILE_ORDER), loc="outside upper right",
-                   ncols=2, frameon=False, fontsize=annotation_size())
+        fig.legend(*_grid_legend(axes.flat, order), loc="outside upper right",
+                   ncols=len(parts) if split else 2, frameon=False,
+                   fontsize=annotation_size())
         entries += finish_figure(fig, legend, show)
-        _save(fig, f"discrimination_learning_session_profiles{show_suffix(show)}"
-                   f"_sub-{subjid:03d}", fit, save)
+        _save(fig, f"discrimination_learning_session_profiles{odors_tag(split)}"
+                   f"{show_suffix(show)}_sub-{subjid:03d}", fit, save)
         figures[subjid] = fig
     legend_figure(entries, fontsize=annotation_size())
     return figures

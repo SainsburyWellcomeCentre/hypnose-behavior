@@ -9,6 +9,9 @@ animal with `io.save.save_figure`.
   over the row index, and, as a second figure, the lnL surface over (center, width).
 - `plot_sigmoid_anchors`  -- every fit on task time: the 1.1 running counts with each
   fit's expected count, and the rates and accuracy per session with the fitted curves.
+
+Both take ``separate_odors``, or fits per odour (`data.per_odor`): one figure per animal and
+odour, ``{subjid: {odour: ...}}``, the observed excess correct in the odour's port colour.
 """
 from __future__ import annotations
 
@@ -28,7 +31,9 @@ from hypnose_behavior.io.save import (
     show_suffix,
     tie,
 )
-from hypnose_behavior.modelling.discrimination_learning.data import session_bounds
+from hypnose_behavior.modelling.discrimination_learning.data import (
+    by_odor, is_per_odor, session_bounds,
+)
 from hypnose_behavior.modelling.discrimination_learning.diagnostics import wilson_interval
 from hypnose_behavior.modelling.discrimination_learning.sigmoid import (
     VARIANTS,
@@ -42,6 +47,7 @@ from hypnose_behavior.modelling.discrimination_learning.sigmoid import (
 from hypnose_behavior.visualization.modelling.discrimination_learning._common import (
     BAND_ALPHA,
     BOUNDARY,
+    CATEGORICAL,
     REFERENCE,
     SECOND,
     SERIES,
@@ -49,7 +55,12 @@ from hypnose_behavior.visualization.modelling.discrimination_learning._common im
     annotation_size,
     figure,
     index_bounds,
+    observed_colour,
+    odor_figures,
+    odor_tag,
+    odor_title,
     require_data,
+    resolve_fits,
     save_scope,
     style_axis,
     text_size,
@@ -100,6 +111,10 @@ _ANCHOR_LABELS = {"initiations": "Initiations", "excess": "Excess correct",
 # which scale with the line width, so "Sigmoid fit" reads as dashed.
 _ANCHOR_HANDLE_LENGTH = 2.5
 
+# Per odour, excess correct takes the odour's port colour and rewards the next categorical
+# slot, clear of the aqua that port 2's colour sits next to.
+_ODOR_REWARDS = CATEGORICAL[3]
+
 # A fit drawn over its observed count: the count's colour, dashed.
 _FITTED = dict(linewidth=2.2, linestyle=(0, (4, 2)), alpha=1.0, zorder=5)
 _MIDPOINT = dict(marker="o", markersize=9, markeredgecolor="white", markeredgewidth=1.5,
@@ -110,9 +125,10 @@ _HEIGHT = 3.4
 
 
 def _save(fig, name, sessions, save, subjid):
+    """Save without the odour's title, which the displayed figure keeps."""
     if not save:
         return
-    save_figure(fig, name, **save_scope(sessions, subjid))
+    save_figure(fig, name, titles=False, **save_scope(sessions, subjid))
 
 
 def _width_text(width, lo, hi):
@@ -183,12 +199,13 @@ def _headline(fits, subjid, lead):
     return lines
 
 
-def _draw_excess(ax, rows, curves):
+def _draw_excess(ax, rows, curves, colour):
     """Observed excess correct over the row count, and each curve's expected excess; the
     first curve of a series carries its label, the rest are tied to it."""
     count = np.r_[0, rows["k"].to_numpy() + 1]
     observed = np.r_[0.0, np.cumsum(rows["y"].to_numpy() - 0.5)]
-    ax.plot(count, observed, drawstyle="steps-post", label=_OBSERVED_LABEL, **_OBSERVED)
+    ax.plot(count, observed, drawstyle="steps-post", label=_OBSERVED_LABEL,
+            **{**_OBSERVED, "color": colour})
     labelled = set()
     for fit, rank, style, series in curves:
         line, = ax.plot(count, np.r_[0.0, expected_excess(fit, rank)], **style)
@@ -212,13 +229,13 @@ def _mark_switch(ax, rows, center):
     return marker
 
 
-def _draw_accuracy(ax, rows, curves):
+def _draw_accuracy(ax, rows, curves, colour):
     """Accuracy per `_BIN` rows and each curve's p(k), tied to their series."""
     k = rows["k"].to_numpy(dtype=float)
     bins = _binned(rows)
     spread = np.clip([bins["p"] - bins["lo"], bins["hi"] - bins["p"]], 0, None)
     ax.errorbar(bins["k"], bins["p"], yerr=spread, fmt="o", elinewidth=1, capsize=0,
-                label=_OBSERVED_LABEL, **_DATA)
+                label=_OBSERVED_LABEL, **{**_DATA, "color": colour})
     for fit, rank, style, series in curves:
         optimum = fit["optima"].iloc[rank]
         line, = ax.plot(k, erf_curve(k, optimum["initial"], optimum["final"],
@@ -258,14 +275,15 @@ def _draw_surface(ax, fit):
 
 
 def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="completed",
-                          fits=None, show_fit="best", surface=True, legend=None, show=None,
-                          save=False, **selectors):
+                          fits=None, show_fit="best", surface=True, separate_odors=False,
+                          legend=None, show=None, save=False, **selectors):
     """The accuracy sigmoid over the row index: a fit figure and a surface figure per
     animal.
 
         acc = {v: fit_accuracy(ab, "completed", v) for v in VARIANTS}
         figs = plot_accuracy_sigmoid(fits=acc)          # figs[60]["fit"], figs[60]["surface"]
         plot_accuracy_sigmoid(fits=acc, show_fit=None)  # both variants
+        plot_accuracy_sigmoid(data=ab, separate_odors=True)   # figs[60]["A"]["fit"]
 
     ``fits`` maps a `VARIANTS` entry to its `fit_accuracy` result; without it both are
     fitted from the selection in ``mode``. ``show_fit`` is ``"best"`` (each animal's pick
@@ -291,14 +309,26 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
     ``show`` numbers the series in legend order, observed first. The fit labels carry the
     animal's own pᵢ, so a legend set apart is one small figure per animal, and the fit
     summary is printed instead of drawn.
+
+    ``separate_odors`` fits each odour alone over its own choices (or takes ``fits`` per
+    odour, ``{Odor: {variant: fits}}``) and draws both figures per animal and odour, the
+    observed choices in its port colour and the odour named top right; returns
+    ``{subjid: {odour: {"fit": Figure, "surface": Figure}}}``.
     """
     if show_fit not in SHOW_FITS:
         raise ValueError(f"show_fit must be one of {SHOW_FITS}, got {show_fit!r}")
-    if fits is None:
-        data = require_data(subjids, dates, selectors, data)
-        fits = {variant: fit_accuracy(data, mode, variant) for variant in VARIANTS}
-    reference = next(iter(fits.values()))
+    fits = resolve_fits(fits, separate_odors,
+                        lambda: require_data(subjids, dates, selectors, data),
+                        lambda d: {variant: fit_accuracy(d, mode, variant)
+                                   for variant in VARIANTS})
+    figures, _ = odor_figures(fits, lambda part, odor: (_accuracy_figures(
+        part, odor, show_fit, surface, legend, show, save), []))
+    return figures
 
+
+def _accuracy_figures(fits, odor, show_fit, surface, legend, show, save):
+    """`plot_accuracy_sigmoid`'s figures of one set of fits; ``odor`` names them."""
+    reference = next(iter(fits.values()))
     figures = {}
     for subjid in sorted(reference):
         rows, mode = reference[subjid]["rows"], reference[subjid]["mode"]
@@ -311,8 +341,8 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
         fig, (excess, accuracy) = figure(2, width=_WIDTH, height=_HEIGHT)
         accuracy.sharex(excess)
         curves = _curves(fits, subjid, variants)
-        _draw_excess(excess, rows, curves)
-        _draw_accuracy(accuracy, rows, curves)
+        _draw_excess(excess, rows, curves, observed_colour(odor))
+        _draw_accuracy(accuracy, rows, curves, observed_colour(odor))
         if lead_fit is not None:
             best = lead_fit["optima"].iloc[0]
             for ax in (excess, accuracy):
@@ -330,16 +360,18 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
         excess.set_xlim(0, len(rows))
         accuracy.set_xlabel(unit.capitalize())
         excess.legend(frameon=False, fontsize=annotation_size(), loc="lower right")
+        odor_title(excess, odor)
 
         headline = _headline(fits, subjid, lead)
         if legends_apart(legend):
-            print(f"sub-{subjid:03d} | {mode}: " + " | ".join(headline))
+            name = "" if odor is None else f" {odor.name}"
+            print(f"sub-{subjid:03d}{name} | {mode}: " + " | ".join(headline))
         else:
             excess.text(0.01, 0.97, "\n".join(headline), transform=excess.transAxes,
                         fontsize=annotation_size(), va="top", ha="left")
         entries = finish_figure(fig, legend, show)
         _save(fig, f"discrimination_learning_accuracy_sigmoid{show_suffix(show)}_{mode}"
-                   f"_sub-{subjid:03d}", rows, save, subjid)
+                   f"{odor_tag(odor)}_sub-{subjid:03d}", rows, save, subjid)
         legend_figure(entries, fontsize=annotation_size())
         figures[int(subjid)] = {"fit": fig}
 
@@ -350,8 +382,9 @@ def plot_accuracy_sigmoid(subjids=None, dates=None, *, data=None, mode="complete
                 ax.axvline(start, **BOUNDARY)
             ax.set_xlim(0, len(rows))
             ax.set_xlabel(unit.capitalize())
+            odor_title(ax, odor)
             _save(fig, f"discrimination_learning_accuracy_sigmoid_surface_{mode}"
-                       f"_sub-{subjid:03d}", rows, save, subjid)
+                       f"{odor_tag(odor)}_sub-{subjid:03d}", rows, save, subjid)
             figures[int(subjid)]["surface"] = fig
     return figures
 
@@ -376,7 +409,7 @@ def _observed_and_fitted(name, fit, span):
             expected_count(fit, clock), midpoint)
 
 
-def _draw_counts(ax, fits, span):
+def _draw_counts(ax, fits, span, colours):
     """The scaled running counts and their fits, with the figure's one legend; returns
     each fit's midpoint in hours."""
     midpoints = {}
@@ -385,9 +418,9 @@ def _draw_counts(ax, fits, span):
         x, observed, fitted_x, fitted, (mid_x, mid_y) = _observed_and_fitted(name, fit, span)
         scale = float(np.abs(observed).max()) or 1.0
         ax.plot(x, observed / scale, drawstyle="steps-post",
-                **{**style, "label": _ANCHOR_LABELS[name]})
-        ax.plot(fitted_x, fitted / scale, color=style["color"], **_FITTED)
-        ax.plot(mid_x, mid_y / scale, color=style["color"], **_MIDPOINT)
+                **{**style, "color": colours[name], "label": _ANCHOR_LABELS[name]})
+        ax.plot(fitted_x, fitted / scale, color=colours[name], **_FITTED)
+        ax.plot(mid_x, mid_y / scale, color=colours[name], **_MIDPOINT)
         midpoints[name] = mid_x
     ax.axhline(0, **ZERO)
     style_axis(ax, ylabel="Normalized count", ylim=None)
@@ -406,7 +439,7 @@ def _segments(ax, frame, column, colour):
               alpha=0.35, zorder=1)
 
 
-def _draw_rates(ax, data, spans, fits, subjid, span):
+def _draw_rates(ax, data, spans, fits, subjid, span, colours):
     """Initiations and rewards per task hour, per session, with each rate fit's curve."""
     trials = data["trials"][data["trials"]["subjid"] == subjid]
     counts = trials.groupby("session_idx").agg(
@@ -417,7 +450,7 @@ def _draw_rates(ax, data, spans, fits, subjid, span):
     hours = (rates["end"] - rates["start"]).where(lambda h: h > 0)
     clock = np.linspace(0, span, 800)
     for name in ("initiations", "rewards"):
-        colour = CURVE_STYLES[name]["color"]
+        colour = colours[name]
         _segments(ax, rates.assign(rate=rates[name] / hours), "rate", colour)
         best = fits[name]["optima"].iloc[0]
         ax.plot(clock, erf_curve(clock, best["initial"], best["final"], best["center"],
@@ -426,10 +459,9 @@ def _draw_rates(ax, data, spans, fits, subjid, span):
     ax.set_ylim(bottom=0)
 
 
-def _draw_accuracy_on_time(ax, spans, fit):
+def _draw_accuracy_on_time(ax, spans, fit, colour):
     """Accuracy per session, and the fitted p(k) at each trial's task time."""
     rows = fit["rows"]
-    colour = CURVE_STYLES["excess"]["color"]
     per_session = spans.set_index("session_idx").join(
         rows.groupby("session_idx")["y"].mean().rename("accuracy"), how="inner")
     _segments(ax, per_session, "accuracy", colour)
@@ -443,11 +475,13 @@ def _draw_accuracy_on_time(ax, spans, fit):
 
 
 def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
-                         engagement=None, rewards=None, legend=None, save=False, **selectors):
+                         engagement=None, rewards=None, separate_odors=False, legend=None,
+                         save=False, **selectors):
     """Every sigmoid fit on task time, as running counts and as rates, one figure per
     animal.
 
         plot_sigmoid_anchors(data=ab, accuracy=acc["free"], engagement=eng, rewards=rew)
+        plot_sigmoid_anchors(data=ab, separate_odors=True)
 
     ``accuracy`` is any `fit_accuracy` result (completed, initial free when omitted);
     ``engagement`` / ``rewards`` are `fit_rate` results, fitted when omitted.
@@ -468,14 +502,42 @@ def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
     One legend, on the top panel; the colours carry down. ``legend`` follows the plotter
     convention, and set apart it is one figure for all animals. The midpoints are printed
     as a table, one row per animal.
+
+    ``separate_odors``, or fits per odour (`data.per_odor`; the ones not given are fitted
+    per odour), draws a figure per animal and odour, every count and rate that odour's
+    alone, excess correct in its port colour, rewards amber and the odour named top
+    right; returns ``{subjid: {odour: Figure}}``, and the table gets a row per odour.
     """
     data = require_data(subjids, dates, selectors, data)
-    accuracy = accuracy if accuracy is not None else fit_accuracy(data)
-    engagement = engagement if engagement is not None else fit_rate(data)
-    rewards = rewards if rewards is not None else fit_rate(data, "rewards")
-    bounds = session_bounds(data)
+    separate_odors = separate_odors or any(map(is_per_odor, (accuracy, engagement, rewards)))
+    split = by_odor(data) if separate_odors else None
+    load = (lambda: split) if separate_odors else (lambda: data)
+    accuracy = resolve_fits(accuracy, separate_odors, load, fit_accuracy)
+    engagement = resolve_fits(engagement, separate_odors, load, fit_rate)
+    rewards = resolve_fits(rewards, separate_odors, load, lambda d: fit_rate(d, "rewards"))
+    parts = ({odor: (split[odor], accuracy[odor], engagement[odor], rewards[odor])
+              for odor in split} if separate_odors
+             else (data, accuracy, engagement, rewards))
 
-    figures, entries, table = {}, [], []
+    table = []
+    figures, entries = odor_figures(parts, lambda part, odor: _anchor_figures(
+        *part, odor, legend, save, table))
+    with plt.rc_context({"legend.handlelength": _ANCHOR_HANDLE_LENGTH}):
+        legend_figure(entries, fontsize=annotation_size())
+    print("Sigmoid midpoints (task time, h):")
+    print(pd.DataFrame(table).to_string(index=False, float_format=lambda v: f"{v:.1f}"))
+    return figures
+
+
+def _anchor_figures(data, accuracy, engagement, rewards, odor, legend, save, table):
+    """`plot_sigmoid_anchors`' figures of one set of fits, their midpoints added to
+    ``table``; ``odor`` names them."""
+    bounds = session_bounds(data)
+    colours = {name: CURVE_STYLES[name]["color"] for name in _ANCHOR_LABELS}
+    if odor is not None:
+        colours.update(excess=observed_colour(odor), rewards=_ODOR_REWARDS)
+
+    figures, entries = {}, []
     for subjid in sorted(set(accuracy) & set(engagement) & set(rewards)):
         spans = bounds[bounds["subjid"] == subjid].sort_values("session_idx")
         span = float(spans["end"].max())
@@ -484,25 +546,22 @@ def plot_sigmoid_anchors(subjids=None, dates=None, *, data=None, accuracy=None,
         fig, (counts, rates, acc) = figure(3, width=_WIDTH, height=_HEIGHT)
         for ax in (rates, acc):
             ax.sharex(counts)
-        midpoints = _draw_counts(counts, fits, span)
-        _draw_rates(rates, data, spans, fits, subjid, span)
-        _draw_accuracy_on_time(acc, spans, fits["excess"])
+        midpoints = _draw_counts(counts, fits, span, colours)
+        _draw_rates(rates, data, spans, fits, subjid, span, colours)
+        _draw_accuracy_on_time(acc, spans, fits["excess"], colours["excess"])
         for ax in (counts, rates, acc):
             for start in spans["start"].to_numpy()[1:]:
                 ax.axvline(start, **BOUNDARY)
             for name, hours in midpoints.items():
-                ax.axvline(hours, color=CURVE_STYLES[name]["color"], linestyle="--",
-                           linewidth=1.2, zorder=2)
+                ax.axvline(hours, color=colours[name], linestyle="--", linewidth=1.2,
+                           zorder=2)
         counts.set_xlim(0, span)
         acc.set_xlabel("Task time (h)")
+        odor_title(counts, odor)
         entries += finish_figure(fig, legend)
         _save(fig, f"discrimination_learning_sigmoid_anchors"
-                   f"_sub-{subjid:03d}", data["sessions"], save, subjid)
+                   f"{odor_tag(odor)}_sub-{subjid:03d}", data["sessions"], save, subjid)
         figures[int(subjid)] = fig
-        table.append({"subjid": int(subjid),
+        table.append({"subjid": int(subjid), **({} if odor is None else {"odor": odor.name}),
                       **{_ANCHOR_LABELS[name]: hours for name, hours in midpoints.items()}})
-    with plt.rc_context({"legend.handlelength": _ANCHOR_HANDLE_LENGTH}):
-        legend_figure(entries, fontsize=annotation_size())
-    print("Sigmoid midpoints (task time, h):")
-    print(pd.DataFrame(table).to_string(index=False, float_format=lambda v: f"{v:.1f}"))
-    return figures
+    return figures, entries

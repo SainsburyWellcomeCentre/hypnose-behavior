@@ -260,7 +260,9 @@ def _surface_peaks(lnl):
         for other in near - {top}:
             prominence[other] = flat[other] - flat[cell]
             parent[other] = merged_into[other] = top
-    best = int(np.argmax(flat))
+    # The component every cell ends in; with a tied maximum, argmax can name a cell that
+    # joined it rather than its peak.
+    best = root(int(label[np.argmax(flat)]))
     prominence[best] = np.inf
     peaks = {p for p, v in prominence.items() if v >= PROMINENCE}
 

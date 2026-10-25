@@ -3,12 +3,15 @@
 `plot_step_posterior` takes the step fits of `step.fit_step` and draws **one figure per
 animal**. Returns ``{subjid: Figure}``; ``save=True`` files each figure under its own
 animal with `io.save.save_figure`.
+
+Fits per odour (`data.per_odor`) draw one figure per animal and odour,
+``{subjid: {odour: Figure}}``.
 """
 from __future__ import annotations
 
 import numpy as np
 
-from hypnose_behavior.io.save import save_figure
+from hypnose_behavior.io.save import finish_figure, legend_figure, save_figure, show_suffix
 from hypnose_behavior.modelling.discrimination_learning.sigmoid import erf_curve
 from hypnose_behavior.visualization.modelling.discrimination_learning._common import (
     BAND_ALPHA,
@@ -20,6 +23,10 @@ from hypnose_behavior.visualization.modelling.discrimination_learning._common im
     annotation_size,
     figure,
     index_bounds,
+    observed_colour,
+    odor_figures,
+    odor_tag,
+    odor_title,
     save_scope,
     style_axis,
 )
@@ -45,9 +52,10 @@ _HEIGHT = 3.4
 
 
 def _save(fig, name, rows, save, subjid):
+    """Save without the odour's title, which the displayed figure keeps."""
     if not save:
         return
-    save_figure(fig, name, **save_scope(rows, subjid))
+    save_figure(fig, name, titles=False, **save_scope(rows, subjid))
 
 
 def _headline(summary, modes):
@@ -70,13 +78,13 @@ def _headline(summary, modes):
     return "\n".join(lines)
 
 
-def _draw_fit(ax, step):
+def _draw_fit(ax, step, colour):
     """Observed excess correct, the step at the posterior's peak, and the sigmoid."""
     rows, summary, sigmoid = step["rows"], step["summary"], step["sigmoid"]
     k = rows["k"].to_numpy(dtype=float)
     count = np.r_[0, k + 1]
     ax.plot(count, np.r_[0.0, np.cumsum(rows["y"].to_numpy() - 0.5)],
-            drawstyle="steps-post", **_OBSERVED)
+            drawstyle="steps-post", **{**_OBSERVED, "color": colour})
     p_step = np.where(k < summary["k_s"], summary["initial"], summary["final"])
     ax.plot(count, np.r_[0.0, np.cumsum(p_step - 0.5)], **_STEP)
     p_sigmoid = erf_curve(k, sigmoid["initial"], sigmoid["final"], sigmoid["center"],
@@ -110,10 +118,11 @@ def _draw_posterior(ax, step, zoom=False):
     ax.set_ylabel("P(k_s)")
 
 
-def plot_step_posterior(steps: dict, *, save=False):
+def plot_step_posterior(steps: dict, *, legend=None, show=None, save=False):
     """The step model per animal: its fit on the data and the posterior over k_s.
 
         plot_step_posterior(fit_step(acc_best))
+        plot_step_posterior(per_odor(fit_step, per_odor(pick_variant, acc)))   # per odour
 
     - top: observed excess correct (orange), the step at the posterior's peak (blue) and
       the sigmoid (dashed grey), as expected running sums.
@@ -123,14 +132,27 @@ def plot_step_posterior(steps: dict, *, save=False):
 
     The headline says whether the step is an adequate description at all (`step_test`);
     for a gradual change the posterior is drawn but is not a result.
+
+    ``legend`` and ``show`` follow the plotter convention; ``show`` numbers: 1 observed,
+    2 step at the peak, 3 sigmoid, in the top panel. Fits per odour draw a figure per
+    animal and odour, the observed choices in its port colour and the odour named top
+    right; returns ``{subjid: {odour: Figure}}``.
     """
-    figures = {}
+    figures, entries = odor_figures(
+        steps, lambda part, odor: _step_figures(part, odor, legend, show, save))
+    legend_figure(entries, fontsize=annotation_size())
+    return figures
+
+
+def _step_figures(steps, odor, legend, show, save):
+    """`plot_step_posterior`'s figures of one set of fits; ``odor`` names them."""
+    figures, entries = {}, []
     for subjid, step in steps.items():
         rows, mode = step["rows"], step["mode"]
         spans = index_bounds(rows)
         fig, (fit_ax, whole, zoom) = figure(3, width=_WIDTH, height=_HEIGHT)
         whole.sharex(fit_ax)
-        _draw_fit(fit_ax, step)
+        _draw_fit(fit_ax, step, observed_colour(odor))
         _draw_posterior(whole, step)
         _draw_posterior(zoom, step, zoom=True)
         for ax in (fit_ax, whole, zoom):
@@ -150,7 +172,9 @@ def plot_step_posterior(steps: dict, *, save=False):
                           xycoords=("data", "axes fraction"), xytext=(3, -2),
                           textcoords="offset points", va="top",
                           fontsize=annotation_size(), color=REFERENCE)
-        _save(fig, f"discrimination_learning_step_posterior_{mode}"
-                   f"_sub-{subjid:03d}", rows, save, subjid)
+        odor_title(fit_ax, odor)
+        entries += finish_figure(fig, legend, show)
+        _save(fig, f"discrimination_learning_step_posterior{show_suffix(show)}_{mode}"
+                   f"{odor_tag(odor)}_sub-{subjid:03d}", rows, save, subjid)
         figures[int(subjid)] = fig
-    return figures
+    return figures, entries

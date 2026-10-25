@@ -3,6 +3,9 @@
 `plot_state_space` takes `state_space.fit_state_space` results and draws **one figure
 per animal**. Returns ``{subjid: Figure}``; ``save=True`` files each figure under its own
 animal with `io.save.save_figure`, without the headline title the displayed figure keeps.
+
+Fits per odour (`data.per_odor`) draw one figure per animal and odour,
+``{subjid: {odour: Figure}}``.
 """
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ from hypnose_behavior.io.save import (
     show_suffix,
     tie,
 )
+from hypnose_behavior.modelling.discrimination_learning.data import is_per_odor
 from hypnose_behavior.modelling.discrimination_learning.diagnostics import wilson_interval
 from hypnose_behavior.modelling.discrimination_learning.state_space import LEARNED
 from hypnose_behavior.visualization.modelling.discrimination_learning._common import (
@@ -29,6 +33,10 @@ from hypnose_behavior.visualization.modelling.discrimination_learning._common im
     figure,
     in_order,
     index_bounds,
+    observed_colour,
+    odor_figures,
+    odor_tag,
+    odor_title,
     save_scope,
     style_axis,
     text_size,
@@ -99,12 +107,13 @@ def _headline(fit, boundary_fit):
     return "\n".join(lines)
 
 
-def _draw_excess(ax, fit, boundary_fit):
+def _draw_excess(ax, fit, boundary_fit, colour):
     """Observed excess correct and the expected excess with its 95% band."""
     curve = fit["curve"]
     count = np.r_[0, curve["k"].to_numpy() + 1]
     ax.plot(count, np.r_[0.0, np.cumsum(curve["y"].to_numpy() - 0.5)],
-            drawstyle="steps-post", label=_OBSERVED_LABEL, **_OBSERVED)
+            drawstyle="steps-post", label=_OBSERVED_LABEL,
+            **{**_OBSERVED, "color": colour})
     tie(ax.fill_between(count, np.r_[0.0, curve["excess_lo"]],
                         np.r_[0.0, curve["excess_hi"]], **_BAND), _MODEL_LABEL)
     ax.plot(count, np.r_[0.0, curve["excess"]], label=_MODEL_LABEL, **_MODEL)
@@ -114,7 +123,7 @@ def _draw_excess(ax, fit, boundary_fit):
     ax.axhline(0, **ZERO)
 
 
-def _draw_accuracy(ax, fit, boundary_fit):
+def _draw_accuracy(ax, fit, boundary_fit, colour):
     """Accuracy per `_BIN` rows, the median p_k with its 95% band, and the session means
     the changes are counted on."""
     curve, sessions = fit["curve"], fit["sessions"]
@@ -122,7 +131,7 @@ def _draw_accuracy(ax, fit, boundary_fit):
     bins = _binned(fit["rows"])
     spread = np.clip([bins["p"] - bins["lo"], bins["hi"] - bins["p"]], 0, None)
     ax.errorbar(bins["k"], bins["p"], yerr=spread, fmt="o", elinewidth=1, capsize=0,
-                label=_OBSERVED_LABEL, **_DATA)
+                label=_OBSERVED_LABEL, **{**_DATA, "color": colour})
     tie(ax.fill_between(k, curve["p_lo"], curve["p_hi"], **_BAND), _MODEL_LABEL)
     tie(ax.plot(k, curve["p"], **_MODEL)[0], _MODEL_LABEL)
     tie(ax.hlines(sessions["p"], sessions["start"], sessions["end"], **_SESSION_MEAN),
@@ -213,7 +222,23 @@ def plot_state_space(fits: dict, *, boundary: dict | None = None, legend=None, s
     ``legend`` and ``show`` follow the plotter convention (`hypnose_helpers.viz.plotter`);
     ``show`` numbers: 1 observed, 2 the walk, 3 learning trial, 4 changes, 5 the
     boundary-σ fit.
+
+    Fits per odour, ``per_odor(fit_state_space, ab)`` (``boundary`` then per odour too),
+    draw a figure per animal and odour, the observed choices in its port colour and the
+    odour named top right; returns ``{subjid: {odour: Figure}}``.
     """
+    if boundary is not None and is_per_odor(boundary) != is_per_odor(fits):
+        raise ValueError("boundary must be per odour exactly when fits are: "
+                         "per_odor(fit_state_space, data, boundary=True)")
+    figures, entries = odor_figures(fits, lambda part, odor: _state_space_figures(
+        part, boundary if odor is None or boundary is None else boundary[odor], odor,
+        legend, show, save))
+    legend_figure(entries, fontsize=annotation_size())
+    return figures
+
+
+def _state_space_figures(fits, boundary, odor, legend, show, save):
+    """`plot_state_space`'s figures of one set of fits; ``odor`` names them."""
     figures, entries = {}, []
     for subjid, fit in sorted(fits.items()):
         boundary_fit = None if boundary is None else boundary.get(subjid)
@@ -223,8 +248,8 @@ def plot_state_space(fits: dict, *, boundary: dict | None = None, legend=None, s
         excess, accuracy, certainty = axes
         for ax in (accuracy, certainty):
             ax.sharex(excess)
-        _draw_excess(excess, fit, boundary_fit)
-        _draw_accuracy(accuracy, fit, boundary_fit)
+        _draw_excess(excess, fit, boundary_fit, observed_colour(odor))
+        _draw_accuracy(accuracy, fit, boundary_fit, observed_colour(odor))
         _draw_certainty(certainty, fit, boundary_fit)
         _mark_changes(excess, accuracy, fit)
         _mark_learning(axes, fit["learning_trial"])
@@ -239,11 +264,11 @@ def plot_state_space(fits: dict, *, boundary: dict | None = None, legend=None, s
         certainty.set_xlabel(unit.capitalize())
         excess.set_title(_headline(fit, boundary_fit), loc="left",
                          fontsize=annotation_size(), color=REFERENCE)
+        odor_title(excess, odor)
         fig.legend(*in_order(excess, _ORDER), loc="outside lower center", ncols=5,
                    frameon=False, fontsize=annotation_size())
         entries += finish_figure(fig, legend, show)
         _save(fig, f"discrimination_learning_state_space{show_suffix(show)}_{mode}"
-                   f"_sub-{subjid:03d}", rows, save, subjid)
+                   f"{odor_tag(odor)}_sub-{subjid:03d}", rows, save, subjid)
         figures[int(subjid)] = fig
-    legend_figure(entries, fontsize=annotation_size())
-    return figures
+    return figures, entries
