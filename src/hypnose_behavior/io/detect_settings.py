@@ -47,6 +47,35 @@ def _first_segment_value(sequences_obj, key):
     return None
 
 
+def _definition_conditions(reward_conditions):
+    """A segment's `rewardConditions` in the `{definition, position}` layout, whichever one it uses.
+
+    - Definition layout (schemas before the task's 2026-10-13 reformat): each condition is
+      `{definition: [[choices at index 0], [choices at index 1], ...], position: port}`.
+      Returned as is.
+    - Flat layout (every schema since): the list *is* the sequence, one
+      `{command, rewarded, index, minimumSamplingTime, ..., position}` per odour. `index` is the
+      odour's place in the sequence (list order where it is absent, as in the one-odour
+      schemas) and `position` its own reward port. Returned as one condition: items grouped by
+      `index`, with the final odour's port.
+    """
+    if not isinstance(reward_conditions, list) or not reward_conditions:
+        return []
+    items = [rc for rc in reward_conditions if isinstance(rc, dict)]
+    if not items or any('definition' in rc for rc in items):
+        return reward_conditions
+    by_index = defaultdict(list)
+    for list_pos, item in enumerate(items):
+        index = item.get('index')
+        if isinstance(index, bool) or not isinstance(index, (int, float)):
+            index = list_pos
+        by_index[int(index)].append(item)
+    definition = [by_index[index] for index in sorted(by_index)]
+    final_ports = {item.get('position') for item in definition[-1]}
+    return [{'definition': definition,
+             'position': final_ports.pop() if len(final_ports) == 1 else None}]
+
+
 def detect_settings(root):
     """
     Handles structure of settings and schema files.
@@ -115,7 +144,7 @@ def detect_settings(root):
                     if not isinstance(seg, dict):
                         continue
                     
-                    rc = seg.get('rewardConditions')
+                    rc = _definition_conditions(seg.get('rewardConditions'))
                     if isinstance(rc, list) and rc and isinstance(rc[0], dict):
                         definition = rc[0].get('definition')
                         if isinstance(definition, list):
@@ -233,7 +262,7 @@ def detect_settings(root):
             for seg in segs:
                 if not isinstance(seg, dict):
                     continue
-                rc = _ci_get(seg, "rewardConditions")
+                rc = _definition_conditions(_ci_get(seg, "rewardConditions"))
                 if isinstance(rc, list) and rc and isinstance(rc[0], dict):
                     definition = _ci_get(rc[0], "definition")
                     if isinstance(definition, list):
@@ -396,14 +425,15 @@ def detect_settings(root):
 
     # --- Which reward port each final rewarded odor pays out at ---
     # A reward condition's `position` is its port, 0-based, in every protocol: 0 -> port 1
-    # (A, G), 1 -> port 2 (B, E). An odor rewarded at both ports has no single port and is
+    # (A, G), 1 -> port 2 (B, E). In the flat layout it is the final odour's own `position`
+    # (`_definition_conditions`). An odor rewarded at both ports has no single port and is
     # left out.
     reward_port_by_odor = {}
     conflicting = set()
     try:
         for block in sequences_obj or []:
             for seg in (block if isinstance(block, list) else [block]):
-                for rc in (_ci_get(seg, "rewardConditions") or []) if isinstance(seg, dict) else []:
+                for rc in _definition_conditions(_ci_get(seg, "rewardConditions")) if isinstance(seg, dict) else []:
                     definition = _ci_get(rc, "definition")
                     position = _ci_get(rc, "position")
                     if (not isinstance(definition, list) or not definition
