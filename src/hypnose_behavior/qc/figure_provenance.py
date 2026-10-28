@@ -20,11 +20,12 @@ What this asserts, per saved figure
 2. ``module`` is a ``hypnose_behavior`` plotting module -- not helpers, not this
    gate, not ``io.save``. This is the wrapper hazard stated directly.
 
-What it deliberately does NOT assert: ``module``, ``file``, ``lineno`` and
-``path`` are *derived from where the code lives*, and moving code is the whole
-point of Phase 10. Gating them would only restate what ``git diff`` says. They
-are printed, so a move's effect on the saved metadata is legible rather than
-silent. ``commit`` / ``created_at`` / ``version`` are runtime facts, not code.
+What it deliberately does NOT assert: ``module``, ``file`` and ``lineno`` are
+*derived from where the code lives*, and moving code is the whole point of
+Phase 10. Gating them would only restate what ``git diff`` says. They are
+printed, so a move's effect on the saved metadata is legible rather than
+silent. ``commit``, ``branch``, ``created_at`` and the versions are runtime
+facts, not code.
 
 Nothing is written. ``save_figure`` is replaced by a recorder for the duration,
 so neither the real figure directory nor ``resolve_figure_dir``'s ``mkdir`` is
