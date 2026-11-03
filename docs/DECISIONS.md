@@ -1083,18 +1083,16 @@ metrics dict; it never reads the manifest, so a per-run commit stamp cannot caus
 RED. Anything that enters the fingerprint and changes per commit would make the golden master
 useless. Verified: all five gates GREEN with no regeneration.
 
-### Both `provenance()` arguments are passed explicitly, and neither is optional here
+### Both `provenance()` arguments are passed explicitly
 
-`provenance(anchor=__file__, call={"module": __name__})`, rather than letting it inspect the
-calling frame. Two distinct silent-resolution failures, each of which produces a
-plausible-looking wrong answer rather than an error:
+`provenance(anchor=__file__, call={"module": __name__})`, rather than letting backstamp
+inspect the calling frame. The stamp then does not depend on the frame walk:
 
-- **`anchor`** — `hypnose-helpers` is installed as a library, so an anchor resolved there
-  stamps every repo with the *helpers* commit. The same failure `io/paths` hit in Phase 2a and
-  `io/layout` in 2b.
-- **`call`** — captured from the frame, a call from a notebook resolves to `__main__`, and
-  `package_version` returns `None`. Passing `__name__` also sidesteps the §9 wrapper hazard
-  entirely, because nothing is being captured.
+- **`anchor`** names this file's repo as the one whose commit is recorded. The `call` passed
+  here holds no file, so without `anchor` the commit is `None`.
+- **`call`** left out, backstamp records the nearest frame outside itself: today
+  `_analysis_provenance`, since `lru_cache` adds no Python frame. Passing `__name__` keeps the
+  module right whatever calls this, and sidesteps the §9 wrapper hazard: nothing is captured.
 
 `package_version` maps the import package to the distribution via `packages_distributions()`,
 **not** by swapping underscores for hyphens. That guess happens to land now that the
