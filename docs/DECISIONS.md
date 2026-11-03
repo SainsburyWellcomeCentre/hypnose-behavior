@@ -1064,7 +1064,7 @@ Measured with a row-level diff on the nine fixture sessions plus three G/E sessi
 ## 19. The manifest provenance stamp is for audit, and lives in the manifest only *(Phase 7a, 2026-08-12)*
 
 `manifest.json` carries `commit` and `version` alongside `created_at`, from
-`hypnose_helpers.provenance.provenance()` — the same implementation that stamps saved
+`backstamp.provenance.provenance()` — the same implementation that stamps saved
 figures (Phase 2c), so the two cannot drift.
 
 **What it is for: auditing.** "Which sessions were produced before commit X, and should I

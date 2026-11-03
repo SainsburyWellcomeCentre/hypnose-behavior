@@ -19,8 +19,7 @@ from hypnose_helpers.viz.save import (  # noqa: F401
     set_size, strip_legends, _coerce_list, _unique_sorted, _format_span,
 )
 from hypnose_helpers.viz.save import save_figure as _save_figure
-from hypnose_helpers.viz.metadata import read_figure_metadata  # noqa: F401  (re-exported)
-from hypnose_helpers.provenance import provenance as _provenance
+from backstamp.provenance import provenance as _provenance
 
 
 # This module deliberately applies NO style at import. Apply a style

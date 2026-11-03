@@ -89,7 +89,7 @@ def _install_recorder(records, *, break_skip_modules=False):
     own ``skip_modules=(__name__,)``; ``--break-skip-modules`` omits it, which is
     exactly the defect section 9 exists for.
     """
-    from hypnose_helpers.provenance import provenance as _provenance
+    from backstamp.provenance import provenance as _provenance
 
     skip = () if break_skip_modules else ("hypnose_behavior.io.save", __name__)
 
@@ -150,7 +150,7 @@ def main(argv=None) -> int:
     use_style("nature")
 
     if args.break_chain:
-        import hypnose_helpers.provenance as prov
+        import backstamp.provenance as prov
         prov.MAX_CHAIN = 1
 
     records: list[dict] = []

@@ -19,7 +19,7 @@ import pandas as pd
 from hypnose_behavior.io import layout
 from hypnose_behavior.io.paths import get_rawdata_root, get_derivatives_root
 from hypnose_behavior.utils.helpers import vprint
-from hypnose_helpers.provenance import provenance
+from backstamp.provenance import provenance
 from hypnose_behavior.io.protocol_schema import (
     ABORT_COLUMNS, ASSEMBLED_COLUMNS, POSITION_BLOB_COLUMNS, RESPONSE_TIME_COLUMNS,
     trial_data_columns,
@@ -77,10 +77,9 @@ def _analysis_provenance() -> dict:
     commit, so plotters still compute through the registry (DECISIONS.md section 5).
 
     **Pass both arguments explicitly; do not let `provenance()` inspect the calling
-    frame.** Each omission produces a plausible-looking wrong answer rather than an
-    error: an anchor resolved inside the installed `hypnose-helpers` stamps every repo
-    with the helpers commit, and a `call` captured from a notebook frame resolves to
-    ``__main__``, where `package_version` returns ``None``.
+    frame.** The stamp then names this repo and this package whatever the frame walk
+    finds (DECISIONS.md section 9). This `call` holds no file to anchor on, so without
+    `anchor` the commit is ``None``.
 
     **Write both keys always, even as `None`**, so a reader can tell "written before
     provenance existed" (no key) from "written by code whose commit could not be
