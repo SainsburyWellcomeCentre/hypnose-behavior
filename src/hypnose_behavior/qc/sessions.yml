@@ -26,8 +26,16 @@
 #                        sub-040 20251124 (ses-021)  3 runs
 #   hidden_rule          sub-048 20260306 (ses-062)  location0123, seq len 5
 #                        sub-040 20251229 (ses-046)  location0123, single run
+#   probe                sub-045 20260203 (ses-039)  quintuples-probe-option2-location1:
+#                                                    A/B rewarded early, scored as hidden rule
 #                        sub-040 20251124 (ses-021)  location01234 -> final pos dropped
+#   probe_hidden_rule    sub-062 20261007 (ses-063)  hiddenrule-probe-location1-option6:
+#                                                    HR C/F and probe A/B, both at index 1
 #   preseq               sub-059 20260612 (ses-036)  preseq-triples-stage1
+#   flat_schema          sub-069 20261027 (ses-018)  odourdiscrimination-stage4 } rewardConditions in the
+#                        sub-065 20261027 (ses-044)  hiddenrule-location1-option6 } flat layout (task
+#                                                    schemas since 2026-10-13); every session above
+#                                                    uses the older {definition, position} layout
 #
 # Sequence lengths covered: 1 (odourdiscrimination), 3 (singrew / preseq), 5 (quintuples).
 #
@@ -64,3 +72,15 @@ sessions:
   - subjid: "040"
     date: "20251124"
     label: hidden_rule_pos12345_finalpos_bug
+  - subjid: "045"
+    date: "20260203"
+    label: probe_quintuples_location1
+  - subjid: "062"
+    date: "20261007"
+    label: probe_hidden_rule_location1
+  - subjid: "069"
+    date: "20261027"
+    label: odourdiscrimination_stage4_flat_schema
+  - subjid: "065"
+    date: "20261027"
+    label: hidden_rule_location1_flat_schema

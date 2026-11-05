@@ -116,6 +116,9 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
             'hidden_rule_locations': cls.get('hidden_rule_locations'),
             'hidden_rule_positions': cls.get('hidden_rule_positions'),
             'hidden_rule_odors': cls.get('hidden_rule_odors'),
+            'probe_locations': cls.get('probe_locations'),
+            'probe_positions': cls.get('probe_positions'),
+            'probe_odors': cls.get('probe_odors'),
         })
 
     # Keys we will merge
@@ -141,6 +144,15 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
         'aborted_sequences_HR',
         'aborted_sequences_detailed',
         'non_initiated_attempts',
+        'completed_sequences_probe',
+        'completed_sequence_probe_rewarded',
+        'completed_sequence_probe_unrewarded',
+        'completed_sequence_probe_reward_timeout',
+        'completed_sequences_probe_missed',
+        'completed_sequence_probe_missed_rewarded',
+        'completed_sequence_probe_missed_unrewarded',
+        'completed_sequence_probe_missed_reward_timeout',
+        'aborted_sequences_probe',
     ]
 
     def _normalize_trial_id(s):
@@ -205,7 +217,11 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
         merged['hidden_rule_position'] = first.get('hidden_rule_position')
         merged['hidden_rule_locations'] = list(first.get('hidden_rule_locations') or [])
         merged['hidden_rule_positions'] = list(first.get('hidden_rule_positions') or [])
-    
+        # From run 1, like `protocol_mode`, which decides whether the probe is scored at all.
+        merged['probe_locations'] = list(first.get('probe_locations') or [])
+        merged['probe_positions'] = list(first.get('probe_positions') or [])
+        merged['probe_odors'] = list(first.get('probe_odors') or [])
+
     # Aggregate unique hidden rule odors across all runs
     hr_odors_all: list[str] = []
     hr_positions_all: list[int] = []
@@ -300,6 +316,7 @@ def merge_classifications(run_results: list[dict], verbose: bool = True) -> dict
                     'hidden_rule_position',
                     'hidden_rule_locations',
                     'hidden_rule_positions',
+                    'probe_positions',
                 ]:
                     if meta.get(key) != first_params.get(key):
                         if not params_differ:

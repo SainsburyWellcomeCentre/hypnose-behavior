@@ -35,7 +35,8 @@ from hypnose_behavior.trial_classification.hidden_rule import (
     _resolve_hidden_rule_from_stage,
 )
 from hypnose_behavior.trial_classification.params import (
-    _get_single_reward_info, _odour_discrimination_info, get_experiment_parameters,
+    _get_single_reward_info, _odour_discrimination_info, _protocol_labels,
+    get_experiment_parameters,
 )
 from hypnose_behavior.trial_classification.response_times import analyze_response_times
 from hypnose_behavior.trial_classification.merge import merge_classifications
@@ -180,7 +181,7 @@ def classify_and_analyze_with_response_times(data, events, trial_counts, odor_ma
 
 
 def _print_protocol_summary(stage, root):
-    """Print the protocol a run is analysed as, and the three schema checks that decide it.
+    """Print the protocol a run is analysed as, and the schema checks that decide it.
 
     - Uses the classifiers' own helpers, so it states what they will do.
     - Printed whatever `verbose`, so every run of a batch shows it before its results.
@@ -195,7 +196,8 @@ def _print_protocol_summary(stage, root):
     is_single_reward, rewarded_sequences, all_sequences = _get_single_reward_info(root)
     is_odour_discrimination = bool(schema_settings.get('isOdourDiscriminationProtocol'))
     mode = resolve_mode(is_odour_discrimination=is_odour_discrimination,
-                        is_single_reward=is_single_reward)
+                        is_single_reward=is_single_reward,
+                        is_probe_hidden_rule=bool(schema_settings.get('isProbeHiddenRuleProtocol')))
     hidden_rule_indices = _drop_final_hidden_rule_index(hidden_rule_indices, schema_settings,
                                                         is_single_reward)
 
@@ -219,6 +221,15 @@ def _print_protocol_summary(stage, root):
           f"  - odour discrimination: {od}\n"
           f"  - single reward: {sr}\n"
           f"  - hidden rule: {hr}")
+    # Printed for probe sessions only, so every other session's header is unchanged.
+    probe_positions = ", ".join(str(idx + 1) for idx in schema_settings.get('probeIndicesInferred') or [])
+    probe_odours = ", ".join(schema_settings.get('probeOdorsInferred') or [])
+    if schema_settings.get('isProbeHiddenRuleProtocol'):
+        print(f"  - probe: position(s) {probe_positions} (odours {probe_odours}), "
+              f"scored separately from the hidden rule")
+    elif schema_settings.get('isProbeProtocol'):
+        print(f"  - probe: position(s) {probe_positions} (odours {probe_odours}), "
+              f"scored as the hidden rule")
 
 
 def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verbose: bool = True, max_runs: int = 32, save: bool = True, print_summary: bool = True, save_csv: bool = False):
@@ -438,6 +449,8 @@ def analyze_session_multi_run_by_id_date(subject_id: str, date_str: str, *, verb
             'subject_id': subject_id,
             'date': date_str,
             'is_singrew': is_singrew,
+            # The schema's other protocol labels, for filtering sessions.
+            **_protocol_labels(first_root),
             'runs': [
                 {
                     'run_id': ridx + 1,

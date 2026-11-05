@@ -1064,7 +1064,7 @@ Measured with a row-level diff on the nine fixture sessions plus three G/E sessi
 ## 19. The manifest provenance stamp is for audit, and lives in the manifest only *(Phase 7a, 2026-08-12)*
 
 `manifest.json` carries `commit` and `version` alongside `created_at`, from
-`hypnose_helpers.provenance.provenance()` — the same implementation that stamps saved
+`backstamp.provenance.provenance()` — the same implementation that stamps saved
 figures (Phase 2c), so the two cannot drift.
 
 **What it is for: auditing.** "Which sessions were produced before commit X, and should I
@@ -1083,18 +1083,16 @@ metrics dict; it never reads the manifest, so a per-run commit stamp cannot caus
 RED. Anything that enters the fingerprint and changes per commit would make the golden master
 useless. Verified: all five gates GREEN with no regeneration.
 
-### Both `provenance()` arguments are passed explicitly, and neither is optional here
+### Both `provenance()` arguments are passed explicitly
 
-`provenance(anchor=__file__, call={"module": __name__})`, rather than letting it inspect the
-calling frame. Two distinct silent-resolution failures, each of which produces a
-plausible-looking wrong answer rather than an error:
+`provenance(anchor=__file__, call={"module": __name__})`, rather than letting backstamp
+inspect the calling frame. The stamp then does not depend on the frame walk:
 
-- **`anchor`** — `hypnose-helpers` is installed as a library, so an anchor resolved there
-  stamps every repo with the *helpers* commit. The same failure `io/paths` hit in Phase 2a and
-  `io/layout` in 2b.
-- **`call`** — captured from the frame, a call from a notebook resolves to `__main__`, and
-  `package_version` returns `None`. Passing `__name__` also sidesteps the §9 wrapper hazard
-  entirely, because nothing is being captured.
+- **`anchor`** names this file's repo as the one whose commit is recorded. The `call` passed
+  here holds no file, so without `anchor` the commit is `None`.
+- **`call`** left out, backstamp records the nearest frame outside itself: today
+  `_analysis_provenance`, since `lru_cache` adds no Python frame. Passing `__name__` keeps the
+  module right whatever calls this, and sidesteps the §9 wrapper hazard: nothing is captured.
 
 `package_version` maps the import package to the distribution via `packages_distributions()`,
 **not** by swapping underscores for hyphens. That guess happens to land now that the
@@ -3378,6 +3376,41 @@ disk costs correctness.
 **Gate:** `regression` **GREEN, 90 fingerprints across all nine sessions**, byte-identical
 · `check_imports` PASS. The per-session write path is untouched; only the batch layer
 above it changed.
+
+---
+
+## 40. Three early-reward protocols; only the joint one is a mode *(2026-10-09)*
+
+`detect_settings` labels a session with at most one of three mutually exclusive flags. A
+**probe** is a final-position rewarded odour (A/B) that the schema also rewards earlier:
+
+| label | schema | example | scored as |
+|---|---|---|---|
+| `isHiddenRuleProtocol` | a non-final odour rewarded early; A/B only at the end | sub-040 20251229 | `standard`, HR odours C/F |
+| `isProbeProtocol` | A/B rewarded early, no other early pair | sub-045 20260203 | `standard`, **HR odours A/B** |
+| `isProbeHiddenRuleProtocol` | both | sub-062 20261007 | `probe_hidden_rule` |
+
+- **A probe-only session keeps being scored as a hidden rule**, A/B as its HR odours, so
+  every saved probe session stays byte-identical. Do not "fix" it into the probe columns
+  without regenerating its fixture on purpose.
+- **The joint session breaks the exactly-two HR inference**: index 1 holds F, C, A and B.
+  For that label only, the HR odours are re-inferred with the final odours left out; the
+  original inference is untouched and still decides the other two.
+- **Its own mode, not new base columns** -- the §20/§21 measurement again: probe columns on
+  `StandardTrialRecord` would add nine all-null columns to every session.
+  `ProbeHiddenRuleTrialRecord` extends `StandardTrialRecord`; the probe fields mirror the HR
+  ones and are scored by the same helpers, plus `early_reward_type`
+  (`hidden_rule` / `probe` / `neither`, the first one reached).
+- **Success is the HR rule unchanged.** The schema also rewards the odour after an HR/probe
+  odour (the reward stays unlocked), so leaving one or two odours later is still a success.
+- **The labels are written to `manifest.session`** (and so `summary.session`) next to
+  `is_singrew`, as `is_odour_discrimination` / `is_hidden_rule` / `is_probe` /
+  `is_probe_hidden_rule`, None when the schema is unreadable.
+- **Metrics are not probe-aware yet**: on a joint session `hidden_rule_mask`'s non-HR group
+  contains the probe trials.
+
+Fixtures: sub-045 20260203 (probe) was generated from the code before this change; sub-062
+20261007 (joint) is generated from it.
 
 ---
 

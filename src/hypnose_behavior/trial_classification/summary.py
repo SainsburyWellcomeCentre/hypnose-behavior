@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from hypnose_behavior.io import layout
+from hypnose_behavior.io.protocol_schema import PROBE_HIDDEN_RULE
 
 def print_merged_session_summary(merged_classification: dict, subjid=None, date=None, save=False, out_dir=None) -> None:
     """
@@ -52,6 +53,9 @@ def print_merged_session_summary(merged_classification: dict, subjid=None, date=
                 else:
                     print(f"  Hidden Rule Index: {meta.get('hidden_rule_location')}")
                 print(f"  Hidden Rule Odors: {meta.get('hidden_rule_odors')}")
+                if meta.get('probe_odors'):
+                    print(f"  Probe Positions: {meta.get('probe_positions')}")
+                    print(f"  Probe Odors: {meta.get('probe_odors')}")
             print()
 
         # Rest of summary output (use first run's params or show per-run note)
@@ -68,6 +72,10 @@ def print_merged_session_summary(merged_classification: dict, subjid=None, date=
         hr_positions = [int(pos) for pos in hr_positions if pos is not None]
         if not hr_locations and hr_positions:
             hr_locations = [pos - 1 for pos in hr_positions]
+        # Probe-hidden-rule sessions get the HR / probe / neither breakdown; every other
+        # session's summary is unchanged.
+        is_probe_hr = cls.get("protocol_mode") == PROBE_HIDDEN_RULE
+        probe_positions = [int(pos) for pos in (cls.get("probe_positions") or []) if pos is not None]
 
         
         if per_run_params and len(per_run_params) > 1:
@@ -141,6 +149,11 @@ def print_merged_session_summary(merged_classification: dict, subjid=None, date=
         print(f"Hidden Rule Locations: Positions {hr_pos_display} (indices {hr_idx_display})\n")
         hr_odors = merged_classification.get('hidden_rule_odors') or []
         print(f"Hidden Rule Odors: {', '.join(hr_odors) if hr_odors else 'None'}\n")
+        if is_probe_hr:
+            probe_idx_display = ", ".join(str(idx) for idx in (cls.get("probe_locations") or []))
+            print(f"Probe Locations: Positions {', '.join(map(str, probe_positions))} "
+                  f"(indices {probe_idx_display})\n")
+            print(f"Probe Odors: {', '.join(cls.get('probe_odors') or []) or 'None'}\n")
         print(f"Total attempts: {total_attempts}")
         print(f"-- Non-initiated sequences (total): {non_ini_total} ({pct(non_ini_total, total_attempts):.1f}%)")
         print(f"    -- Position 1 attempts within trials {pos1_n} ({pct(pos1_n, non_ini_total):.1f}%)")
@@ -165,19 +178,46 @@ def print_merged_session_summary(merged_classification: dict, subjid=None, date=
         )
         hr_total_count = hr_rewarded_count + hr_missed_count
 
+        def _print_early_reward_block(title, name, key):
+            """HR or probe trials: acted on / missed, each by outcome, then aborted."""
+            n_acted = _count_unique_trials(get_df(f"completed_sequences_{key}"))
+            n_missed = _count_unique_trials(get_df(f"completed_sequences_{key}_missed"))
+            n_aborted = _count_unique_trials(get_df(f"aborted_sequences_{key}"))
+            total = n_acted + n_missed + n_aborted
+            print(f"{title}: {total} ({pct(total, len(ini)):.1f}% of trials)")
+            for label, n, prefix in ((f"Acted on {name} (left before the final odour)", n_acted,
+                                      f"completed_sequence_{key}"),
+                                     (f"Missed {name} (completed the sequence)", n_missed,
+                                      f"completed_sequence_{key}_missed")):
+                print(f"   -- {label}: {n} ({pct(n, total):.1f}%)")
+                for outcome, outcome_name in (("rewarded", "Rewarded"), ("unrewarded", "Unrewarded"),
+                                              ("reward_timeout", "Reward Timeout")):
+                    k = _count_unique_trials(get_df(f"{prefix}_{outcome}"))
+                    print(f"      -- {outcome_name}: {k} ({pct(k, n):.1f}%)")
+            print(f"   -- Aborted after the {name} odour: {n_aborted} ({pct(n_aborted, total):.1f}%)\n")
+
         print("INITIATED TRIALS BREAKDOWN:")
         print(f"-- Completed sequences: {comp_n} ({pct(comp_n, len(ini)): .1f}%)")
-        print(f"-- Hidden Rule Trials (HR): {hr_total_count} ({pct(hr_total_count, len(ini)):.1f}%)")
-        if hr_total_count:
-            print(f"   -- Hidden Rule Trials Rewarded: {hr_rewarded_count} ({pct(hr_rewarded_count, hr_total_count):.1f}%)")
-            print(f"   -- Hidden Rule Missed: {hr_missed_count} ({pct(hr_missed_count, hr_total_count):.1f}%)")
+        if is_probe_hr:
+            print(f"-- Aborted sequences: {ab_n} ({pct(ab_n, len(ini)): .1f}%)\n")
+            _print_early_reward_block("HIDDEN RULE TRIALS (HR)", "HR", "HR")
+            _print_early_reward_block("PROBE TRIALS", "probe", "probe")
+            if "early_reward_type" in ini.columns:
+                n_neither = int((ini["early_reward_type"] == "neither").sum())
+                print(f"NEITHER (no HR or probe odour reached): {n_neither} "
+                      f"({pct(n_neither, len(ini)):.1f}% of trials)\n")
         else:
-            print("   -- Hidden Rule Trials Rewarded: 0 (0.0%)")
-            print("   -- Hidden Rule Missed: 0 (0.0%)")
-        print(f"-- Aborted sequences: {ab_n} ({pct(ab_n, len(ini)): .1f}%)")
-        # Count unique HR aborted trials (deduplicate by run_id, trial_id)
-        ab_hr_count = _count_unique_trials(ab_hr)
-        print(f"   -- Aborted Hidden Rule trials (HR): {int(ab_hr_count)} ({pct(ab_hr_count, ab_n):.1f}%)\n")
+            print(f"-- Hidden Rule Trials (HR): {hr_total_count} ({pct(hr_total_count, len(ini)):.1f}%)")
+            if hr_total_count:
+                print(f"   -- Hidden Rule Trials Rewarded: {hr_rewarded_count} ({pct(hr_rewarded_count, hr_total_count):.1f}%)")
+                print(f"   -- Hidden Rule Missed: {hr_missed_count} ({pct(hr_missed_count, hr_total_count):.1f}%)")
+            else:
+                print("   -- Hidden Rule Trials Rewarded: 0 (0.0%)")
+                print("   -- Hidden Rule Missed: 0 (0.0%)")
+            print(f"-- Aborted sequences: {ab_n} ({pct(ab_n, len(ini)): .1f}%)")
+            # Count unique HR aborted trials (deduplicate by run_id, trial_id)
+            ab_hr_count = _count_unique_trials(ab_hr)
+            print(f"   -- Aborted Hidden Rule trials (HR): {int(ab_hr_count)} ({pct(ab_hr_count, ab_n):.1f}%)\n")
 
         print(f"REWARDED TRIALS BREAKDOWN:")
         print(f"-- Rewarded: {int(len(comp_rew))} ({pct(len(comp_rew), comp_n):.1f}%)")
@@ -385,6 +425,14 @@ def print_merged_session_summary(merged_classification: dict, subjid=None, date=
         else:
             print("HR REWARDED TRIALS (response times): none\n")
 
+        if is_probe_hr:
+            probe_rew_rt = (rew_rt[rew_rt["probe_success"].eq(True)]
+                            if "probe_success" in rew_rt.columns else pd.DataFrame())
+            if probe_rew_rt.empty:
+                print("PROBE REWARDED TRIALS (response times): none\n")
+            else:
+                rt_block(probe_rew_rt, "PROBE REWARDED TRIALS (response times)")
+
         rt_block(unr_rt, "UNREWARDED TRIALS")
         if tdel_rt.empty:
             print("REWARD TIMEOUT TRIALS:\n  No reward timeout trials\n")
@@ -517,6 +565,24 @@ def print_merged_session_summary(merged_classification: dict, subjid=None, date=
                 _print_fa_counts(in_hr_trials)
                 print(f"    Non-Hidden Rule Abortions at HR Location: n={int(len(non_hr_trials))}")
                 _print_fa_counts(non_hr_trials)
+
+                # The same split at the probe positions, probe-hidden-rule sessions only.
+                if is_probe_hr and probe_positions:
+                    at_probe = ab_det[ab_det['last_odor_position'].isin(probe_positions)]
+                    probe_ab = get_df('aborted_sequences_probe')
+                    probe_keys = (set(zip(probe_ab['run_id'].fillna(1) if 'run_id' in probe_ab.columns
+                                          else [1] * len(probe_ab), probe_ab['trial_id']))
+                                  if 'trial_id' in probe_ab.columns else set())
+                    in_probe_mask = [(row.get('run_id', 1), row['trial_id']) in probe_keys
+                                     for _, row in at_probe.iterrows()]
+                    in_probe = at_probe[in_probe_mask] if in_probe_mask else at_probe
+                    non_probe = at_probe[[not m for m in in_probe_mask]] if in_probe_mask else at_probe
+                    print(f"\n  Abortions at Probe Positions {', '.join(map(str, probe_positions))}: "
+                          f"n={int(len(at_probe))}")
+                    print(f"    Of which in Probe Trials: n={int(len(in_probe))}")
+                    _print_fa_counts(in_probe)
+                    print(f"    Non-Probe Abortions at Probe Location: n={int(len(non_probe))}")
+                    _print_fa_counts(non_probe)
 
             # False Alarm classification for non-initiated trials (if present)
             fa_noninit_df = merged_classification.get('non_initiated_attempts', pd.DataFrame())

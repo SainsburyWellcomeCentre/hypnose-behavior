@@ -272,6 +272,23 @@ def _print_abortion_summary(aborted_detailed, classification, response_time, res
         if total_non_hr > 0:
             _print_fa_counts(non_hr_trials, indent="        ")
 
+        # The same split at the probe positions, probe-hidden-rule sessions only.
+        probe_positions = [int(pos) for pos in (classification.get('probe_positions') or [])]
+        if classification.get('probe_odors') and probe_positions:
+            at_probe = aborted_detailed[aborted_detailed['last_odor_position'].isin(probe_positions)].copy()
+            probe_ab = classification.get('aborted_sequences_probe')
+            probe_ids = (set(probe_ab['trial_id'])
+                         if isinstance(probe_ab, pd.DataFrame) and 'trial_id' in probe_ab.columns else set())
+            in_probe = at_probe[at_probe['trial_id'].isin(probe_ids)]
+            non_probe = at_probe[~at_probe['trial_id'].isin(probe_ids)]
+            print(f"\n  Abortions at Probe Positions {', '.join(map(str, probe_positions))}: n={int(len(at_probe))}")
+            print(f"    Of which in Probe Trials: n={int(len(in_probe))}")
+            if len(in_probe) > 0:
+                _print_fa_counts(in_probe, indent="        ")
+            print(f"    Non-Probe Abortions at Probe Location: n={int(len(non_probe))}")
+            if len(non_probe) > 0:
+                _print_fa_counts(non_probe, indent="        ")
+
     # Non-last odor poke times (>= the odor-specific minimum), requires 'presentations'
     if 'presentations' in aborted_detailed.columns and 'last_event_index' in aborted_detailed.columns:
         pres_df = aborted_detailed[['trial_id', 'presentations', 'last_event_index']].explode('presentations')

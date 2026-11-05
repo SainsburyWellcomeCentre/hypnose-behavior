@@ -263,7 +263,7 @@ class Session:
         return self.results().get("summary", {}) or {}
 
     def protocol_mode(self) -> Optional[str]:
-        """`standard` / `single_reward` / `odour_discrimination`, or None.
+        """`standard` / `single_reward` / `odour_discrimination` / `probe_hidden_rule`, or None.
 
         None means the file was written before the mode was recorded, not that the
         session had no protocol -- an absent marker is *unknown* (section 2). **Do not

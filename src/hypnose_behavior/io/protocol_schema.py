@@ -18,11 +18,13 @@ __all__ = [
     "STANDARD",
     "SINGLE_REWARD",
     "ODOUR_DISCRIMINATION",
+    "PROBE_HIDDEN_RULE",
     "MODES",
     "resolve_mode",
     "StandardTrialRecord",
     "SingleRewardTrialRecord",
     "OdourDiscriminationTrialRecord",
+    "ProbeHiddenRuleTrialRecord",
     "record_class_for",
     "ABORT_COLUMNS",
     "RESPONSE_TIME_COLUMNS",
@@ -53,27 +55,29 @@ class ConflictingProtocolError(Exception):
     """
 
 
-# The three protocol modes. A session is exactly one of them, and the value is written
+# The four protocol modes. A session is exactly one of them, and the value is written
 # to `manifest.json` so `io/load_results.py` can check the file against the right field
 # set rather than guessing from the columns it happens to find.
 STANDARD = "standard"
 SINGLE_REWARD = "single_reward"
 ODOUR_DISCRIMINATION = "odour_discrimination"
+PROBE_HIDDEN_RULE = "probe_hidden_rule"
 
-MODES = (STANDARD, SINGLE_REWARD, ODOUR_DISCRIMINATION)
+MODES = (STANDARD, SINGLE_REWARD, ODOUR_DISCRIMINATION, PROBE_HIDDEN_RULE)
 
 
-def resolve_mode(*, is_odour_discrimination: bool, is_single_reward: bool) -> str:
-    """Which of `MODES` this run follows. Raises `ConflictingProtocolError` on the impossible one.
+def resolve_mode(*, is_odour_discrimination: bool, is_single_reward: bool,
+                 is_probe_hidden_rule: bool = False) -> str:
+    """Which of `MODES` this run follows. Raises `ConflictingProtocolError` on an impossible one.
 
-    The two flags are read independently from the schema -- `is_odour_discrimination` from
+    The flags are read independently from the schema -- `is_odour_discrimination` from
     `isOdourDiscriminationProtocol` (one-odour sequences), `is_single_reward` from
-    `isSingleRewardProtocol`. Nothing in the code makes them exclusive; the experiment
-    does, by construction, so both being true is a structural fault in the session as
-    it was run.
+    `isSingleRewardProtocol`, `is_probe_hidden_rule` from `isProbeHiddenRuleProtocol`.
+    Nothing in the code makes them exclusive; the experiment does, by construction, so
+    two being true is a structural fault in the session as it was run.
 
     **Raise, never warn.** Raising makes the broken session name itself, write no derivative, and let
-    the batch finish. 
+    the batch finish.
     """
     if is_odour_discrimination and is_single_reward:
         raise ConflictingProtocolError(
@@ -84,10 +88,20 @@ def resolve_mode(*, is_odour_discrimination: bool, is_single_reward: bool) -> st
             "was run -- fix the task schema before analysing it; the "
             "saved schema is undefined while both hold."
         )
+    if is_probe_hidden_rule and (is_odour_discrimination or is_single_reward):
+        other = "odour-discrimination" if is_odour_discrimination else "single-reward"
+        raise ConflictingProtocolError(
+            f"session is flagged as BOTH probe-hidden-rule and {other}, which no protocol "
+            "combines: probe-hidden-rule rewards every sequence at its final position and needs "
+            "positions before it. This is a structural fault in the session as it was run -- "
+            "fix the task schema before analysing it; the saved schema is undefined while both hold."
+        )
     if is_odour_discrimination:
         return ODOUR_DISCRIMINATION
     if is_single_reward:
         return SINGLE_REWARD
+    if is_probe_hidden_rule:
+        return PROBE_HIDDEN_RULE
     return STANDARD
 
 
@@ -255,10 +269,33 @@ class OdourDiscriminationTrialRecord(_TrialRecordBase):
     abort_reason: str | None = None
 
 
+@dataclass(slots=True)
+class ProbeHiddenRuleTrialRecord(StandardTrialRecord):
+    """Probe hidden rule: a hidden-rule odor or the final odor (a probe) can appear early.
+
+    - The hidden-rule fields above hold the hidden-rule odors only; the probe fields mirror
+      them for the final odors, scored by the same rules.
+    - A probe-only session is not this mode: it is scored as a hidden-rule session, with the
+      final odors as the hidden-rule odors.
+    """
+
+    probe_locations: object = None
+    probe_positions: object = None
+    enough_odors_for_probe: bool | None = None
+    hit_probe: bool | None = None
+    probe_hit_indices: object = None
+    probe_hit_positions: object = None
+    probe_success: bool | None = None
+    probe_success_position: int | None = None
+    # 'hidden_rule' / 'probe' -- whichever odor the trial reached first -- or 'neither'.
+    early_reward_type: str | None = None
+
+
 _RECORD_CLASSES = {
     STANDARD: StandardTrialRecord,
     SINGLE_REWARD: SingleRewardTrialRecord,
     ODOUR_DISCRIMINATION: OdourDiscriminationTrialRecord,
+    PROBE_HIDDEN_RULE: ProbeHiddenRuleTrialRecord,
 }
 
 
@@ -311,7 +348,7 @@ def mode_independent_columns() -> tuple:
     """Columns a `trial_data` carries whatever protocol wrote it.
 
     The largest set checkable against a file whose mode is unknown, with no risk of a
-    false alarm: the base record's fields are common to all three modes, and the merged
+    false alarm: the base record's fields are common to every mode, and the merged
     and assembled columns do not depend on mode at all.
 
     **Build it from `columns()`, not from `fields(_TrialRecordBase)`** -- the latter

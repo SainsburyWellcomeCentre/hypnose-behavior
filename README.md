@@ -128,6 +128,10 @@ s.metrics(["decision_accuracy", "poke_durations"])    # {name: value}, computed
 s.metric("decision_accuracy")                         # just the one
 
 s.manifest(), s.summary(), s.protocol_mode()          # what this session is
+s.manifest()["session"].get("is_probe")              # protocol labels, for filtering: is_singrew,
+                                                      # is_odour_discrimination, is_hidden_rule,
+                                                      # is_probe, is_probe_hidden_rule (absent on
+                                                      # sessions saved before they existed)
 print(s.peek(table="trial_data"))                     # one line per column, to read
 s.subjid, s.date, s.ses, s.results_dir                # where it came from
 ```
@@ -284,6 +288,20 @@ Hidden Rule Information
     - hidden_rule_success (boolean): Whether the animal successfully completed the hidden rule trial (got to await_reward state by leaving at the hidden rule odor; can still be unrewarded or timeout)
     - hidden_rule_success_position (string): Same as hidden_rule_hit_position, but only in trials where hidden_rule_success is True
     - enough_odors_for_hr (boolean): Whether enough odors were presented for hidden rule to be possible
+
+Probe Information (protocol mode `probe_hidden_rule` only)
+
+A probe is a final-position odor (A/B) presented early, and rewarded there. On these sessions the hidden-rule columns above hold the hidden-rule odors only, and the probe columns mirror them with the same rules. A probe-only session is not this mode: it is scored with the hidden-rule columns, the final odors acting as the hidden-rule odors.
+
+    - probe_locations (list): All indices the probe odor can appear at
+    - probe_positions (list): The same as positions (index + 1)
+    - enough_odors_for_probe (boolean): Whether enough odors were presented for a probe to be possible
+    - hit_probe (boolean): Whether a probe odor appeared in the sequence
+    - probe_hit_indices (list): The index where the probe appeared
+    - probe_hit_positions (list): The position where the probe appeared (index + 1)
+    - probe_success (boolean): Whether the animal left early after the probe and reached the await_reward state (can still be unrewarded or timeout)
+    - probe_success_position (int): Same as the first probe_hit_position, but only in trials where probe_success is True
+    - early_reward_type (string): "hidden_rule" or "probe", whichever of the two the trial reached first, or "neither"
 
 Reward Information
 

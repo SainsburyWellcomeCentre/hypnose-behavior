@@ -24,8 +24,7 @@ from hypnose_helpers.viz.legends import (  # noqa: F401  (re-exported)
 from hypnose_helpers.viz.series import show_series, show_suffix, tie  # noqa: F401
 from hypnose_helpers.viz.plotter import finish_figure  # noqa: F401  (re-exported)
 from hypnose_helpers.viz.save import save_figure as _save_figure
-from hypnose_helpers.viz.metadata import read_figure_metadata  # noqa: F401  (re-exported)
-from hypnose_helpers.provenance import provenance as _provenance
+from backstamp.provenance import provenance as _provenance
 
 
 # This module deliberately applies NO style at import. Apply a style
