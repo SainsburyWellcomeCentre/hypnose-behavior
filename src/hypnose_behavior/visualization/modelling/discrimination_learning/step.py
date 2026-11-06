@@ -9,6 +9,7 @@ Fits per odour (`data.per_odor`) draw one figure per animal and odour,
 """
 from __future__ import annotations
 
+import backstamp
 import numpy as np
 
 from hypnose_behavior.io.save import finish_figure, legend_figure, save_figure, show_suffix
@@ -51,6 +52,7 @@ _WIDTH = 10.0
 _HEIGHT = 3.4
 
 
+@backstamp.helper
 def _save(fig, name, rows, save, subjid):
     """Save without the odour's title, which the displayed figure keeps."""
     if not save:

@@ -9,6 +9,7 @@ Fits per odour (`data.per_odor`) draw one figure per animal and odour,
 """
 from __future__ import annotations
 
+import backstamp
 import numpy as np
 from matplotlib.transforms import offset_copy
 
@@ -76,6 +77,7 @@ _WIDTH = 10.0
 _HEIGHT = 3.0
 
 
+@backstamp.helper
 def _save(fig, name, rows, save, subjid):
     if not save:
         return

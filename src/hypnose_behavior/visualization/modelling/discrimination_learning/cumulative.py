@@ -18,6 +18,7 @@ and ``show_combined`` adds both together in grey.
 """
 from __future__ import annotations
 
+import backstamp
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
@@ -98,6 +99,7 @@ _WIDTH = 10.0
 _HEIGHT = 5.0
 
 
+@backstamp.helper
 def _save(fig, name, data, save, subjid):
     if not save:
         return

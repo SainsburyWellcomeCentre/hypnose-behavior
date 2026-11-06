@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import math
 
+import backstamp
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -135,6 +136,7 @@ def _labels(odors, order) -> list:
     return [f"{odor.name} {label}" for odor in odors for label in order]
 
 
+@backstamp.helper
 def _save(fig, name, fit, save, titles=True):
     """``titles=False`` leaves the titles out of the file; the displayed figure keeps them."""
     if not save:

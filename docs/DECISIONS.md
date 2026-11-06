@@ -342,8 +342,9 @@ the plotter's place, so each is passed over one of two ways:
   does. Capturing *inside* the wrapper does not help: `capture_call()` still returns the
   wrapper's own frame. There is a regression test for it.
 - **A private function beside the plotters is marked `@backstamp.helper`**, since
-  `skip_modules` would pass over the plotters too: the movement `_save_fig` and `_make_fig`
-  closures, `_draw_panel` (`sampling.py`), `_plot_sing_rew_metrics` and
+  `skip_modules` would pass over the plotters too: the `_save` helpers in
+  `visualization/modelling/discrimination_learning/`, the movement `_save_fig` and
+  `_make_fig` closures, `_draw_panel` (`sampling.py`), `_plot_sing_rew_metrics` and
   `_plot_cumulative_hit_cr` (`sing_rew.py`), and `_plot_metric_over_sessions` (`timing.py`).
   A thin public wrapper such as `dprime` is then the recorded plotter.
 

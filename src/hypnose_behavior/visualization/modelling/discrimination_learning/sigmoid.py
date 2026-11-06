@@ -15,6 +15,7 @@ odour, ``{subjid: {odour: ...}}``, the observed excess correct in the odour's po
 """
 from __future__ import annotations
 
+import backstamp
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
@@ -124,6 +125,7 @@ _WIDTH = 10.0
 _HEIGHT = 3.4
 
 
+@backstamp.helper
 def _save(fig, name, sessions, save, subjid):
     """Save without the odour's title, which the displayed figure keeps."""
     if not save:

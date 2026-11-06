@@ -13,6 +13,7 @@ and odour, ``{subjid: {odour: Figure}}``.
 """
 from __future__ import annotations
 
+import backstamp
 import numpy as np
 from scipy.special import logit
 
@@ -82,6 +83,7 @@ _WIDTH = 10.0
 _PANEL_HEIGHT = 3.4
 
 
+@backstamp.helper
 def _save(fig, name, sessions, save, subjid=None):
     """Save without the headline title, which the displayed figure keeps."""
     if not save:

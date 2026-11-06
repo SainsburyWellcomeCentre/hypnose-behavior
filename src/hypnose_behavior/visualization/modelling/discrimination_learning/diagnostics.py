@@ -12,6 +12,7 @@ port's colour, with ``show_combined`` adding both together in grey.
 """
 from __future__ import annotations
 
+import backstamp
 import numpy as np
 
 from hypnose_behavior.io.save import finish_figure, legend_figure, save_figure, show_suffix
@@ -57,6 +58,7 @@ _GROUP_LABELS = {"none": "none", "no_visit": "no visit", "wrong_port": "wrong\np
 _ODOR_SPACING = 0.2
 
 
+@backstamp.helper
 def _save(fig, name, data, save, subjid=None):
     if not save:
         return
