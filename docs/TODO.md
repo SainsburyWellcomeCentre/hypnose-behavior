@@ -3,37 +3,30 @@
 Work that is known, scoped and deliberately not scheduled. Each entry carries the
 measurement that makes it actionable, so picking one up does not mean re-deriving it.
 
-Settled rules live in `DECISIONS.md`; closed plans live in `archive/`. Addresses below
-were re-measured on `8e5ee27`.
+Settled rules live in `DECISIONS.md`. Addresses below were re-measured on `8e5ee27`.
+
 
 ---
 
-## Before merging `ab-learning-detection`: per-odour mode and cohort cache
+## Per-odour session regression raises on perfectly separated sessions
 
-`6199a90` adds the cohort cache and the per-odour mode; the working tree (2026-10-22,
-uncommitted) gives every discrimination-learning plotter the per-odour mode, adds
-`DECISIONS.md` section 43 on the cache (this branch's section 40 is now 41, the merge slot
-for main's 40) and the notebook cells. It also fixes two crashes: `plot_session_profiles`
-raised on a bin's negative Wilson error bar (pooled G/E included), and
-`sigmoid._surface_peaks` raised on a tied maximum (G's per-odour rate fit).
+`log_regression.fit_session_models` raises when a kept session holds only correct or only
+incorrect choices, which separates the logistic fit. Per odour that is common once an odour is
+learned, so with `separate_odors` the four plotters built on it (`plot_gain_decomposition`,
+`plot_edge_gains`, `plot_position_profile`, `plot_session_profiles`) raise on G/E and on A/B in
+attempts mode. The pooled fits are not affected. Measured 2026-11-06, default `min_trials`, A/B
+63 and 66 ses 2-10, 64 ses 2-14, 65 ses 2-11, G/E 63 from 20260930, 66 from 20260929, both to
+20261021:
 
-Passed: `check_imports`, `check_layering`; the cache check (cached = fresh exactly, stale
-file / stale code / `refresh=True` rebuild); the separate-mode figures rendered and looked at
-(A/B sub-064, G/E sub-063); the new notebook cells run headless.
+- A/B completed: none.
+- A/B attempts: sub-064 ses-7, A (21/21 correct).
+- G/E completed: sub-066 ses-54 (52/52) and ses-55 (56/56), G.
+- G/E attempts: sub-063 ses-53 (38/38) and sub-066 ses-55 (102/102), G.
 
-- **Gates left** (`plot_regression`'s `_CHILD` harness with colours, A/B and G/E, about
-  30 min): pooled figures against `ec676b6` on the final code; the per-odour plotters of
-  `6199a90` against HEAD. A run before the last edits was 54 of 56 green; the 2 RED are
-  `plot_session_profiles` on G/E, which raised at `ec676b6` and now draws: compare those
-  against `ec676b6` with only the error-bar clip applied. State-space cases need
-  `PYTENSOR_FLAGS="cxx=,mode=NUMBA"` on the Mac, where pytensor's C build fails (clang reads
-  `-ld64` as `-l d64`). The 2026-10-19 selection (`ses_range (1, 14)` for all four) raises
-  now on sub-063 ses-001; use each animal's A/B range.
-- **Trials with no odour.** 234 A/B trials (sub-060/061/062, ses 11-12) have an empty `odor`
-  and no reward port but are scored, so the pooled analyses count them and no single odour does
-  (measured 2026-10-19, again 2026-10-22). List the sessions and trials, then decide whether
-  the pooled view keeps them.
-- **Then:** commit.
+Raising `min_trials` above them, as the error suggests, drops most G/E sessions. Either leave
+separated sessions out of the fit with a warning (the figures then lose exactly the perfect
+sessions), or fit a penalised (Firth) logistic, which keeps them with finite estimates. A
+modelling decision; `plot_regression` on the pooled cases gates it.
 
 ---
 
