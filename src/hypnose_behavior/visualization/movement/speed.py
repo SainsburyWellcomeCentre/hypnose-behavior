@@ -36,6 +36,7 @@ from hypnose_behavior.io.loaders import (
 from hypnose_behavior.visualization.prep import smooth_xy
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
 from hypnose_behavior.metric_analysis.movement.speed_analysis import THRESHOLD_COLUMNS
+import backstamp
 from hypnose_behavior.io.save import save_figure
 import re
 import warnings
@@ -99,6 +100,7 @@ def plot_epoch_speeds_by_condition(
         slug = re.sub(r"[^0-9a-zA-Z]+", "_", str(value)).strip("_")
         return slug.lower() or "figure"
 
+    @backstamp.helper
     def _save_fig(fig, save_name: str, date_scope):
         if not save:
             return
@@ -367,6 +369,7 @@ def plot_traces_with_speed_threshold(
         slug = re.sub(r"[^0-9a-zA-Z]+", "_", str(value)).strip("_")
         return slug.lower() or "figure"
 
+    @backstamp.helper
     def _save_fig(fig, save_name: str, date_scope):
         if not save:
             return

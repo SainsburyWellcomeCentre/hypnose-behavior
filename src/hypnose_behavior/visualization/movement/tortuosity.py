@@ -17,6 +17,7 @@ from hypnose_behavior.io.layout import (
 from hypnose_behavior.io.load_results import PortOdors, reward_port_of
 from hypnose_behavior.io.loaders import iter_sessions
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
+import backstamp
 from hypnose_behavior.io.save import save_figure
 import re
 import numpy as np
@@ -67,6 +68,7 @@ def plot_tortuosity_lines_overlay(
         slug = re.sub(r"[^0-9a-zA-Z]+", "_", str(value)).strip("_")
         return slug.lower() or "figure"
 
+    @backstamp.helper
     def _save_fig(fig, save_name: str, date_scope):
         if not save:
             return

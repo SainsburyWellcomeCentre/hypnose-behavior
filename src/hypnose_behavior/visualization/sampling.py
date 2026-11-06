@@ -25,6 +25,7 @@ from hypnose_behavior.io.paths import (
 )
 import numpy as np
 import json
+import backstamp
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.visualization.primitives import mean_sem
 from hypnose_behavior.io.loaders import (
@@ -527,6 +528,7 @@ def plot_poke_duration_by_position(
 
     present = [s for s in subjids if any(r["subjid"] == s for r in rows)]
 
+    @backstamp.helper
     def _draw_panel(trial_type, label, base_color):
         fig, ax = plt.subplots(figsize=figsize)
         for p in positions_list:
