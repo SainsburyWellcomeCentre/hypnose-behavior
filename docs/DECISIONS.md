@@ -331,24 +331,26 @@ break the x-axis did not apply — no plotter ever used `ses` as x.
 
 ---
 
-## 9. A `save_figure` wrapper must pass `skip_modules=(__name__,)`
+## 9. Every function between a plotter and `save_figure` is passed over by the frame walk
 
-Provenance capture walks the stack and stops at the **first** non-helpers frame — which, for a
-repo that wraps `hypnose_helpers.viz.save_figure`, is the wrapper itself. Capturing *inside* the
-wrapper does not fix it; `capture_call()` still returns the wrapper's own frame. Both consumer
-repos pass `skip_modules=(__name__,)`, and there is a regression test for it.
+Provenance capture walks the stack and records the **first** frame it does not pass over: its
+function, module, file, line and parameters, which `backstamp show --reproduce` turns into the
+call that rebuilds the figure. A function between a plotter and backstamp would be recorded in
+the plotter's place, so each is passed over one of two ways:
 
-**Two things reintroduce the hazard:**
+- **A module of wrappers passes `skip_modules=(__name__,)`.** `io/save.py`'s `save_figure`
+  does. Capturing *inside* the wrapper does not help: `capture_call()` still returns the
+  wrapper's own frame. There is a regression test for it.
+- **A private function beside the plotters is marked `@backstamp.helper`**, since
+  `skip_modules` would pass over the plotters too: the movement `_save_fig` and `_make_fig`
+  closures, `_draw_panel` (`sampling.py`), `_plot_sing_rew_metrics` and
+  `_plot_cumulative_hit_cr` (`sing_rew.py`), and `_plot_metric_over_sessions` (`timing.py`).
+  A thin public wrapper such as `dprime` is then the recorded plotter.
 
-- **Phase 5's plotting primitives.** Once `plot_accuracy` calls `line(ax, …)` which calls
-  `save_figure`, the primitive's module needs skipping too — or pass `provenance=` explicitly,
-  which overrides introspection and is the robust form.
-- **The proposed Phase 10 `visualization_utils.py` split.** Moving a plotter between modules
-  changes `file` and `chain` in every saved figure's provenance record.
-
-Related: `function` is only ever "the nearest frame we did not skip", frequently a local closure
-(`movement_analysis_utils` has four nested `_save_fig` helpers). **Read `chain` before
-`function`.**
+A new function on that path, a plotting primitive that calls `save_figure` included, is marked
+too, or passes `provenance=` explicitly, which overrides introspection.
+`qc/figure_provenance.py` asserts that `function` is the case's plotter, so an unmarked one
+reds its case.
 
 ---
 
@@ -507,7 +509,7 @@ bar says `0.0 if np.isnan(sem) else sem` rather than having the primitive invent
 
 **Two `plot_regression` obligations for anything added here.** Register a new plotter module in
 the gate's `MODULES` list or its cases read as "not found" — untestable, not green. And a
-primitive that calls `save_figure` needs `skip_modules=(__name__,)` or an explicit
+primitive that calls `save_figure` is marked `@backstamp.helper` or passes an explicit
 `provenance=`; see section 9.
 
 ### The three shared modules, and what each is for *(Phase 5, 2026-08-07)*
@@ -2663,36 +2665,35 @@ discrimination.
 
 ### `qc/figure_provenance.py` -- the record in every saved PDF was built by ungated code
 
-§9 says a `save_figure` wrapper must pass `skip_modules=(__name__,)`, and names the Phase 10
-split as one of two things that reintroduce the hazard. **Nothing watched it.**
+§9 has every function between a plotter and `save_figure` passed over by the frame walk.
 `plot_regression` runs every case with `save=False` precisely so it writes nothing, so
 `save_figure` is never called there and the record is never built.
 
-The new gate patches `save_figure` at the same stack depth, runs the cases with `save=True`,
-writes nothing, and asserts per saved figure that **`chain` names the case's plotter** and
+The gate patches `save_figure` at the same stack depth, runs the cases with `save=True`,
+writes nothing, and asserts per saved figure that **`function` is the case's plotter** and
 **`module` is a plotting module**. It reports `module`/`file` without gating them: those are
 derived from where the code lives, and moving code is the point -- gating them would only
 restate what `git diff` says.
 
-**§9's rule is confirmed and its wording corrected.** Confirmed: **6 of 37 cases record
-`function` as a local closure** (`_save_fig`, `_make_fig`, `_draw_panel`,
-`_plot_metric_over_sessions`) with the plotter only at `chain[1]`, so *read `chain` before
-`function`* is exactly right and asserting on `function` would be wrong.
+The cases that save through a private function -- `plot_iti_over_time` and
+`plot_latency_over_time` (`_plot_metric_over_sessions`), `plot_poke_duration_by_position`
+(`_draw_panel`), and the movement plotters (`_save_fig`, `_make_fig`) -- have it marked
+`@backstamp.helper` (§9), so `function` is the plotter there too, with the plotter's
+parameters.
 
-> **Corrected: §9 says a move changes `file` and `chain`. It does not change `chain`.**
-> `chain` is a list of *function names*, and a pure move renames nothing. Measured across
-> the split: `module`, `file`, `lineno` and `path` all moved --
-> `visualization_utils.py` -> `accuracy.py` / `hidden_rule.py` / `rewards.py` / `choice.py`
-> / `overview.py` / `false_alarm.py`, and `movement_analysis_utils.py` ->
-> `movement/speed.py` -- while `chain` and `function` are byte-identical either side.
-> A move *can* change `chain`, but only by adding or removing a wrapper, which is the
-> hazard rather than the move.
+> A move between modules changes `module`, `file`, `lineno` and `path`, never `function` or
+> `chain`: both are *function names*, and a pure move renames nothing. Measured across the
+> split -- `visualization_utils.py` -> `accuracy.py` / `hidden_rule.py` / `rewards.py` /
+> `choice.py` / `overview.py` / `false_alarm.py`, and `movement_analysis_utils.py` ->
+> `movement/speed.py` -- `chain` and `function` were byte-identical either side. Only adding
+> or removing a wrapper changes them, which is the hazard rather than the move.
 
-**Proved before trusted, in both directions and selectively:** `--break-skip-modules`
-(omitting this module, i.e. §9's defect verbatim) reds all 3 saves with `module='__main__'`;
-`--break-chain` (`MAX_CHAIN=1`) reds **only** `plot_iti_over_time`, whose closure eats the
-name, and leaves `plot_decision_accuracy` green. A check that fails selectively is stronger
-evidence than one that just fails.
+**Proved before trusted, in both directions and selectively** (2026-11-06, the 35 cases outside
+`visualization/movement/`): `--break-skip-modules` (omitting this module, i.e. §9's defect
+verbatim) reds all 3 saves of `plot_decision_accuracy` and `plot_iti_over_time`, each recording
+the gate's `recorder`; `--break-helpers` (every `@backstamp.helper` mark ignored) reds **only**
+the 3 cases above that save through a marked function, 6 saves, and leaves the other 28 green.
+A check that fails selectively is stronger evidence than one that just fails.
 
 ---
 

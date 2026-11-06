@@ -27,6 +27,7 @@ from hypnose_behavior.io.paths import (
     get_server_root,
 )
 import numpy as np
+import backstamp
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.visualization.prep import _load_subject_trial_timeline
 from hypnose_behavior.visualization.primitives import (
@@ -246,6 +247,7 @@ def _style_log_yaxis(ax):
 
 
 
+@backstamp.helper
 def _plot_metric_over_sessions(
     subjids,
     dates,

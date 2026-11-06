@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
+import backstamp
 
 from hypnose_behavior.io.save import save_figure
 from hypnose_behavior.io.layout import session_selectors
@@ -673,6 +674,7 @@ def _size_legend_handles(counts, *, title_key="n"):
     return handles
 
 
+@backstamp.helper
 def _plot_sing_rew_metrics(
     data,
     metrics,
@@ -1190,6 +1192,7 @@ def _trim_timeline_to_singrew(timeline):
     }
 
 
+@backstamp.helper
 def _plot_cumulative_hit_cr(subjids, dates, *, ses=None, index=None, date_range=None,
                             ses_range=None, index_range=None,
                             by_trial, save, verbose,

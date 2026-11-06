@@ -24,6 +24,7 @@ from hypnose_behavior.io.loaders import iter_sessions
 from hypnose_behavior.visualization.panels import _clean_graph
 from hypnose_behavior.visualization.primitives import mean_sem
 from hypnose_behavior.metric_analysis.stats.kw_mwu import kw_mwu_by_group
+import backstamp
 from hypnose_behavior.io.save import save_figure
 import re
 import numpy as np
@@ -76,6 +77,7 @@ def plot_movement_analysis_statistics(
         slug = re.sub(r"[^0-9a-zA-Z]+", "_", str(value)).strip("_")
         return slug.lower() or "figure"
 
+    @backstamp.helper
     def _save_fig(fig, save_name: str, date_scope):
         if not save or fig is None:
             return

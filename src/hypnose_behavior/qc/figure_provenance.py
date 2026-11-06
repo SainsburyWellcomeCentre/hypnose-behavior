@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 """Does a saved figure's provenance record still name the plotter that drew it?
 
-``DECISIONS.md`` section 9: provenance capture walks the stack and stops at the
-**first** non-skipped frame, so a wrapper between the plotter and
-``hypnose_helpers.viz.save.save_figure`` silently becomes the recorded author.
-Section 9 names two things that reintroduce that hazard -- Phase 5's plotting
-primitives, and "the proposed Phase 10 ``visualization_utils.py`` split".
+``DECISIONS.md`` section 9: provenance capture walks the stack and records the
+**first** frame neither skipped nor marked ``@backstamp.helper``, so an unmarked
+function between the plotter and ``save_figure`` silently becomes the recorded
+author, with its own parameters in place of the plotter's.
 
 Nothing watched it. ``plot_regression.py`` runs every case with ``save=False``
 precisely so it writes nothing, so ``save_figure`` is never called there and the
@@ -14,9 +13,9 @@ embedded in every saved PDF was therefore produced by code no gate executed.
 
 What this asserts, per saved figure
 -----------------------------------
-1. ``chain`` names the case's own plotter. Section 9's rule is *read ``chain``
-   before ``function``*, because ``function`` is only ever "the nearest frame we
-   did not skip" and is routinely a local ``_save_fig`` closure.
+1. ``function`` is the case's own plotter. The private functions a plotter saves
+   through are marked ``@backstamp.helper`` (section 9); an unmarked one reds its
+   case.
 2. ``module`` is a ``hypnose_behavior`` plotting module -- not helpers, not this
    gate, not ``io.save``. This is the wrapper hazard stated directly.
 
@@ -34,13 +33,13 @@ ever reached -- which matters because the real one resolves under
 
 Usage
 -----
-  PY=~/miniconda3/envs/hypnose-analysis-test/bin/python
+  PY=~/miniconda3/envs/hypnose-behavior/bin/python
   QC=~/repos/harris_lab/hypnose/hypnose-behavior/src/hypnose_behavior/qc
 
   $PY -u $QC/figure_provenance.py
   $PY -u $QC/figure_provenance.py --only plot_decision_accuracy
   $PY -u $QC/figure_provenance.py --break-skip-modules   # section 17 probe
-  $PY -u $QC/figure_provenance.py --break-chain          # section 17 probe
+  $PY -u $QC/figure_provenance.py --break-helpers        # section 17 probe
 
 Exit code 0 == every saved figure names its plotter; 1 == at least one does not.
 """
@@ -137,9 +136,10 @@ def main(argv=None) -> int:
     ap.add_argument("--break-skip-modules", action="store_true",
                     help="section 17 probe: omit this module from skip_modules, "
                          "reproducing the section 9 wrapper defect")
-    ap.add_argument("--break-chain", action="store_true",
-                    help="section 17 probe: shorten MAX_CHAIN to 1, so a plotter "
-                         "that saves from a nested closure loses its own name")
+    ap.add_argument("--break-helpers", action="store_true",
+                    help="section 17 probe: ignore every @backstamp.helper mark, so a "
+                         "plotter that saves through a private function records that "
+                         "function")
     args = ap.parse_args(argv)
 
     import matplotlib
@@ -149,14 +149,21 @@ def main(argv=None) -> int:
     from hypnose_helpers.viz.styles import use_style
     use_style("nature")
 
-    if args.break_chain:
+    if args.break_helpers:
+        # backstamp keeps the marks in a private set; one that never holds a mark
+        # drops those made at import and those closures make on each call.
         import backstamp.provenance as prov
-        prov.MAX_CHAIN = 1
+
+        class _NoMarks(set):
+            def add(self, code):
+                pass
+
+        prov._HELPERS = _NoMarks()
 
     records: list[dict] = []
     patched = _install_recorder(records, break_skip_modules=args.break_skip_modules)
     print(f"save_figure recorder installed in {len(patched)} module(s)")
-    if args.break_skip_modules or args.break_chain:
+    if args.break_skip_modules or args.break_helpers:
         print(f"{YELLOW}PROBE MODE -- expected to FAIL{RESET}")
     print()
 
@@ -213,10 +220,10 @@ def main(argv=None) -> int:
         bad = []
         for s in saves:
             rec = s["record"]
-            chain = rec.get("chain", [])
+            function = rec.get("function")
             module = rec.get("module", "")
-            if plotter not in chain:
-                bad.append((s, f"chain does not name {plotter}"))
+            if function != plotter:
+                bad.append((s, f"function is {function!r}, not {plotter}"))
             elif not module.startswith(_PLOTTING_PREFIX):
                 bad.append((s, f"module {module!r} is not a plotting module"))
         total_saves += len(saves)

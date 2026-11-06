@@ -54,6 +54,7 @@ from hypnose_behavior.visualization.prep import (
 )
 from hypnose_behavior.visualization.prep import load_tracking_with_behavior
 from hypnose_behavior.io.tracking import _load_tracking_and_behavior
+import backstamp
 from hypnose_behavior.io.save import save_figure
 import re
 import numpy as np
@@ -1602,6 +1603,7 @@ def plot_trial_traces_by_mode(
         suffix_parts.append("trialid_color")
     save_suffix = "_".join(filter(None, suffix_parts))
 
+    @backstamp.helper
     def _make_fig(axis_key, title=None):
         fig, ax = plt.subplots(1, 1, figsize=figsize)
         _plot_axis(ax, axis_key)
